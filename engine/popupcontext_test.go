@@ -7,16 +7,17 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // popupPair — две сцены с одинаковым содержимым: большой холст и холст попапа,
 // вырезанный из него по rect (шахматка с клеткой 10, rect выровнен по клетке).
-func popupPair(rect image.Rectangle) (big *Canvas, tc *translatingContext, small *Canvas) {
+func popupPair(rect image.Rectangle) (big *Canvas, tc *overlay.Translating, small *Canvas) {
 	big = checkerCanvas(200, 200, 10)
 	small = checkerCanvas(rect.Dx(), rect.Dy(), 10)
-	tc = &translatingContext{inner: small, dx: rect.Min.X, dy: rect.Min.Y}
+	tc = &overlay.Translating{Inner: small, DX: rect.Min.X, DY: rect.Min.Y}
 	return
 }
 
@@ -39,7 +40,7 @@ func samePixels(t *testing.T, big, small *Canvas, rect, inner image.Rectangle) {
 // PaintStyle не найдёт ни тени, ни размытия, ни скругления.
 func TestTranslatingContext_ImplementsOptionalCapabilities(t *testing.T) {
 	testreset.Globals(t)
-	var ctx widget.DrawContext = &translatingContext{inner: hgraster.NewCanvas(10, 10, hgtext.NewFontCache("assets"))}
+	var ctx widget.DrawContext = &overlay.Translating{Inner: hgraster.NewCanvas(10, 10, hgtext.NewFontCache("assets"))}
 	if _, ok := ctx.(widget.BackdropDrawer); !ok {
 		t.Error("контекст попапа не реализует BackdropDrawer")
 	}

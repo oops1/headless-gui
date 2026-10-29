@@ -1,4 +1,4 @@
-package engine
+package overlay
 
 import (
 	"image"
@@ -22,14 +22,14 @@ func TestTooltipAt_PerPartTooltip(t *testing.T) {
 	})
 
 	// Кнопки: «GitHub» 195..213, «Вид» 215..233 по X; 3..21 по Y.
-	if got := tooltipAt(p, 204, 12); got != "GitHub" {
+	if got := TooltipAt(p, 204, 12); got != "GitHub" {
 		t.Errorf("над первой кнопкой %q, ждал GitHub", got)
 	}
-	if got := tooltipAt(p, 224, 12); got != "Вид" {
+	if got := TooltipAt(p, 224, 12); got != "Вид" {
 		t.Errorf("над второй кнопкой %q, ждал Вид", got)
 	}
 	// Мимо кнопок — общая подсказка виджета, как раньше.
-	if got := tooltipAt(p, 100, 100); got != "Панель веток" {
+	if got := TooltipAt(p, 100, 100); got != "Панель веток" {
 		t.Errorf("мимо кнопок %q, ждал общую подсказку", got)
 	}
 }

@@ -61,7 +61,7 @@ func (e *Engine) SetPixelFormat(f PixelFormat) error {
 	if changed {
 		// Заготовка арены попапов — клон в прежнем формате (ADR-0009):
 		// следующий попап получит клон в новом.
-		e.popupArena.release()
+		e.ov.ReleaseArena()
 	}
 	e.frameMu.Unlock()
 	if !changed {

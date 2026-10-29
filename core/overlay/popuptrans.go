@@ -1,4 +1,4 @@
-package engine
+package overlay
 
 // popuptrans.go — переходы хостовых попапов (задача 3.4 плана 4.0):
 // появление и исчезновение оверлея, вынесенного в окно ОС (SetPopupSink).
@@ -8,7 +8,7 @@ package engine
 // фоне, и переход — это непрозрачность и сдвиг ОКНА, которые прикладывает
 // хост. Движок шлёт тот же Img с PopupFrame.Transition на каждом шаге; DrawOverlay
 // на шагах не зовётся, и холст не перерисовывается — шаг доходит только до
-// renderPopups (renderFrame, popupSteps).
+// RenderPopups (renderFrame, popupSteps).
 //
 // Исчезающий оверлей остаётся в кадрах (Transition.Closing) до конца
 // перехода, с последней картинкой и на прежнем месте; хост закрывает окно,
@@ -24,6 +24,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/core/raster"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -40,23 +41,23 @@ type popupTrans struct {
 }
 
 // popupTransSpec — параметры переходов попапов для этого кадра.
-func (e *Engine) popupTransSpec(canvas *Canvas) popupTrans {
-	if !e.popupFade.Load() || !e.ovt.on.Load() {
+func (m *Manager) popupTransSpec(canvas *raster.Canvas) popupTrans {
+	if !m.popupFade.Load() || !m.host.TransitionsOn() {
 		return popupTrans{}
 	}
-	m := e.themeMgr.Load()
-	if m == nil {
+	tm := m.host.ThemeManager()
+	if tm == nil {
 		return popupTrans{}
 	}
-	a := m.GetAnimation(theme.AnimMenuOpen)
+	a := tm.GetAnimation(theme.AnimMenuOpen)
 	if a.Duration <= 0 {
 		return popupTrans{}
 	}
-	c := m.GetAnimationFirst(theme.AnimMenuClose, theme.AnimMenuOpen)
+	c := tm.GetAnimationFirst(theme.AnimMenuClose, theme.AnimMenuOpen)
 	return popupTrans{
 		dur:        a.Duration,
 		curve:      widget.EasingByName(a.Curve),
-		slide:      int(math.Round(m.GetMetric(theme.KeyMenuOpenOffset))),
+		slide:      int(math.Round(tm.GetMetric(theme.KeyMenuOpenOffset))),
 		closeDur:   c.Duration,
 		closeCurve: widget.EasingByName(c.Curve),
 	}
@@ -67,7 +68,7 @@ func (ent *popupEntry) setVal(v float64) { ent.tv.Store(math.Float64bits(v)) }
 
 // popupOpenStep — открытый оверлей кадра: начинает переход появления (новый
 // или исчезавший), заканчивает дошедший до конца.
-func (e *Engine) popupOpenStep(ent *popupEntry, it popupItem, fresh bool, tr popupTrans) {
+func (m *Manager) popupOpenStep(ent *popupEntry, it PopupItem, fresh bool, tr popupTrans) {
 	switch {
 	case ent.closing:
 		// Открыт снова посреди исчезновения — разворачиваемся с текущей доли.
@@ -76,12 +77,12 @@ func (e *Engine) popupOpenStep(ent *popupEntry, it popupItem, fresh bool, tr pop
 			ent.stopTrans()
 			return
 		}
-		ent.slide = popupSlideDir(it, tr.slide)
-		e.popupAnimate(ent, ent.val(), 1, tr)
+		ent.slide = m.popupSlideDir(it, tr.slide)
+		m.popupAnimate(ent, ent.val(), 1, tr)
 	case fresh && tr.dur > 0:
-		ent.slide = popupSlideDir(it, tr.slide)
+		ent.slide = m.popupSlideDir(it, tr.slide)
 		ent.setVal(0)
-		e.popupAnimate(ent, 0, 1, tr)
+		m.popupAnimate(ent, 0, 1, tr)
 	case ent.trans && ent.tdone.Load():
 		ent.stopTrans() // появление закончено: окно в покое
 	}
@@ -89,7 +90,7 @@ func (e *Engine) popupOpenStep(ent *popupEntry, it popupItem, fresh bool, tr pop
 
 // popupCloseStep — оверлей, которого нет в кадре. true — он исчезает
 // переходом и остаётся в кадрах; false — уходит сразу.
-func (e *Engine) popupCloseStep(ent *popupEntry, tr popupTrans) bool {
+func (m *Manager) popupCloseStep(ent *popupEntry, tr popupTrans) bool {
 	if ent.closing {
 		if ent.tdone.Load() {
 			return false // исчезновение закончено
@@ -104,13 +105,13 @@ func (e *Engine) popupCloseStep(ent *popupEntry, tr popupTrans) bool {
 		return false
 	}
 	ent.closing = true
-	e.popupAnimate(ent, from, 0, popupTrans{dur: tr.closeDur, curve: tr.closeCurve})
+	m.popupAnimate(ent, from, 0, popupTrans{dur: tr.closeDur, curve: tr.closeCurve})
 	return true
 }
 
 // popupAnimate ведёт долю от from к to за часть длительности, пропорциональную
 // пути. Кривая — в тике, к линейному прогрессу: конец — прогресс 1.
-func (e *Engine) popupAnimate(ent *popupEntry, from, to float64, tr popupTrans) {
+func (m *Manager) popupAnimate(ent *popupEntry, from, to float64, tr popupTrans) {
 	ent.stopAnim()
 	ent.trans = true
 	ent.tdone.Store(false)
@@ -118,7 +119,7 @@ func (e *Engine) popupAnimate(ent *popupEntry, from, to float64, tr popupTrans) 
 	if d <= 0 {
 		ent.setVal(to)
 		ent.tdone.Store(true)
-		e.popupWake()
+		m.popupWake()
 		return
 	}
 	curve := tr.curve
@@ -126,7 +127,7 @@ func (e *Engine) popupAnimate(ent *popupEntry, from, to float64, tr popupTrans) 
 		if p >= 1 {
 			ent.setVal(to)
 			ent.tdone.Store(true)
-			e.popupWake()
+			m.popupWake()
 			return
 		}
 		k := p
@@ -134,15 +135,19 @@ func (e *Engine) popupAnimate(ent *popupEntry, from, to float64, tr popupTrans) 
 			k = curve(p)
 		}
 		ent.setVal(from + (to-from)*k)
-		e.popupWake()
+		m.popupWake()
 	})
 }
 
+// RequestPopupStep просит кадр под шаг перехода попапа: холст не меняется,
+// кадр доходит только до RenderPopups (то же делает тик перехода).
+func (m *Manager) RequestPopupStep() { m.popupWake() }
+
 // popupWake просит кадр под шаг попапа: холст не меняется, кадр доходит
-// только до renderPopups.
-func (e *Engine) popupWake() {
-	e.popupTicked.Store(true)
-	e.lp.BumpGen()
+// только до RenderPopups.
+func (m *Manager) popupWake() {
+	m.popupTicked.Store(true)
+	m.host.BumpGen()
 }
 
 // stopAnim снимает анимацию перехода (под popupMu).
@@ -197,7 +202,7 @@ func isSelfAnimated(od widget.OverlayDrawer) bool {
 // popupOwners — ID владельцев оверлеев в дереве и открытых модальных
 // окнах, открытых и погашенных: исчезнуть переходом может только оверлей,
 // чей владелец ещё здесь.
-func (e *Engine) popupOwners(root widget.Widget, modals []widget.ModalWidget) map[uintptr]bool {
+func (m *Manager) popupOwners(root widget.Widget, modals []widget.ModalWidget) map[uintptr]bool {
 	set := map[uintptr]bool{}
 	var walk func(w widget.Widget, depth int)
 	walk = func(w widget.Widget, depth int) {
@@ -205,7 +210,7 @@ func (e *Engine) popupOwners(root widget.Widget, modals []widget.ModalWidget) ma
 			return
 		}
 		if _, ok := w.(widget.OverlayDrawer); ok {
-			if id := widgetID(w); id != 0 {
+			if id := WidgetID(w); id != 0 {
 				set[id] = true
 			}
 		}
@@ -224,13 +229,13 @@ func (e *Engine) popupOwners(root widget.Widget, modals []widget.ModalWidget) ma
 
 // popupSlideDir — сдвиг в начале появления: оверлей выше точки привязки
 // (или верха владельца) выезжает снизу, остальные — сверху.
-func popupSlideDir(it popupItem, d int) image.Point {
+func (m *Manager) popupSlideDir(it PopupItem, d int) image.Point {
 	if d <= 0 {
 		return image.Point{}
 	}
-	w, ok := it.od.(widget.Widget)
+	w, ok := it.OD.(widget.Widget)
 	if !ok {
 		return image.Pt(0, -d)
 	}
-	return ovtSlideDir(w, it.rect.Add(it.off), d)
+	return m.host.SlideDir(w, it.Rect.Add(it.Off), d)
 }

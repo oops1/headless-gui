@@ -34,6 +34,7 @@ import (
 
 	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	"github.com/oops1/headless-gui/v3/core/geom"
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	hgraster "github.com/oops1/headless-gui/v3/core/raster"
 	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"github.com/oops1/headless-gui/v3/internal/testreset"
@@ -451,7 +452,7 @@ type protoRound struct {
 	radius int
 }
 
-func protoReplay(t *translatingContext, cur *image.Rectangle, round *protoRound, c *protoCmd) {
+func protoReplay(t *overlay.Translating, cur *image.Rectangle, round *protoRound, c *protoCmd) {
 	if c.round != round.r || c.roundR != round.radius {
 		if c.round == (image.Rectangle{}) {
 			t.ClearRoundClip()
@@ -503,12 +504,12 @@ func protoReplay(t *translatingContext, cur *image.Rectangle, round *protoRound,
 	case opDrawLineAA:
 		t.DrawLineAA(c.x, c.y, c.i1, c.i2, c.f1, c.col)
 	case opStrokeCubicAA:
-		dx, dy := float64(t.dx), float64(t.dy)
-		t.inner.StrokeCubicAA(c.f1-dx, c.f2-dy, c.f3-dx, c.f4-dy, c.f5-dx, c.f6-dy, c.f7-dx, c.ptsF[0].Y-dy, c.ptsF[1].X, c.col)
+		dx, dy := float64(t.DX), float64(t.DY)
+		t.Inner.StrokeCubicAA(c.f1-dx, c.f2-dy, c.f3-dx, c.f4-dy, c.f5-dx, c.f6-dy, c.f7-dx, c.ptsF[0].Y-dy, c.ptsF[1].X, c.col)
 	case opStrokePathAA:
-		t.inner.StrokePathAA(protoShiftF(c.ptsF, t.dx, t.dy), c.f1, c.flag, c.col)
+		t.Inner.StrokePathAA(protoShiftF(c.ptsF, t.DX, t.DY), c.f1, c.flag, c.col)
 	case opFillPathAA:
-		t.inner.FillPathAA(protoShiftF(c.ptsF, t.dx, t.dy), c.col)
+		t.Inner.FillPathAA(protoShiftF(c.ptsF, t.DX, t.DY), c.col)
 	case opSoftShadow:
 		t.DrawSoftShadow(c.rect, c.r, c.f1, c.col)
 	case opShadow:
@@ -518,11 +519,11 @@ func protoReplay(t *translatingContext, cur *image.Rectangle, round *protoRound,
 	case opMica:
 		t.MicaBehind(c.rect, c.r, c.col)
 	case opNoise:
-		t.inner.DrawNoise(c.rect.Sub(image.Pt(t.dx, t.dy)), c.f1)
+		t.Inner.DrawNoise(c.rect.Sub(image.Pt(t.DX, t.DY)), c.f1)
 	case opBlitPixels:
 		t.BlitPixels(c.rgba, c.rect, c.x, c.y, c.flag)
 	case opBlitBGRA:
-		t.inner.BlitPixelsBGRA(c.rgba, c.rect, c.x-t.dx, c.y-t.dy, c.flag)
+		t.Inner.BlitPixelsBGRA(c.rgba, c.rect, c.x-t.DX, c.y-t.DY, c.flag)
 	case opOpacity:
 		t.DrawWithOpacity(c.rect, c.f1, func() {
 			for i := range c.sub {
@@ -547,7 +548,7 @@ func protoShiftF(pts []geom.Point2F, dx, dy int) []geom.Point2F {
 // protoWorker — холст размером с тайл и сдвигающий контекст над ним.
 type protoWorker struct {
 	c   *Canvas
-	ctx *translatingContext
+	ctx *overlay.Translating
 }
 
 // protoFrame — состояние прототипа между кадрами: единственный полный буфер
@@ -613,7 +614,7 @@ func newProtoFrame(src *Canvas, parallel, ownFonts bool) *protoFrame {
 			c = src.CloneForSize(ts, ts, 1, nil)
 		}
 		c.InheritWallpaper(src) // обои и их кэш — у холста движка, как у буфера попапа
-		f.workers <- &protoWorker{c: c, ctx: &translatingContext{inner: c}}
+		f.workers <- &protoWorker{c: c, ctx: &overlay.Translating{Inner: c}}
 	}
 	f.haloSrc = src
 	return f
@@ -738,7 +739,7 @@ func (f *protoFrame) RunPart(i int) {
 	w := <-f.workers
 	defer func() { f.workers <- w }()
 	c, t := w.c, w.ctx
-	t.dx, t.dy = ox, oy
+	t.DX, t.DY = ox, oy
 	c.ClearRoundClip()
 	c.ClearClip()
 	tile := image.Rect(ox, oy, ox+f.ts, oy+f.ts).Intersect(image.Rect(0, 0, f.w, f.h))
@@ -788,7 +789,7 @@ func (f *protoFrame) renderSegmented() {
 		}
 		if i < len(f.cmds) {
 			c := &f.cmds[i]
-			full := &translatingContext{inner: f.work}
+			full := &overlay.Translating{Inner: f.work}
 			cur, round := image.Rect(0, 0, f.w, f.h), protoRound{}
 			f.work.ClearRoundClip()
 			f.work.SetClip(cur)

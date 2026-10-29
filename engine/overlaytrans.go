@@ -50,6 +50,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/core/input"
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -246,9 +247,7 @@ func (e *Engine) ovtPrepare(canvas *Canvas, rects []image.Rectangle, all bool, l
 	clear(t.list[len(kept):])
 	t.list = kept
 
-	e.ttMu.Lock()
-	t.tt = canvas.PhysRect(e.ttShownAt)
-	e.ttMu.Unlock()
+	t.tt = canvas.PhysRect(e.ov.TooltipShownAt())
 
 	for _, tr := range t.list {
 		tr.doneSeen = tr.done.Load()
@@ -384,7 +383,7 @@ func (e *Engine) drawOverlaysT(w widget.Widget, canvas *Canvas, hosted bool, lay
 				e.ovtVisit(w, od, canvas, layer, off)
 			}
 		case len(e.ovt.byKey) > 0:
-			if tr := e.ovt.byKey[widgetID(w)]; tr != nil {
+			if tr := e.ovt.byKey[overlay.WidgetID(w)]; tr != nil {
 				e.ovtVisitClosed(tr, canvas)
 			}
 		}
@@ -410,7 +409,7 @@ func (e *Engine) ovtDrawOther(w widget.Widget, od widget.OverlayDrawer, canvas *
 func (e *Engine) ovtVisit(w widget.Widget, od widget.OverlayDrawer, canvas *Canvas, layer widget.Widget, off image.Point) {
 	draw := func() { widget.DrawOverlayTraced(w, od, widget.OffsetContext(canvas, off.X, off.Y)) }
 	ob, ok := w.(widget.OverlayBoundsProvider)
-	key := widgetID(w)
+	key := overlay.WidgetID(w)
 	if !ok || key == 0 {
 		e.ovtDrawOther(w, od, canvas, layer, off)
 		return

@@ -22,6 +22,7 @@ import (
 
 	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	"github.com/oops1/headless-gui/v3/core/input"
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -84,11 +85,11 @@ func (e *Engine) recordTop(rec *hgdraw.Recorder, canvas *Canvas, root widget.Wid
 	}
 	tt := e.tooltipPlan(canvas, root)
 	e.postTooltip = tt
-	if tt.ok {
+	if tt.OK {
 		if e.postMode {
-			e.addPost(postItem{kind: postTooltip}, canvas.PhysRect(tt.rect))
+			e.addPost(postItem{kind: postTooltip}, canvas.PhysRect(tt.Rect))
 		} else {
-			e.drawTooltipBox(rec, tt.text, tt.rect)
+			e.drawTooltipBox(rec, tt.Text, tt.Rect)
 		}
 	}
 }
@@ -101,7 +102,7 @@ func (e *Engine) clearPost() {
 	e.post = e.post[:0]
 	e.postRect = image.Rectangle{}
 	e.postMode = false
-	e.postTooltip = tooltipPlan{}
+	e.postTooltip = overlay.TooltipPlan{}
 }
 
 // addPost откладывает слой и расширяет место после растра на его место
@@ -141,7 +142,7 @@ func (e *Engine) topWalk(w widget.Widget, rec *hgdraw.Recorder, canvas *Canvas, 
 				e.topOverlay(w, od, rec, canvas, on, layer, off)
 			}
 		case on && len(e.ovt.byKey) > 0:
-			if tr := e.ovt.byKey[widgetID(w)]; tr != nil {
+			if tr := e.ovt.byKey[overlay.WidgetID(w)]; tr != nil {
 				// Исчезающий оверлей смешивается на месте владельца в порядке
 				// рисования: с него и дальше — после растра.
 				e.postMode = true
@@ -184,7 +185,7 @@ func (e *Engine) topOverlay(w widget.Widget, od widget.OverlayDrawer, rec *hgdra
 // запасом под тень) и берёт ли его присмотр: те же условия, что у ovtVisit.
 func (e *Engine) ovtRestOf(w widget.Widget, canvas *Canvas, off image.Point) (image.Rectangle, bool) {
 	ob, ok := w.(widget.OverlayBoundsProvider)
-	if !ok || widgetID(w) == 0 {
+	if !ok || overlay.WidgetID(w) == 0 {
 		return image.Rectangle{}, false
 	}
 	if sa, ok := w.(widget.SelfAnimatedOverlay); ok && sa.AnimatesOverlay() {
@@ -246,7 +247,7 @@ func (e *Engine) drawPost(canvas *Canvas, hosted, on bool) {
 			e.drawOverlayLayer(m, canvas, hosted, on)
 			cur = nil // drawOverlayLayer перестроил byKey под m
 		case postTooltip:
-			e.drawTooltipBox(canvas, e.postTooltip.text, e.postTooltip.rect)
+			e.drawTooltipBox(canvas, e.postTooltip.Text, e.postTooltip.Rect)
 		}
 	}
 	for i := range e.post {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/core/input"
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -70,7 +71,7 @@ func TestTreeCycle_DoesNotHang(t *testing.T) {
 func TestTreeCycle_CollectPopupsBounded(t *testing.T) {
 	testreset.Globals(t)
 	w := &cyclicWidget{b: image.Rect(0, 0, 200, 200), overlay: true}
-	items := collectPopups(nil, w, 0)
+	items := overlay.CollectPopups(nil, w, 0)
 	if len(items) != maxTreeDepth {
 		t.Fatalf("собрано %d оверлеев, ожидалось %d", len(items), maxTreeDepth)
 	}

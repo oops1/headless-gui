@@ -1,4 +1,4 @@
-package engine
+package overlay
 
 import "github.com/oops1/headless-gui/v3/widget"
 
@@ -21,16 +21,18 @@ type ModalHost interface {
 
 // SetModalHost устанавливает хост нативных модалок (nil — снять).
 // Обычно вызывается пакетом window в Window.Run() при поддержке бэкенда.
-func (e *Engine) SetModalHost(h ModalHost) {
-	e.hostMu.Lock()
-	e.modalHost = h
-	e.hostMu.Unlock()
+func (m *Manager) SetModalHost(h ModalHost) {
+	m.hostMu.Lock()
+	m.modalHost = h
+	m.hostMu.Unlock()
 }
 
-func (e *Engine) getModalHost() ModalHost {
-	e.hostMu.Lock()
-	defer e.hostMu.Unlock()
-	return e.modalHost
+// NativeModalHost — хост нативных модальных окон (nil — модальные окна в
+// холсте).
+func (m *Manager) NativeModalHost() ModalHost {
+	m.hostMu.Lock()
+	defer m.hostMu.Unlock()
+	return m.modalHost
 }
 
 // SetOnModalClosed регистрирует колбэк, вызываемый в конце CloseModal после
@@ -38,10 +40,10 @@ func (e *Engine) getModalHost() ModalHost {
 // движка, а не у хоста). Используется хостом на вторичном движке: диалог,
 // закрытый своим closer'ом (✕/Escape) → secondEng.CloseModal → колбэк →
 // хост уничтожает нативное окно.
-func (e *Engine) SetOnModalClosed(fn func(m widget.ModalWidget)) {
-	e.hostMu.Lock()
-	e.onModalClosed = fn
-	e.hostMu.Unlock()
+func (m *Manager) SetOnModalClosed(fn func(m widget.ModalWidget)) {
+	m.hostMu.Lock()
+	m.onModalClosed = fn
+	m.hostMu.Unlock()
 }
 
 // modalClosedSub — подписчик закрытия модалки с дескриптором для отписки.
@@ -60,28 +62,28 @@ type modalClosedSub struct {
 //
 // Колбэк приходит и для диалога, показанного в собственном окне ОС, — в том
 // числе когда его закрыли крестиком окна или Alt+F4.
-func (e *Engine) AddOnModalClosed(fn func(m widget.ModalWidget)) int {
+func (m *Manager) AddOnModalClosed(fn func(m widget.ModalWidget)) int {
 	if fn == nil {
 		return 0
 	}
-	e.hostMu.Lock()
-	defer e.hostMu.Unlock()
-	e.modalSubNextID++
-	id := e.modalSubNextID
-	e.modalClosedSubs = append(e.modalClosedSubs, modalClosedSub{id: id, fn: fn})
+	m.hostMu.Lock()
+	defer m.hostMu.Unlock()
+	m.modalSubNextID++
+	id := m.modalSubNextID
+	m.modalClosedSubs = append(m.modalClosedSubs, modalClosedSub{id: id, fn: fn})
 	return id
 }
 
 // RemoveOnModalClosed снимает подписку по дескриптору (no-op, если нет).
-func (e *Engine) RemoveOnModalClosed(id int) {
+func (m *Manager) RemoveOnModalClosed(id int) {
 	if id == 0 {
 		return
 	}
-	e.hostMu.Lock()
-	defer e.hostMu.Unlock()
-	for i, s := range e.modalClosedSubs {
+	m.hostMu.Lock()
+	defer m.hostMu.Unlock()
+	for i, s := range m.modalClosedSubs {
 		if s.id == id {
-			e.modalClosedSubs = append(e.modalClosedSubs[:i], e.modalClosedSubs[i+1:]...)
+			m.modalClosedSubs = append(m.modalClosedSubs[:i], m.modalClosedSubs[i+1:]...)
 			return
 		}
 	}
@@ -92,24 +94,27 @@ func (e *Engine) RemoveOnModalClosed(id int) {
 // Зовётся хостом нативных окон: диалог в собственном окне ОС закрывается мимо
 // CloseModal этого движка — его закрывает вторичный движок окна, — и без этого
 // приложение не узнавало о закрытии крестиком или Alt+F4 (GG-82).
-func (e *Engine) NotifyModalClosed(m widget.ModalWidget) {
-	e.fireOnModalClosed(m)
+func (m *Manager) NotifyModalClosed(mw widget.ModalWidget) {
+	m.FireModalClosed(mw)
 }
 
-func (e *Engine) fireOnModalClosed(m widget.ModalWidget) {
-	e.hostMu.Lock()
-	fn := e.onModalClosed
-	subs := append([]modalClosedSub(nil), e.modalClosedSubs...)
-	e.hostMu.Unlock()
+// FireModalClosed сообщает о закрытии модального окна mw: слоту
+// SetOnModalClosed, затем подписчикам AddOnModalClosed (замок снят до
+// колбэков), затем самому окну. Зовёт движок в конце CloseModal.
+func (m *Manager) FireModalClosed(mw widget.ModalWidget) {
+	m.hostMu.Lock()
+	fn := m.onModalClosed
+	subs := append([]modalClosedSub(nil), m.modalClosedSubs...)
+	m.hostMu.Unlock()
 	if fn != nil {
-		fn(m)
+		fn(mw)
 	}
 	for _, s := range subs {
-		s.fn(m)
+		s.fn(mw)
 	}
 	// Событие самого диалога: приложению обычно нужен не «какая-то модалка
 	// закрылась», а «этот диалог закрылся» — чтобы освободить его дерево.
-	if d, ok := m.(*widget.Dialog); ok {
+	if d, ok := mw.(*widget.Dialog); ok {
 		if cb := d.OnClosed; cb != nil {
 			cb()
 		}

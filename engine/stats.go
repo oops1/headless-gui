@@ -96,12 +96,11 @@ type engineStats struct {
 	tiles, moves         atomic.Uint64
 	drawNs, diffNs       atomic.Uint64
 	panics               atomic.Uint64
-	recorded, retained      atomic.Uint64
-	tiledFrames             atomic.Uint64
-	blurHits, blurMisses    atomic.Uint64
-	tilesSkipped            atomic.Uint64
-	bufferBytes             atomic.Uint64
-	popupBytes              atomic.Uint64
+	recorded, retained   atomic.Uint64
+	tiledFrames          atomic.Uint64
+	blurHits, blurMisses atomic.Uint64
+	tilesSkipped         atomic.Uint64
+	bufferBytes          atomic.Uint64
 }
 
 // Stats возвращает снимок счётчиков движка. Безопасен из любой горутины и не
@@ -135,7 +134,7 @@ func (e *Engine) Stats() Stats {
 		BlurMisses:    s.blurMisses.Load(),
 		TilesSkipped:  s.tilesSkipped.Load(),
 		BufferBytes:   s.bufferBytes.Load(),
-		PopupBytes:    s.popupBytes.Load(),
+		PopupBytes:    e.ov.PopupBytes(),
 	}
 }
 

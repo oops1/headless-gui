@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/internal/workpool"
 	"github.com/oops1/headless-gui/v3/output"
@@ -116,7 +117,7 @@ func (f *protoFrame) haloWorker(size image.Point) (*protoWorker, chan *protoWork
 		for i := 0; i < cap(f.workers); i++ {
 			c := f.haloSrc.CloneForSize(size.X, size.Y, 1, nil)
 			c.InheritWallpaper(f.haloSrc)
-			ch <- &protoWorker{c: c, ctx: &translatingContext{inner: c}}
+			ch <- &protoWorker{c: c, ctx: &overlay.Translating{Inner: c}}
 		}
 		f.haloPool[size] = ch
 	}
@@ -133,7 +134,7 @@ func (f *protoFrame) runHaloTile(i int, tile image.Rectangle) {
 	w, pool := f.haloWorker(halo.Size())
 	defer func() { pool <- w }()
 	c, t := w.c, w.ctx
-	t.dx, t.dy = halo.Min.X, halo.Min.Y
+	t.DX, t.DY = halo.Min.X, halo.Min.Y
 	c.ClearRoundClip()
 	c.ClearClip()
 	cur, round := image.Rect(0, 0, f.w, f.h), protoRound{}
@@ -212,7 +213,7 @@ func (f *protoFrame) renderBlurRegion(before []protoCmd, blur *protoCmd, src, pr
 	}
 	c.ClearRoundClip()
 	c.ClearClip()
-	t := &translatingContext{inner: c, dx: src.Min.X, dy: src.Min.Y}
+	t := &overlay.Translating{Inner: c, DX: src.Min.X, DY: src.Min.Y}
 	cur, round := image.Rect(0, 0, f.w, f.h), protoRound{}
 	t.SetClip(cur)
 	for i := range before {

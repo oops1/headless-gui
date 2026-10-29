@@ -5,6 +5,7 @@ import (
 	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	"github.com/oops1/headless-gui/v3/core/input"
 	"github.com/oops1/headless-gui/v3/core/loop"
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	hgraster "github.com/oops1/headless-gui/v3/core/raster"
 	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
@@ -57,6 +58,9 @@ type Engine struct {
 	// и рендер по запросу, очередь Post, таймеры (core/loop, loop.go).
 	// Создаётся в конструкторе, не меняется.
 	lp *loop.Loop
+	// ov — оверлеи вне кадра: хостовые попапы, хост нативных модальных окон,
+	// подсказка (core/overlay, overlay.go). Создаётся в конструкторе.
+	ov *overlay.Manager
 }
 
 type saveJob struct {
@@ -138,8 +142,7 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	e.lp = loop.New(loopHost{e}, fps)
 	e.offscreen = offscreen
 	e.userDPI = DefaultDPI
-	e.ttEnabled = true
-	e.ttDelay = 600 * time.Millisecond
+	e.ov = overlay.New(overlayHost{e})
 	e.in = input.New(inputHost{e})
 	e.scaleBits.Store(math.Float64bits(1))
 	e.canvasRef.Store(e.canvas)
@@ -1499,7 +1502,7 @@ func (e *Engine) renderFrame() output.Frame {
 	}
 	// Шаги переходов хостовых попапов (popuptrans.go): холст не меняется,
 	// кадр без повреждения доходит только до renderPopups.
-	popupSteps := e.popupTicked.Swap(false)
+	popupSteps := e.ov.TakePopupTicked()
 	if (len(ovtSteps) > 0 || popupSteps) && !damageAll && len(damageRects) == 0 && e.lp.RenderOnDemand() {
 		return e.renderStepFrame(canvas, root, modals, surface, ovtSteps, popupSteps, image.Rectangle{}, drawStart)
 	}
@@ -1697,10 +1700,10 @@ func (e *Engine) renderFrame() output.Frame {
 	if hosted {
 		// !partial — рисовали весь кадр, значит перерисовываем и все попапы.
 		e.renderPopups(canvas, root, modals, popupDamage, !partial)
-	} else if e.popupArena.c != nil {
+	} else if e.ov.Arena().Canvas() != nil {
 		// Хост попапов снят: заготовку арены — сборщику (ADR-0009).
-		e.popupArena.release()
-		e.stats.popupBytes.Store(0)
+		e.ov.ReleaseArena()
+		e.ov.ResetPopupBytes()
 	}
 
 	// Всплывающая подсказка (поверх всего, включая модальные диалоги); на

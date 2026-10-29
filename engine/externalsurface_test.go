@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	hgraster "github.com/oops1/headless-gui/v3/core/raster"
 	"image"
 	"image/color"
@@ -482,7 +483,7 @@ func TestTranslatingContext_BlitPixels(t *testing.T) {
 	testreset.Globals(t)
 	src := esNoise(10, 10, 3)
 	oc := hgraster.NewCanvas(40, 40, nil)
-	tc := &translatingContext{inner: oc, dx: 100, dy: 200}
+	tc := &overlay.Translating{Inner: oc, DX: 100, DY: 200}
 	tc.BlitPixels(src, src.Rect, 105, 203, true)
 	if got := oc.Back().RGBAAt(5, 3); got != src.RGBAAt(0, 0) {
 		t.Fatalf("(5,3) = %v", got)

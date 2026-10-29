@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -79,7 +80,7 @@ func (s *arenaScene) checkIdentity(t *testing.T, name string) {
 	}
 	for i, dd := range s.dds {
 		fr := frames[i]
-		want := renderOverlay(s.e.canvas, dd, fr.Rect)
+		want := overlay.RenderOverlay(s.e.canvas, dd, fr.Rect)
 		if fr.Img.Rect != want.Rect {
 			t.Fatalf("%s: попап %d размером %v, свежий клон %v", name, i, fr.Img.Rect, want.Rect)
 		}
@@ -141,7 +142,7 @@ func TestPopupArena_MemoryWithThreeMenus(t *testing.T) {
 	if got := s.e.Stats().PopupBytes; got != 0 {
 		t.Errorf("после закрытия меню PopupBytes = %d, ждали 0", got)
 	}
-	if s.e.popupArena.c != nil {
+	if s.e.ov.Arena().Canvas() != nil {
 		t.Error("после закрытия меню заготовка арены не отпущена")
 	}
 }
@@ -152,12 +153,12 @@ func TestPopupArena_ReleasedWhenSinkRemoved(t *testing.T) {
 	s := newArenaScene(t, 1)
 	s.open(true)
 	s.e.renderFrame()
-	if s.e.popupArena.c == nil {
+	if s.e.ov.Arena().Canvas() == nil {
 		t.Fatal("заготовка арены не заведена при открытых меню")
 	}
 	s.e.SetPopupSink(nil)
 	s.e.renderFrame()
-	if s.e.popupArena.c != nil || s.e.Stats().PopupBytes != 0 {
-		t.Errorf("после снятия хоста заготовка %v, PopupBytes %d", s.e.popupArena.c != nil, s.e.Stats().PopupBytes)
+	if s.e.ov.Arena().Canvas() != nil || s.e.Stats().PopupBytes != 0 {
+		t.Errorf("после снятия хоста заготовка %v, PopupBytes %d", s.e.ov.Arena().Canvas() != nil, s.e.Stats().PopupBytes)
 	}
 }

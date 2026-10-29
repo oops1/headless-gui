@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -45,7 +46,7 @@ func TestTooltipAt_InScroll(t *testing.T) {
 	other.SetToolTip("прокрученная за верх")
 	sv.AddChild(other)
 
-	if got := tooltipAt(root, 100, 15); got != "видимая" {
+	if got := overlay.TooltipAt(root, 100, 15); got != "видимая" {
 		t.Fatalf("подсказка %q, ждали \"видимая\"", got)
 	}
 }
@@ -69,20 +70,20 @@ func TestPopupItems_ScreenRectInScroll(t *testing.T) {
 	sv.SetScrollY(250) // поле на экране 90..120, список 120..210
 	dd.SetOpen(true)
 
-	items := collectPopups(nil, root, 0)
+	items := overlay.CollectPopups(nil, root, 0)
 	if len(items) != 1 {
 		t.Fatalf("попапов %d, ждали 1", len(items))
 	}
 	want := dd.OverlayBounds().Sub(image.Pt(0, 250))
-	if items[0].rect != want {
-		t.Fatalf("прямоугольник попапа %v, ждали экранный %v", items[0].rect, want)
+	if items[0].Rect != want {
+		t.Fatalf("прямоугольник попапа %v, ждали экранный %v", items[0].Rect, want)
 	}
 
 	// Картинка попапа совпадает с тем, что холст рисует на этом месте.
 	c := e.canvas
 	c.BlitBackground()
 	drawOverlays(root, c, false)
-	shifted := renderOverlayShifted(c.CloneForSize(want.Dx(), want.Dy(), c.Scale(), nil), dd, want, items[0].off)
+	shifted := overlay.RenderOverlayShifted(c.CloneForSize(want.Dx(), want.Dy(), c.Scale(), nil), dd, want, items[0].Off)
 	for y := 0; y < want.Dy(); y++ {
 		for x := 0; x < want.Dx(); x++ {
 			if in, out := c.Back().RGBAAt(want.Min.X+x, want.Min.Y+y), shifted.RGBAAt(x, y); in != out {

@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
@@ -214,7 +215,7 @@ func TestMica_PopupCanvasUsesParentWallpaper(t *testing.T) {
 	r := image.Rect(150, 100, 250, 160)
 	oc := e.canvas.CloneForSize(r.Dx(), r.Dy(), e.canvas.Scale(), nil)
 	oc.InheritWallpaper(e.canvas)
-	tc := &translatingContext{inner: oc, dx: r.Min.X, dy: r.Min.Y}
+	tc := &overlay.Translating{Inner: oc, DX: r.Min.X, DY: r.Min.Y}
 	if !tc.MicaBehind(r, 40, color.RGBA{}) {
 		t.Fatal("попап не получил обои основного холста")
 	}

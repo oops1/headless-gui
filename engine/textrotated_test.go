@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	hgraster "github.com/oops1/headless-gui/v3/core/raster"
 	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
@@ -162,7 +163,7 @@ func TestDrawTextRotated_WrappersForward(t *testing.T) {
 
 	// translatingContext: попап с началом координат (dx, dy).
 	pop := rotatedTextCanvas(200, 200, 1)
-	tc := &translatingContext{inner: pop, dx: 30, dy: 20}
+	tc := &overlay.Translating{Inner: pop, DX: 30, DY: 20}
 	if !tc.DrawTextRotated("Hello", 110, 170, 12, "", 90, black) {
 		t.Fatal("translatingContext не нарисовал")
 	}

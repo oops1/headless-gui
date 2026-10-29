@@ -141,7 +141,7 @@ func TestCmdPath_ForceSurvivesStepFrame(t *testing.T) {
 	bl.on = true
 	eng.InvalidateRect(bl.Bounds())
 	eng.consumeDamage() // damage снят, ничейное повреждение осталось
-	eng.popupTicked.Store(true)
+	eng.ov.RequestPopupStep()
 	eng.renderFrame()
 	eng.damageRect(bl.Bounds())
 	img := eng.RenderOnce()

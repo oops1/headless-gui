@@ -8,8 +8,9 @@ package engine
 // переходы) — встроенные структуры ниже; встраивание сохраняет имена:
 // e.canvas, e.frameMu читаются как прежде. Ввод вынесен в core/input (7.2,
 // поле e.in, адаптер — input.go), цикл кадров — в core/loop (7.3, поле e.lp,
-// адаптер — loop.go). Этап 7.4 так же выносит оверлеи в core/overlay; здесь
-// закреплён их состав и порядок замков.
+// адаптер — loop.go), хостовые попапы, нативные модальные окна и подсказка —
+// в core/overlay (7.4, поле e.ov, адаптер — overlay.go); здесь закреплён
+// состав оставшегося и порядок замков.
 //
 // Порядок замков (подробно — ADR-0011, проверка — lockorder_test.go):
 //
@@ -34,9 +35,9 @@ import (
 	"image"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	hgraster "github.com/oops1/headless-gui/v3/core/raster"
 	"github.com/oops1/headless-gui/v3/theme"
 	"github.com/oops1/headless-gui/v3/widget"
@@ -186,48 +187,13 @@ type frameState struct {
 	snapPool  sync.Pool // пул снапшотов front-буфера для SaveFrames
 }
 
-// overlayState — слои поверх дерева: модальные окна в холсте и их хост,
-// хостовые попапы с ареной и переходами, отложенные слои кадра, переходы
-// оверлеев, всплывающая подсказка. Будущий core/overlay.
+// overlayState — слои поверх дерева, которые остались у движка: стек
+// модальных окон в холсте, отложенные слои кадра, переходы оверлеев в холсте.
+// Хостовые попапы, хост нативных модальных окон и подсказка — core/overlay
+// (7.4), поле e.ov, адаптер — overlay.go.
 type overlayState struct {
 	modals []widget.ModalWidget // стек модальных виджетов (последний = верхний)
 	modMu  sync.Mutex
-
-	// modalHost — опциональный хост нативных модалок (window.dialogHost на
-	// Win32). Если установлен и принимает модалку, она живёт в собственном
-	// нативном окне ОС, а не в холсте движка. onModalClosed — колбэк,
-	// вызываемый в конце CloseModal (см. modalhost.go). hostMu защищает оба.
-	modalHost     ModalHost
-	onModalClosed func(widget.ModalWidget)
-	// modalClosedSubs — подписчики AddOnModalClosed. Слот onModalClosed занят
-	// хостом нативных окон, и приложению его не хватало: второй подписчик
-	// молча вытеснял первого (GG-82).
-	modalClosedSubs []modalClosedSub
-	modalSubNextID  int
-	hostMu          sync.Mutex
-
-	// popupSink — опциональный хост popup-оверлеев (window.popupHost). Если
-	// задан, открытые оверлеи (dropdown/меню) выносятся в собственные нативные
-	// окна ОС, а не рисуются в холст. lastPopupSig — сигнатура последнего
-	// набора попапов, отданного sink (для вызова sink только при изменениях).
-	popupSink    func([]PopupFrame)
-	lastPopupSig []popupSig
-	popupCache   map[uintptr]*popupEntry // кэш картинки на оверлей
-	// popupArena — общий холст-заготовка хостовых попапов (ADR-0009); только
-	// горутина кадра, под frameMu.
-	popupArena popupArena
-	popupGen   uint64 // поколение для отсева исчезнувших попапов
-	popupMu    sync.Mutex
-
-	// Рабочие буферы renderPopups (только рендер-горутина, под frameMu).
-	popupItems []popupItem
-	popupSigBu []popupSig
-	// Переходы хостовых попапов (popuptrans.go): popupFade — хост их
-	// понимает (SetPopupFade); popupTicked — тик просит кадр под шаг;
-	// popupClosingBu — исчезающие попапы кадра (переиспользуемый буфер).
-	popupFade      atomic.Bool
-	popupTicked    atomic.Bool
-	popupClosingBu []uintptr
 
 	// post, postRect, postMode, postTooltip — слои, отложенные до конца растра
 	// (переходы оверлеев, toplayers.go), их место и признак, что обход уже
@@ -235,18 +201,8 @@ type overlayState struct {
 	post        []postItem
 	postRect    image.Rectangle
 	postMode    bool
-	postTooltip tooltipPlan
+	postTooltip overlay.TooltipPlan
 
 	// ovt — переходы оверлеев (overlaytrans.go); у каждого перехода свой замок.
 	ovt overlayTransitions
-
-	// ── Tooltip ─────────────────────────────────────────────────────────────
-	ttMu       sync.Mutex
-	ttEnabled  bool          // показывать всплывающие подсказки
-	ttDelay    time.Duration // задержка появления после остановки курсора
-	ttMouseX   int
-	ttMouseY   int
-	ttLastMove time.Time
-	ttHasMouse bool            // курсор хотя бы раз входил на холст
-	ttShownAt  image.Rectangle // область показанной подсказки (пустая — не показана)
 }

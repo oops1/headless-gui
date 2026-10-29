@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -47,7 +48,7 @@ func TestTranslatingContext_PixelMatch(t *testing.T) {
 	drawOverlays(root, c, false)
 
 	// Offscreen отрисовка через транслирующий контекст.
-	oc := renderOverlay(c, dd, r)
+	oc := overlay.RenderOverlay(c, dd, r)
 
 	// Сравнение области r основного холста с popup-канвасом (scale==1).
 	if oc.Bounds().Dx() != r.Dx() || oc.Bounds().Dy() != r.Dy() {

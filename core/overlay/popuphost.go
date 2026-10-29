@@ -3,14 +3,14 @@
 //
 // Логика попапа (hover, выбор, закрытие) остаётся в этом движке: нативное
 // окно-попап — лишь вьюпорт. Движок рендерит содержимое оверлея в отдельный
-// маленький буфер (renderOverlay через транслирующий DrawContext) и отдаёт его
+// маленький буфер (RenderOverlay через транслирующий DrawContext) и отдаёт его
 // хосту (window.popupHost) через PopupSink. Хост создаёт/двигает/закрывает
 // окна ОС и транслирует их события мыши обратно в этот движок.
 //
 // Без установленного sink (headless и бэкенды без поддержки окон-попапов)
 // поведение прежнее до пикселя: оверлеи рисуются в основной холст.
 
-package engine
+package overlay
 
 import (
 	"hash/fnv"
@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 
 	"github.com/oops1/headless-gui/v3/core/input"
+	"github.com/oops1/headless-gui/v3/core/raster"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -54,10 +55,10 @@ type PopupTransition struct {
 // непрозрачность и сдвиг. По умолчанию — нет: хостовые попапы появляются и
 // исчезают сразу, как прежде. Переходы включаются ещё и
 // SetOverlayTransitions — общим выключателем всех оверлеев.
-func (e *Engine) SetPopupFade(on bool) { e.popupFade.Store(on) }
+func (m *Manager) SetPopupFade(on bool) { m.popupFade.Store(on) }
 
 // PopupFade сообщает, объявил ли хост попапов переходы.
-func (e *Engine) PopupFade() bool { return e.popupFade.Load() }
+func (m *Manager) PopupFade() bool { return m.popupFade.Load() }
 
 // popupSig — сигнатура одного попапа для детекта изменений (состав/Rect/контент).
 type popupSig struct {
@@ -71,19 +72,20 @@ type popupSig struct {
 	trans   bool
 }
 
-// popupItem — найденный в дереве хостируемый оверлей (до рендера).
-type popupItem struct {
-	id   uintptr
-	rect image.Rectangle // ЭКРАННЫЕ координаты (границы оверлея минус off)
-	od   widget.OverlayDrawer
-	// off — кадр виджета-владельца (см. frames.go): оверлей внутри прокрутки
-	// рисуется в координатах содержимого, а окно-попап стоит на экране.
-	off image.Point
+// PopupItem — найденный в дереве хостируемый оверлей (до рендера).
+type PopupItem struct {
+	ID   uintptr
+	Rect image.Rectangle // ЭКРАННЫЕ координаты (границы оверлея минус Off)
+	OD   widget.OverlayDrawer
+	// Off — кадр виджета-владельца (core/input, frames.go): оверлей внутри
+	// прокрутки рисуется в координатах содержимого, а окно-попап стоит на
+	// экране.
+	Off image.Point
 }
 
 // popupEntry — межкадровый кэш одного оверлея: готовая картинка и её хэш.
 // Холста у записи нет: все попапы рендерятся в один холст-заготовку арены
-// (popupArena, ADR-0009).
+// (Arena, ADR-0009).
 type popupEntry struct {
 	rect image.Rectangle
 	img  *image.RGBA
@@ -108,79 +110,80 @@ type popupEntry struct {
 // Дополнительно выставляет глобальный флаг widget.SetPopupsHosted — при нём
 // popup-меню не клэмпятся в границы канваса (экранным позиционированием
 // занимается хост).
-func (e *Engine) SetPopupSink(sink func(frames []PopupFrame)) {
-	e.popupMu.Lock()
-	e.popupSink = sink
-	e.lastPopupSig = nil
-	for _, ent := range e.popupCache {
+func (m *Manager) SetPopupSink(sink func(frames []PopupFrame)) {
+	m.popupMu.Lock()
+	m.popupSink = sink
+	m.lastPopupSig = nil
+	for _, ent := range m.popupCache {
 		ent.stopTrans()
 	}
-	e.popupCache = nil
-	e.popupMu.Unlock()
+	m.popupCache = nil
+	m.popupMu.Unlock()
 	// Заготовку арены трогает только кадр (под frameMu): без хоста её
 	// отпускает ближайший кадр (renderFrame), здесь замка кадра не берём —
 	// хост вправе снять сток из своего колбэка, а тот идёт внутри кадра.
 	widget.SetPopupsHosted(sink != nil)
 }
 
-func (e *Engine) getPopupSink() func([]PopupFrame) {
-	e.popupMu.Lock()
-	defer e.popupMu.Unlock()
-	return e.popupSink
+// PopupSink — установленный хост попапов (nil — оверлеи рисуются в холст).
+func (m *Manager) PopupSink() func([]PopupFrame) {
+	m.popupMu.Lock()
+	defer m.popupMu.Unlock()
+	return m.popupSink
 }
 
-// renderPopups отдаёт sink изменившиеся оверлеи (под frameMu).
+// RenderPopups отдаёт sink изменившиеся оверлеи (под frameMu).
 // Перерисовывается только оверлей с новым Rect или в damage.
-func (e *Engine) renderPopups(canvas *Canvas, root widget.Widget, modals []widget.ModalWidget,
+func (m *Manager) RenderPopups(canvas *raster.Canvas, root widget.Widget, modals []widget.ModalWidget,
 	damage image.Rectangle, dirtyAll bool) {
-	sink := e.getPopupSink()
+	sink := m.PopupSink()
 	if sink == nil {
 		return
 	}
 
-	items := e.popupItems[:0]
+	items := m.popupItems[:0]
 	if root != nil {
-		items = collectPopups(items, root, 0)
+		items = CollectPopups(items, root, 0)
 	}
 	for _, m := range modals {
 		if m.IsModal() {
-			items = collectPopups(items, m, 0)
+			items = CollectPopups(items, m, 0)
 		}
 	}
-	e.popupItems = items
+	m.popupItems = items
 
-	sig := e.popupSigBu[:0]
+	sig := m.popupSigBu[:0]
 
-	e.popupMu.Lock()
-	if e.popupCache == nil {
-		e.popupCache = make(map[uintptr]*popupEntry)
+	m.popupMu.Lock()
+	if m.popupCache == nil {
+		m.popupCache = make(map[uintptr]*popupEntry)
 	}
-	e.popupGen++
-	gen := e.popupGen
-	tr := e.popupTransSpec(canvas)
+	m.popupGen++
+	gen := m.popupGen
+	tr := m.popupTransSpec(canvas)
 	for _, it := range items {
-		ent := e.popupCache[it.id]
+		ent := m.popupCache[it.ID]
 		fresh := ent == nil
 		if fresh {
 			ent = &popupEntry{}
-			e.popupCache[it.id] = ent
+			m.popupCache[it.ID] = ent
 		}
 		ent.seen = gen
-		if ent.img == nil || ent.rect != it.rect || dirtyAll || canvas.PhysRect(it.rect).Overlaps(damage) {
-			oc := e.popupArena.canvasFor(canvas, it.rect)
-			ent.img = renderOverlayShifted(oc, it.od, it.rect, it.off)
+		if ent.img == nil || ent.rect != it.Rect || dirtyAll || canvas.PhysRect(it.Rect).Overlaps(damage) {
+			oc := m.popupArena.CanvasFor(canvas, it.Rect)
+			ent.img = RenderOverlayShifted(oc, it.OD, it.Rect, it.Off)
 			ent.hash = hashRGBA(ent.img)
-			ent.rect = it.rect
+			ent.rect = it.Rect
 		}
 		// Панель, анимирующая себя сама (desktop.Flyout), перехода движка не
 		// получает ни при появлении, ни при исчезновении.
-		ent.self = isSelfAnimated(it.od)
+		ent.self = isSelfAnimated(it.OD)
 		itr := tr
 		if ent.self {
 			itr = popupTrans{}
 		}
-		e.popupOpenStep(ent, it, fresh, itr)
-		sig = append(sig, ent.sig(it.id))
+		m.popupOpenStep(ent, it, fresh, itr)
+		sig = append(sig, ent.sig(it.ID))
 	}
 	// Закрытые оверлеи: исчезают переходом, пока он идёт, — с последней
 	// картинкой и на прежнем месте; без перехода уходят сразу. Переходом —
@@ -188,19 +191,19 @@ func (e *Engine) renderPopups(canvas *Canvas, root widget.Widget, modals []widge
 	// из дерева (или из закрытого модального окна) уносит его сразу, как в
 	// холсте. Порядок — по ID: кадры и подпись не должны зависеть от
 	// порядка обхода карты.
-	closing := e.popupClosingBu[:0]
+	closing := m.popupClosingBu[:0]
 	var owners map[uintptr]bool
-	for id, ent := range e.popupCache {
+	for id, ent := range m.popupCache {
 		if ent.seen == gen {
 			continue
 		}
 		if !ent.closing && tr.dur > 0 && !ent.self {
 			if owners == nil {
-				owners = e.popupOwners(root, modals)
+				owners = m.popupOwners(root, modals)
 			}
 			if !owners[id] {
 				ent.stopTrans()
-				delete(e.popupCache, id)
+				delete(m.popupCache, id)
 				continue
 			}
 		}
@@ -208,62 +211,62 @@ func (e *Engine) renderPopups(canvas *Canvas, root widget.Widget, modals []widge
 		if ent.self {
 			itr = popupTrans{}
 		}
-		if e.popupCloseStep(ent, itr) {
+		if m.popupCloseStep(ent, itr) {
 			ent.seen = gen
 			closing = append(closing, id)
 			continue
 		}
 		ent.stopTrans()
-		delete(e.popupCache, id)
+		delete(m.popupCache, id)
 	}
 	slices.Sort(closing)
 	for _, id := range closing {
-		sig = append(sig, e.popupCache[id].sig(id))
+		sig = append(sig, m.popupCache[id].sig(id))
 	}
-	e.popupClosingBu = closing
-	e.popupSigBu = sig
+	m.popupClosingBu = closing
+	m.popupSigBu = sig
 
 	// Арена живёт, пока есть открытые попапы (исчезающим она не нужна: у них
 	// готовая картинка), и держит размер самого большого из них — закрытое
 	// большое меню не оставляет её раздутой.
-	e.popupArena.trim(items)
-	e.stats.popupBytes.Store(uint64(e.popupBytesLocked()))
+	m.popupArena.trim(items)
+	m.popupBytes.Store(uint64(m.popupBytesLocked()))
 
-	changed := !samePopupSig(e.lastPopupSig, sig)
+	changed := !samePopupSig(m.lastPopupSig, sig)
 	var frames []PopupFrame
 	if changed {
-		e.lastPopupSig = append([]popupSig(nil), sig...)
+		m.lastPopupSig = append([]popupSig(nil), sig...)
 		frames = make([]PopupFrame, 0, len(items)+len(closing))
 		for _, it := range items {
-			frames = append(frames, e.popupCache[it.id].frame(it.id))
+			frames = append(frames, m.popupCache[it.ID].frame(it.ID))
 		}
 		for _, id := range closing {
-			frames = append(frames, e.popupCache[id].frame(id))
+			frames = append(frames, m.popupCache[id].frame(id))
 		}
 	}
-	e.popupMu.Unlock()
+	m.popupMu.Unlock()
 
 	if changed {
 		sink(frames)
 	}
 }
 
-// popupArena — арена попапов (ADR-0009): один холст-заготовка на все
+// Arena — арена попапов (ADR-0009): один холст-заготовка на все
 // открытые хостовые попапы движка вместо холста на каждый. Попапы
 // рендерятся в неё по очереди (горутина кадра, под frameMu), картинка каждого
 // копируется в его запись; заготовка держит только буфер рисования размером
 // с самый большой попап и переводится на размер очередного без новой памяти.
-type popupArena struct {
-	c       *Canvas
-	src     *Canvas // холст движка, с которого снят клон
+type Arena struct {
+	c       *raster.Canvas
+	src     *raster.Canvas // холст движка, с которого снят клон
 	fontRev uint64
 	scale   float64
 }
 
-// canvasFor отдаёт заготовку, переведённую на попап r (логический размер),
+// CanvasFor отдаёт заготовку, переведённую на попап r (логический размер),
 // чистую, — как свежий клон холста src этого размера. Клон пересоздаётся при
 // смене холста движка, его шрифтов или масштаба.
-func (a *popupArena) canvasFor(src *Canvas, r image.Rectangle) *Canvas {
+func (a *Arena) CanvasFor(src *raster.Canvas, r image.Rectangle) *raster.Canvas {
 	if a.c == nil || a.src != src || a.fontRev != src.FontRev() || a.scale != src.Scale() {
 		a.c = src.CloneForSize(r.Dx(), r.Dy(), src.Scale(), nil)
 		a.c.InheritWallpaper(src)
@@ -273,30 +276,36 @@ func (a *popupArena) canvasFor(src *Canvas, r image.Rectangle) *Canvas {
 	return a.c
 }
 
-// release отдаёт заготовку сборщику (попапов нет, хост снят).
-func (a *popupArena) release() { *a = popupArena{} }
+// Canvas — заготовка (nil — отпущена). Для диагностики и тестов.
+func (a *Arena) Canvas() *raster.Canvas { return a.c }
+
+// Source — холст движка, с которого снята заготовка. Для диагностики и тестов.
+func (a *Arena) Source() *raster.Canvas { return a.src }
+
+// Release отдаёт заготовку сборщику (попапов нет, хост снят).
+func (a *Arena) Release() { *a = Arena{} }
 
 // trim отпускает заготовку, если открытых попапов нет или её буфер больше
 // нужного самому большому из них: следующий рендер заведёт её по размеру.
 // Пока открыты попапы разного размера, буфер равен большему и не
 // перевыделяется от кадра к кадру.
-func (a *popupArena) trim(items []popupItem) {
+func (a *Arena) trim(items []PopupItem) {
 	if a.c == nil {
 		return
 	}
 	need := 0
 	for _, it := range items {
-		need = max(need, a.c.ScratchBytes(it.rect.Dx(), it.rect.Dy()))
+		need = max(need, a.c.ScratchBytes(it.Rect.Dx(), it.Rect.Dy()))
 	}
 	if need == 0 || cap(a.c.Back().Pix) > need {
-		a.release()
+		a.Release()
 	}
 }
 
-// bytes — байт, занятых буферами заготовки: по ёмкости — буфер рисования
+// Bytes — байт, занятых буферами заготовки: по ёмкости — буфер рисования
 // переведён на очередной попап срезом, а память держит размер самого
 // большого.
-func (a *popupArena) bytes() int {
+func (a *Arena) Bytes() int {
 	if a.c == nil {
 		return 0
 	}
@@ -305,9 +314,9 @@ func (a *popupArena) bytes() int {
 
 // popupBytesLocked — память хостовых попапов: заготовка арены и картинки
 // записей (под popupMu).
-func (e *Engine) popupBytesLocked() int {
-	n := e.popupArena.bytes()
-	for _, ent := range e.popupCache {
+func (m *Manager) popupBytesLocked() int {
+	n := m.popupArena.Bytes()
+	for _, ent := range m.popupCache {
 		if ent.img != nil {
 			n += len(ent.img.Pix)
 		}
@@ -315,21 +324,21 @@ func (e *Engine) popupBytesLocked() int {
 	return n
 }
 
-// collectPopups рекурсивно собирает хостируемые оверлеи дерева (без рендера).
-func collectPopups(out []popupItem, w widget.Widget, depth int) []popupItem {
+// CollectPopups рекурсивно собирает хостируемые оверлеи дерева (без рендера).
+func CollectPopups(out []PopupItem, w widget.Widget, depth int) []PopupItem {
 	return collectPopupsAt(out, w, image.Point{}, depth)
 }
 
-// collectPopupsAt: off — смещение кадра w. Границы оверлея виджет отдаёт в
+// collectPopupsAt — CollectPopups со смещением: off — смещение кадра w. Границы оверлея виджет отдаёт в
 // своём кадре; окну-попапу нужны экранные — вычитаем кадр.
-func collectPopupsAt(out []popupItem, w widget.Widget, off image.Point, depth int) []popupItem {
+func collectPopupsAt(out []PopupItem, w widget.Widget, off image.Point, depth int) []PopupItem {
 	if tooDeep(depth) {
 		return out
 	}
 	if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
 		if ob, ok := w.(widget.OverlayBoundsProvider); ok {
 			if r := ob.OverlayBounds(); !r.Empty() {
-				out = append(out, popupItem{id: widgetID(w), rect: r.Sub(off), od: od, off: off})
+				out = append(out, PopupItem{ID: WidgetID(w), Rect: r.Sub(off), OD: od, Off: off})
 			}
 		}
 	}
@@ -344,8 +353,8 @@ func collectPopupsAt(out []popupItem, w widget.Widget, off image.Point, depth in
 	return out
 }
 
-// widgetID возвращает стабильный ключ виджета (указатель на его структуру).
-func widgetID(w widget.Widget) uintptr {
+// WidgetID возвращает стабильный ключ виджета (указатель на его структуру).
+func WidgetID(w widget.Widget) uintptr {
 	v := reflect.ValueOf(w)
 	if v.Kind() == reflect.Ptr {
 		return v.Pointer()
@@ -353,26 +362,26 @@ func widgetID(w widget.Widget) uintptr {
 	return 0
 }
 
-// renderOverlay рендерит оверлей od в отдельный буфер размером с r (логический),
+// RenderOverlay рендерит оверлей od в отдельный буфер размером с r (логический),
 // в физическом масштабе движка. Возвращает ФИЗИЧЕСКИЙ RGBA.
-func renderOverlay(c *Canvas, od widget.OverlayDrawer, r image.Rectangle) *image.RGBA {
+func RenderOverlay(c *raster.Canvas, od widget.OverlayDrawer, r image.Rectangle) *image.RGBA {
 	oc := c.CloneForSize(r.Dx(), r.Dy(), c.Scale(), nil)
 	oc.InheritWallpaper(c)
-	return renderOverlayInto(oc, od, r)
+	return RenderOverlayInto(oc, od, r)
 }
 
-// renderOverlayInto рисует оверлей в подготовленный канвас oc. Координаты
+// RenderOverlayInto рисует оверлей в подготовленный канвас oc. Координаты
 // оверлея (абсолютные логические) транслируются на -r.Min.
-func renderOverlayInto(oc *Canvas, od widget.OverlayDrawer, r image.Rectangle) *image.RGBA {
-	return renderOverlayShifted(oc, od, r, image.Point{})
+func RenderOverlayInto(oc *raster.Canvas, od widget.OverlayDrawer, r image.Rectangle) *image.RGBA {
+	return RenderOverlayShifted(oc, od, r, image.Point{})
 }
 
-// renderOverlayShifted — renderOverlayInto для оверлея виджета, лежащего в
+// RenderOverlayShifted — RenderOverlayInto для оверлея виджета, лежащего в
 // кадре off (внутри прокрутки): r — ЭКРАННЫЙ прямоугольник попапа, а оверлей
 // рисуется в координатах своего виджета, поэтому сперва сдвиг кадра, потом
 // сдвиг на начало попапа.
-func renderOverlayShifted(oc *Canvas, od widget.OverlayDrawer, r image.Rectangle, off image.Point) *image.RGBA {
-	tc := &translatingContext{inner: oc, dx: r.Min.X, dy: r.Min.Y}
+func RenderOverlayShifted(oc *raster.Canvas, od widget.OverlayDrawer, r image.Rectangle, off image.Point) *image.RGBA {
+	tc := &Translating{Inner: oc, DX: r.Min.X, DY: r.Min.Y}
 	if w, ok := od.(widget.Widget); ok {
 		widget.DrawOverlayTraced(w, od, widget.OffsetContext(tc, off.X, off.Y))
 	} else {
@@ -407,27 +416,4 @@ func samePopupSig(a, b []popupSig) bool {
 		}
 	}
 	return true
-}
-
-// ─── CloseAllOverlays ────────────────────────────────────────────────────────
-
-// CloseAllOverlays закрывает все Dismissable-оверлеи (dropdown/меню) в дереве и
-// в модалках. Используется хостом при деактивации окна-носителя (клик в другое
-// приложение): системные меню в этом случае закрываются.
-func (e *Engine) CloseAllOverlays() {
-	e.mu.RLock()
-	root := e.root
-	e.mu.RUnlock()
-	if root != nil {
-		// keep=nil и точка вне любого экрана: закрыть ВСЕ, включая панели,
-		// которые считают своей площадь соседки по группе.
-		input.DismissOutside(root, nil, widget.CursorNowhere, widget.CursorNowhere)
-	}
-	e.modMu.Lock()
-	modals := make([]widget.ModalWidget, len(e.modals))
-	copy(modals, e.modals)
-	e.modMu.Unlock()
-	for _, m := range modals {
-		input.DismissOutside(m, nil, widget.CursorNowhere, widget.CursorNowhere)
-	}
 }

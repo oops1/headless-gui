@@ -15,6 +15,7 @@ import (
 	"time"
 
 	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -122,7 +123,7 @@ func (s *revScene) frameOf(t *testing.T, p *revPopup) PopupFrame {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, fr := range s.frames {
-		if fr.ID == widgetID(p) {
+		if fr.ID == overlay.WidgetID(p) {
 			return fr
 		}
 	}
@@ -137,7 +138,7 @@ func (s *revScene) check(t *testing.T, name string) {
 			continue
 		}
 		fr := s.frameOf(t, p)
-		want := renderOverlay(s.e.canvas, p, fr.Rect)
+		want := overlay.RenderOverlay(s.e.canvas, p, fr.Rect)
 		if fr.Img.Rect != want.Rect {
 			t.Fatalf("%s: попап %d размером %v, свежий клон %v", name, i, fr.Img.Rect, want.Rect)
 		}
@@ -198,7 +199,7 @@ func TestPopupArenaReview_PixelFormatChange(t *testing.T) {
 	}
 	s.ps[1].open = true // открыт ПОСЛЕ смены формата
 	s.e.renderFrame()
-	if f := s.e.popupArena.c.Format(); f != s.e.canvas.Format() {
+	if f := s.e.ov.Arena().Canvas().Format(); f != s.e.canvas.Format() {
 		t.Errorf("формат заготовки %v, холста движка %v", f, s.e.canvas.Format())
 	}
 	s.check(t, "после смены формата")
@@ -255,7 +256,7 @@ func TestPopupArenaReview_ResolutionChange(t *testing.T) {
 	old := s.e.canvas
 	s.e.SetResolution(900, 700)
 	s.e.renderFrame()
-	if s.e.popupArena.src == old {
+	if s.e.ov.Arena().Source() == old {
 		t.Error("заготовка держит прежний холст движка")
 	}
 	s.check(t, "после SetResolution")
@@ -270,10 +271,10 @@ func TestPopupArenaReview_AllocsPerRerender(t *testing.T) {
 	}
 	s.e.renderFrame()
 	src := s.e.canvas
-	a := &s.e.popupArena
+	a := s.e.ov.Arena()
 	n := testing.AllocsPerRun(50, func() {
-		a.canvasFor(src, revSmall)
-		a.canvasFor(src, revMid)
+		a.CanvasFor(src, revSmall)
+		a.CanvasFor(src, revMid)
 	})
 	t.Logf("аллокаций на два перевода заготовки: %.1f", n)
 }
@@ -295,7 +296,7 @@ func TestPopupArenaReview_FadeBytes(t *testing.T) {
 	s.setOpen(false)
 	s.eng.RenderFrameNow()
 	gen = s.eng.lp.Gen()
-	t.Logf("открыт %d, в начале исчезновения %d, заготовка %v", open, s.eng.Stats().PopupBytes, s.eng.popupArena.c != nil)
+	t.Logf("открыт %d, в начале исчезновения %d, заготовка %v", open, s.eng.Stats().PopupBytes, s.eng.ov.Arena().Canvas() != nil)
 	t1 := time.Now()
 	for ms := 0; ms <= 120; ms += 20 {
 		widget.StepAnimationsFor(s.eng, t1.Add(time.Duration(ms)*time.Millisecond))
@@ -304,8 +305,8 @@ func TestPopupArenaReview_FadeBytes(t *testing.T) {
 	if f := rec.last(); len(f) != 0 {
 		t.Fatalf("после исчезновения в кадрах %+v", f)
 	}
-	if got := s.eng.Stats().PopupBytes; got != 0 || s.eng.popupArena.c != nil {
-		t.Errorf("после исчезновения PopupBytes = %d, заготовка %v", got, s.eng.popupArena.c != nil)
+	if got := s.eng.Stats().PopupBytes; got != 0 || s.eng.ov.Arena().Canvas() != nil {
+		t.Errorf("после исчезновения PopupBytes = %d, заготовка %v", got, s.eng.ov.Arena().Canvas() != nil)
 	}
 }
 
