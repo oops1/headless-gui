@@ -275,7 +275,8 @@ func TestWaylandPopup_CloseDestroysObjects(t *testing.T) {
 		{p.popupID, xdgPopupDestroy, "xdg_popup"},
 		{p.xdgSurfID, xdgSurfaceDestroy, "xdg_surface"},
 		{p.surfaceID, wlSurfaceDestroy, "wl_surface"},
-		{p.bufID, wlBufferDestroy, "wl_buffer"},
+		{p.bufID[0], wlBufferDestroy, "первый wl_buffer"},
+		{p.bufID[1], wlBufferDestroy, "второй wl_buffer"},
 		{p.poolID, wlShmPoolDestroy, "wl_shm_pool"},
 	} {
 		if _, ok := findWlMsg(msgs, want.obj, want.opcode); !ok {
@@ -290,7 +291,135 @@ func TestWaylandPopup_CloseDestroysObjects(t *testing.T) {
 	}
 }
 
+// У попапа два буфера в одном пуле, как у окна: пока компоновщик читает один,
+// кадр пишется во второй.
+func TestWaylandPopup_TwoBuffers(t *testing.T) {
+	c := newWlTestWindow(t)
+	if err := c.w.OpenChildPopup(1, 0, 0, 64, 48); err != nil {
+		t.Fatalf("OpenChildPopup: %v", err)
+	}
+	p := c.w.popups.byID[1]
+	msgs := splitWlMsgs(t, c.drain(t))
+
+	frame := uint32(64 * 4 * 48)
+	if m, ok := findWlMsg(msgs, c.w.shmID, wlShmCreatePool); !ok || len(m.args) != 2 || m.args[1] != 2*frame {
+		t.Errorf("пул попапа %v, ждали размер %d (два кадра)", m.args, 2*frame)
+	}
+	var offs []uint32
+	for _, m := range msgs {
+		if m.obj == p.poolID && m.opcode == wlShmPoolCreateBuffer {
+			offs = append(offs, m.args[1])
+		}
+	}
+	if len(offs) != 2 || offs[0] != 0 || offs[1] != frame {
+		t.Errorf("смещения буферов в пуле %v, ждали [0 %d]", offs, frame)
+	}
+	if p.bufID[0] == 0 || p.bufID[1] == 0 || p.bufID[0] == p.bufID[1] {
+		t.Errorf("буферы попапа %v", p.bufID)
+	}
+}
+
+// Оба буфера у компоновщика — последний кадр не теряется: он придерживается
+// и кладётся по wl_buffer.release. Хост шлёт кадры только при изменениях, и
+// пропущенный конец перехода (или подсветка пункта) не повторился бы — попап
+// застыл бы на промежуточном кадре. Блит при этом не ждёт.
+func TestWaylandPopup_FrameDeferredUntilRelease(t *testing.T) {
+	c := newWlTestWindow(t)
+	if err := c.w.OpenChildPopup(1, 0, 0, 64, 48); err != nil {
+		t.Fatalf("OpenChildPopup: %v", err)
+	}
+	p := c.w.popups.byID[1]
+	c.w.handleEvent(p.xdgSurfID, xdgSurfaceEvConfigure, wlU32(1))
+	c.drain(t)
+
+	attachedBuf := func(msgs []wlWireMsg) uint32 {
+		t.Helper()
+		m, ok := findWlMsg(msgs, p.surfaceID, wlSurfaceAttach)
+		if !ok || len(m.args) != 3 {
+			t.Fatalf("кадр не прикреплён: %+v", msgs)
+		}
+		if _, ok := findWlMsg(msgs, p.surfaceID, wlSurfaceCommit); !ok {
+			t.Fatal("поверхность не закоммичена")
+		}
+		return m.args[0]
+	}
+
+	c.w.BlitChildPopup(1, popupImg(64, 48, 255), nil)
+	if got := attachedBuf(splitWlMsgs(t, c.drain(t))); got != p.bufID[0] {
+		t.Fatalf("первый кадр в буфере %d, ждали %d", got, p.bufID[0])
+	}
+	// Первый у компоновщика — второй кадр пишется в другой буфер.
+	c.w.BlitChildPopup(1, popupImg(64, 48, 200), nil)
+	if got := attachedBuf(splitWlMsgs(t, c.drain(t))); got != p.bufID[1] {
+		t.Fatalf("второй кадр в буфере %d, ждали %d", got, p.bufID[1])
+	}
+
+	// Оба заняты: кадры придерживаются, последний заменяет предыдущий.
+	start := time.Now()
+	c.w.BlitChildPopup(1, popupImg(64, 48, 100), nil)
+	last := popupImg(64, 48, 50)
+	c.w.BlitChildPopup(1, last, nil)
+	if d := time.Since(start); d >= wlBufWaitTimeout {
+		t.Errorf("блит при занятых буферах ждал %v", d)
+	}
+	if !c.quiet() {
+		t.Fatal("кадр положен в буфер, который ещё у компоновщика")
+	}
+	if p.pending != last {
+		t.Fatal("последний кадр не придержан")
+	}
+
+	// Компоновщик отпустил второй буфер — придержанный кадр ложится в него.
+	c.w.handleEvent(p.bufID[1], wlBufferEvRelease, nil)
+	if got := attachedBuf(splitWlMsgs(t, c.drain(t))); got != p.bufID[1] {
+		t.Fatalf("придержанный кадр в буфере %d, ждали освободившийся %d", got, p.bufID[1])
+	}
+	if p.pending != nil {
+		t.Error("кадр остался придержанным после показа")
+	}
+	frame := p.stride * p.h
+	if a := p.data[frame+3]; a != 50 {
+		t.Errorf("в освободившемся буфере альфа %d, ждали последний кадр (50)", a)
+	}
+
+	// Отпущен буфер, а кадра в очереди нет — ничего не шлётся.
+	c.w.handleEvent(p.bufID[0], wlBufferEvRelease, nil)
+	if !c.quiet() {
+		t.Error("release без придержанного кадра что-то отправил")
+	}
+}
+
+// Придержанный кадр закрытого попапа никуда не кладётся: release может
+// прийти, когда буферы уже уничтожены.
+func TestWaylandPopup_DeferredDroppedOnClose(t *testing.T) {
+	c := newWlTestWindow(t)
+	if err := c.w.OpenChildPopup(1, 0, 0, 16, 16); err != nil {
+		t.Fatalf("OpenChildPopup: %v", err)
+	}
+	p := c.w.popups.byID[1]
+	c.w.handleEvent(p.xdgSurfID, xdgSurfaceEvConfigure, wlU32(1))
+	c.w.BlitChildPopup(1, popupImg(16, 16, 255), nil)
+	c.w.BlitChildPopup(1, popupImg(16, 16, 255), nil)
+	c.w.BlitChildPopup(1, popupImg(16, 16, 128), nil)
+	c.w.CloseChildPopup(1)
+	c.drain(t)
+
+	// Запоздавший вывод (release успел до закрытия) ничего не кладёт.
+	c.w.popupFlush(p)
+	if !c.quiet() {
+		t.Error("кадр закрытого попапа отправлен")
+	}
+}
+
 // ─── Хелперы ───────────────────────────────────────────────────────────────
+
+// quiet сообщает, что окно ничего не отправило за 100 мс.
+func (c *wlTestConn) quiet() bool {
+	c.peer.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	var buf [64]byte
+	n, _ := c.peer.Read(buf[:])
+	return n == 0
+}
 
 // wlU32 — тело события из слов.
 func wlU32(vals ...uint32) []byte {
