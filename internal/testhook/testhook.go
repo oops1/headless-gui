@@ -42,3 +42,6 @@ var SaveStrings func() (restore func())
 
 // LanguageListeners — число подписчиков смены языка.
 var LanguageListeners func() int
+
+// ScreenBounds — размер экрана для раскладки попапов (SetScreenBounds задаёт).
+var ScreenBounds func() (w, h int)

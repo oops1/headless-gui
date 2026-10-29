@@ -31,8 +31,12 @@ const (
 	BackgroundWindow
 )
 
-// themeBackground — цвет роли в теме; false — роль тему не читает.
-func themeBackground(role BackgroundRole, t *Theme) (color.RGBA, bool) {
+// ThemeBackground — цвет роли в теме; false — роль тему не читает.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ThemeBackground(role BackgroundRole, t *Theme) (color.RGBA, bool) {
 	switch role {
 	case BackgroundPanel:
 		return t.PanelBG, true
@@ -42,11 +46,15 @@ func themeBackground(role BackgroundRole, t *Theme) (color.RGBA, bool) {
 	return color.RGBA{}, false
 }
 
-// currentThemeBackground — цвет роли в ТЕКУЩЕЙ теме: нужен, чтобы роль,
+// CurrentThemeBackground — цвет роли в ТЕКУЩЕЙ теме: нужен, чтобы роль,
 // назначенная после применения темы, не ждала следующей смены.
-func currentThemeBackground(role BackgroundRole) (color.RGBA, bool) {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func CurrentThemeBackground(role BackgroundRole) (color.RGBA, bool) {
 	t := CurrentTheme()
-	return themeBackground(role, t)
+	return ThemeBackground(role, t)
 }
 
 // ParseBackgroundRole разбирает значение атрибута Background="{Theme PanelBG}".
@@ -85,7 +93,7 @@ func ParseBackgroundRole(s string) (BackgroundRole, bool) {
 // В разметке — Background="{Theme PanelBG}" или "{Theme WindowBG}".
 func (sp *StackPanel) SetBackgroundRole(r BackgroundRole) {
 	sp.BackgroundRole = r
-	if c, ok := currentThemeBackground(r); ok {
+	if c, ok := CurrentThemeBackground(r); ok {
 		sp.Background = c
 		sp.UseAlpha = c.A < 255
 	}
@@ -93,14 +101,3 @@ func (sp *StackPanel) SetBackgroundRole(r BackgroundRole) {
 }
 
 // ─── DockPanel ──────────────────────────────────────────────────────────────
-
-// SetBackgroundRole задаёт, откуда панель берёт фон, и сразу применяет цвет
-// из текущей темы. В разметке — Background="{Theme WindowBG}".
-func (dp *DockPanel) SetBackgroundRole(r BackgroundRole) {
-	dp.BackgroundRole = r
-	if c, ok := currentThemeBackground(r); ok {
-		dp.Background = c
-		dp.UseAlpha = c.A < 255
-	}
-	dp.Invalidate()
-}

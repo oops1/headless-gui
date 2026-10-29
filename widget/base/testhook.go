@@ -62,6 +62,7 @@ func init() {
 			stringsMu.Unlock()
 		}
 	}
+	testhook.ScreenBounds = getScreenBounds
 	testhook.LanguageListeners = func() int {
 		langMu.RLock()
 		defer langMu.RUnlock()

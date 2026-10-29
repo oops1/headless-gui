@@ -329,9 +329,13 @@ func measureStore(rev uint64, sizePt float64, text string, w int) {
 	bySize[text] = w
 }
 
-// wrapTextPx переносит текст по словам так, чтобы каждая строка была не шире
+// WrapTextPx переносит текст по словам так, чтобы каждая строка была не шире
 // maxW пикселей (шрифт default, sizePt). Явные \n сохраняются.
-func wrapTextPx(text string, maxW int, sizePt float64) []string {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func WrapTextPx(text string, maxW int, sizePt float64) []string {
 	var result []string
 	var line []byte
 	for _, paragraph := range splitLines(text) {

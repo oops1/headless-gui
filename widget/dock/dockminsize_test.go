@@ -1,0 +1,132 @@
+package dock
+
+import (
+	"image"
+	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
+)
+
+// GG-79: свой минимум стороны у панели и событие о смене размера стороны.
+//
+// У DockManager был один MinSideSize на все стороны: поднять его под вкладки
+// панели справа значило запретить и журналу снизу быть ниже того же числа.
+
+type sideEvent struct {
+	side base.DockSide
+	size int
+}
+
+func newMinSizeMgr(t *testing.T) (*DockManager, *DockPane, *DockPane, *[]sideEvent) {
+	t.Helper()
+	m, _ := newDockSizeMgr()
+	commit := newDockSizePane("commit", "Коммит")
+	commit.MinSize = 300
+	journal := newDockSizePane("journal", "Журнал")
+	m.AddPane(commit, base.DockRight)
+	m.AddPane(journal, base.DockBottom)
+	m.SetBounds(image.Rect(0, 0, 1000, 700))
+	var events []sideEvent
+	m.OnSideResized = func(s base.DockSide, size int) { events = append(events, sideEvent{s, size}) }
+	return m, commit, journal, &events
+}
+
+// Минимум панели действует только на её сторону.
+func TestDockMinSize_OnlyOwnSide(t *testing.T) {
+	m, commit, journal, _ := newMinSizeMgr(t)
+	m.SetSideSize(base.DockRight, 100)
+	m.SetSideSize(base.DockBottom, 80)
+	if got := commit.Bounds().Dx(); got != 300 {
+		t.Fatalf("ширина стороны с MinSize=300 — %d", got)
+	}
+	if got := journal.Bounds().Dy(); got != 80 {
+		t.Fatalf("высота нижней стороны %d, ждал 80 — минимум чужой панели её не касается", got)
+	}
+}
+
+// Разделитель упирается в минимум, событие приходит одно — по отпусканию.
+func TestDockMinSize_GutterStopsAndReports(t *testing.T) {
+	m, commit, _, events := newMinSizeMgr(t)
+	m.SetSideSize(base.DockRight, 400)
+	g := m.gutters[int(base.DockRight)]
+	gx, gy := g.Min.X+g.Dx()/2, g.Min.Y+g.Dy()/2
+
+	m.OnMouseButton(base.MouseEvent{X: gx, Y: gy, Button: base.MouseLeft, Pressed: true})
+	m.OnMouseMove(gx+50, gy)
+	m.OnMouseMove(gx+300, gy) // тянем далеко вправо — сузить до 100 с лишним
+	if len(*events) != 0 {
+		t.Fatalf("событие во время перетаскивания: %v", *events)
+	}
+	m.OnMouseButton(base.MouseEvent{X: gx + 300, Y: gy, Button: base.MouseLeft, Pressed: false})
+
+	if got := commit.Bounds().Dx(); got != 300 {
+		t.Fatalf("разделитель не упёрся в минимум: ширина %d", got)
+	}
+	if len(*events) != 1 || (*events)[0] != (sideEvent{base.DockRight, 300}) {
+		t.Fatalf("события после перетаскивания: %v, ждал одно {Right 300}", *events)
+	}
+
+	// Нажали и отпустили, не сдвинув, — события нет.
+	g = m.gutters[int(base.DockRight)]
+	gx = g.Min.X + g.Dx()/2
+	m.OnMouseButton(base.MouseEvent{X: gx, Y: gy, Button: base.MouseLeft, Pressed: true})
+	m.OnMouseButton(base.MouseEvent{X: gx, Y: gy, Button: base.MouseLeft, Pressed: false})
+	if len(*events) != 1 {
+		t.Fatalf("событие без изменения размера: %v", *events)
+	}
+}
+
+// В тесном окне минимум панели уступает документной области.
+func TestDockMinSize_YieldsInTightManager(t *testing.T) {
+	m, _ := newDockSizeMgr()
+	p := newDockSizePane("commit", "Коммит")
+	p.MinSize = 300
+	m.AddPane(p, base.DockLeft)
+	m.SetBounds(image.Rect(0, 0, 250, 300))
+	if got, want := p.Bounds().Dx(), 250-dockGutterSize-dockCenterMin; got != want {
+		t.Fatalf("ширина в тесном окне %d, ждал %d", got, want)
+	}
+}
+
+// RestoreLayout поднимает сохранённый размер до минимума и сообщает размеры
+// занятых сторон.
+func TestDockMinSize_RestoreLayout(t *testing.T) {
+	m, _, _, events := newMinSizeMgr(t)
+	m.MinSideSize = 60
+	commit := m.FindPane("commit")
+	commit.MinSize = 0
+	m.SetSideSize(base.DockRight, 120)
+	saved := m.SaveLayout()
+
+	commit.SetMinSize(300)
+	*events = nil
+	if err := m.RestoreLayout(saved); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.SideSize(base.DockRight); got != 300 {
+		t.Fatalf("SideSize(Right) после восстановления %d, ждал 300", got)
+	}
+	want := map[base.DockSide]bool{base.DockRight: true, base.DockBottom: true}
+	if len(*events) != 2 {
+		t.Fatalf("события после RestoreLayout: %v, ждал по занятым сторонам", *events)
+	}
+	for _, e := range *events {
+		if !want[e.side] {
+			t.Fatalf("событие для незанятой стороны: %v", e)
+		}
+	}
+}
+
+// SetMinSize перекладывает менеджер сразу.
+func TestDockMinSize_SetMinSizeRelayouts(t *testing.T) {
+	m, commit, _, _ := newMinSizeMgr(t)
+	commit.SetMinSize(0)
+	m.SetSideSize(base.DockRight, 120)
+	if got := commit.Bounds().Dx(); got != 120 {
+		t.Fatalf("без минимума ширина %d, ждал 120", got)
+	}
+	commit.SetMinSize(320)
+	if got := commit.Bounds().Dx(); got != 320 {
+		t.Fatalf("после SetMinSize(320) ширина %d", got)
+	}
+}

@@ -57,11 +57,11 @@ func (wp *WrapPanel) measure(child Widget, prev map[Widget]image.Point) (int, in
 	p := prev[child]
 	var auto image.Point
 	if cw <= 0 || p.X == cw {
-		cw = desiredWidth(child)
+		cw = DesiredWidth(child)
 		auto.X = cw
 	}
 	if ch <= 0 || p.Y == ch {
-		ch = desiredHeight(child)
+		ch = DesiredHeight(child)
 		auto.Y = ch
 	}
 	if auto != (image.Point{}) {

@@ -39,7 +39,7 @@ func (b *Base) InsertChildAt(i int, w Widget) {
 	b.children = append(b.children, nil)
 	copy(b.children[i+1:], b.children[i:])
 	b.children[i] = w
-	adoptChild(b, w)
+	AdoptChild(b, w)
 	b.markChildAdded(w)
 	bumpTreeGen()
 	b.notifyOwnedRect(screenRect(b, SubtreeRect(w)))

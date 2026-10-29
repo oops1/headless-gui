@@ -4,7 +4,7 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v3/widget/dock"
 	"github.com/oops1/headless-gui/v3/widget/xaml"
 )
 
@@ -20,14 +20,14 @@ func TestDockMinSize_XAML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, ok := reg["commit"].(*base.DockPane)
+	p, ok := reg["commit"].(*dock.DockPane)
 	if !ok {
 		t.Fatalf("commit — %T", reg["commit"])
 	}
 	if p.MinSize != 300 {
 		t.Fatalf("MinSize из разметки %d", p.MinSize)
 	}
-	dm := reg["dm"].(*base.DockManager)
+	dm := reg["dm"].(*dock.DockManager)
 	dm.SetBounds(image.Rect(0, 0, 1000, 700))
 	if got := p.Bounds().Dx(); got != 300 {
 		t.Fatalf("ширина стороны из разметки %d, ждал 300", got)

@@ -221,7 +221,7 @@ func (sp *StackPanel) Draw(ctx DrawContext) {
 // Без роли фон не трогается: у контейнера раскладки он обычно свой, и смена
 // темы молча стирала бы его (см. bgrole.go).
 func (sp *StackPanel) ApplyTheme(t *Theme) {
-	if c, ok := themeBackground(sp.BackgroundRole, t); ok {
+	if c, ok := ThemeBackground(sp.BackgroundRole, t); ok {
 		sp.Background = c
 		sp.UseAlpha = c.A < 255
 	}

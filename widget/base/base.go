@@ -136,7 +136,7 @@ type Base struct {
 	TabIndexValue int
 
 	// XAMLWidth / XAMLHeight — явно заданные Width/Height из XAML.
-	// Используются applyAlignmentRect когда bounds ещё не установлены контейнером.
+	// Используются ApplyAlignmentRect когда bounds ещё не установлены контейнером.
 	XAMLWidth  int
 	XAMLHeight int
 
@@ -175,7 +175,7 @@ func (b *Base) Children() []Widget { return b.children }
 // AddChild добавляет дочерний виджет и инвалидирует его область.
 func (b *Base) AddChild(w Widget) {
 	b.children = append(b.children, w)
-	adoptChild(b, w)
+	AdoptChild(b, w)
 	b.markChildAdded(w)
 	// Область ребёнка задана в координатах ДЕТЕЙ этого контейнера: если он сам
 	// сдвигает содержимое, сдвиг входит и в этот перевод (поэтому от b, а не от
@@ -238,7 +238,7 @@ func (b *Base) RemoveChild(w Widget) bool {
 	for i, child := range b.children {
 		if child == w {
 			b.children = append(b.children[:i], b.children[i+1:]...)
-			releaseChild(b, w)
+			ReleaseChild(b, w)
 			b.drawDirty.Store(true)
 			b.markUp()
 			b.notifyOwnedRect(screenRect(b, w.Bounds()))
@@ -251,7 +251,7 @@ func (b *Base) RemoveChild(w Widget) bool {
 // ClearChildren удаляет всех потомков (используется при перестроении ItemsControl).
 func (b *Base) ClearChildren() {
 	for _, child := range b.children {
-		releaseChild(b, child)
+		ReleaseChild(b, child)
 	}
 	b.children = nil
 	b.Invalidate()
@@ -364,11 +364,15 @@ func (b *Base) SetCursor(c Cursor) { b.cursorOverride, b.hasCursorOverride = c, 
 // CursorOverride возвращает принудительный курсор и признак, что он задан.
 func (b *Base) CursorOverride() (Cursor, bool) { return b.cursorOverride, b.hasCursorOverride }
 
-// applyAlignmentRect корректирует прямоугольник r на основе
+// ApplyAlignmentRect корректирует прямоугольник r на основе
 // HorizontalAlignment / VerticalAlignment виджета и его текущего размера.
 // Если alignment = Stretch — возвращает r без изменений.
 // Если alignment = Left/Center/Right — использует текущий Dx() виджета как ширину.
-func applyAlignmentRect(w Widget, r image.Rectangle) image.Rectangle {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ApplyAlignmentRect(w Widget, r image.Rectangle) image.Rectangle {
 	type alignGetter interface {
 		GetHAlign() HorizontalAlignment
 		GetVAlign() VerticalAlignment
@@ -382,7 +386,7 @@ func applyAlignmentRect(w Widget, r image.Rectangle) image.Rectangle {
 	va := ag.GetVAlign()
 
 	// Текущий размер виджета: сначала пробуем XAMLWidth/XAMLHeight,
-	// затем текущие bounds, затем desiredWidth/desiredHeight.
+	// затем текущие bounds, затем DesiredWidth/DesiredHeight.
 	type xamlSizeGetter interface {
 		GetXAMLSize() (int, int)
 	}
@@ -442,15 +446,19 @@ func applyAlignmentRect(w Widget, r image.Rectangle) image.Rectangle {
 
 // DefaultSizer — размер виджета по умолчанию для авторазмера в Grid,
 // DockPanel и WrapPanel, когда разметка его не задала: виджет вне ядра
-// отвечает сам, вместо ветки по типу в desiredWidth и desiredHeight.
+// отвечает сам, вместо ветки по типу в DesiredWidth и DesiredHeight.
 type DefaultSizer interface {
 	DefaultSize() (w, h int)
 }
 
-// desiredHeight возвращает желаемую высоту виджета для Auto-измерения в Grid/DockPanel.
+// DesiredHeight возвращает желаемую высоту виджета для Auto-измерения в Grid/DockPanel.
 // Для Label — высота текста + padding. Для контейнеров — максимум из детей.
 // Если не можем определить — возвращаем дефолт 26px.
-func desiredHeight(w Widget) int {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func DesiredHeight(w Widget) int {
 	// Если явно задан Height в XAML — используем его.
 	type xamlSizeGetter interface {
 		GetXAMLSize() (int, int)
@@ -488,7 +496,7 @@ func desiredHeight(w Widget) int {
 			for _, ch := range children {
 				h := ch.Bounds().Dy()
 				if h <= 0 {
-					h = desiredHeight(ch)
+					h = DesiredHeight(ch)
 				}
 				if mg, ok := ch.(marginGetter); ok {
 					m := mg.GetMargin()
@@ -514,7 +522,7 @@ func desiredHeight(w Widget) int {
 			for _, ch := range children {
 				h := ch.Bounds().Dy()
 				if h <= 0 {
-					h = desiredHeight(ch)
+					h = DesiredHeight(ch)
 				}
 				// Учитываем margin дочернего элемента.
 				if mg, ok := ch.(marginGetter); ok {
@@ -533,9 +541,13 @@ func desiredHeight(w Widget) int {
 	}
 }
 
-// desiredWidth возвращает желаемую ширину виджета для Auto-измерения.
+// DesiredWidth возвращает желаемую ширину виджета для Auto-измерения.
 // Для Label/TextBlock — ширина текста (приблизительно), для остальных — дефолт.
-func desiredWidth(w Widget) int {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func DesiredWidth(w Widget) int {
 	// Если явно задан Width в XAML — используем его.
 	type xamlSizeGetter interface {
 		GetXAMLSize() (int, int)
@@ -558,10 +570,10 @@ func desiredWidth(w Widget) int {
 		// 80: кнопка растёт под длинную подпись, а раскладки, где короткой
 		// кнопке 80 хватало, не меняются. Кнопку уже задают Width в разметке или
 		// ToolBar, который меряет кнопки впритык той же функцией.
-		return max(80, buttonContentWidth(v, desiredHeight(v)))
+		return max(80, buttonContentWidth(v, DesiredHeight(v)))
 	case *MenuButton:
 		// Та же ширина по содержимому плюс зона стрелки (GG-78).
-		return max(80, buttonContentWidth(v.Button, desiredHeight(v))+menuButtonArrowW)
+		return max(80, buttonContentWidth(v.Button, DesiredHeight(v))+menuButtonArrowW)
 	case *CheckBox:
 		// Как кнопка: по содержимому, не уже прежних 80 (GG-69 — пара к GG-66).
 		return max(80, checkBoxContentWidth(v))
@@ -676,3 +688,27 @@ func (b *Base) drawDisabledOverlay(ctx DrawContext) {
 func (b *Base) DrawDisabledOverlay(ctx DrawContext) {
 	b.drawDisabledOverlay(ctx)
 }
+
+// ClearChildren убирает всех детей контейнера b без уведомлений (содержимое
+// заменяется целиком следом).
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ClearChildren(b *Base) { b.children = nil }
+
+// SetHiddenQuiet прячет или показывает виджет b без Invalidate: подстройка
+// состояния, а не решение о перерисовке (его принимает вызывающий).
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func SetHiddenQuiet(b *Base, hidden bool) { b.hidden = hidden }
+
+// SetBoundsQuiet задаёт границы ещё не показанного виджета b без уведомлений
+// (конструктор: виджет ни в каком дереве, повреждать нечего).
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func SetBoundsQuiet(b *Base, r image.Rectangle) { b.bounds = r }

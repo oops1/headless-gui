@@ -69,3 +69,26 @@ func ClampInt(v, lo, hi int) int {
 	}
 	return v
 }
+
+// EllipsizeText обрезает строку многоточием так, чтобы она умещалась
+// в maxW пикселей (шрифт default, sizePt).
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func EllipsizeText(ctx DrawContext, s string, maxW int, sizePt float64) string {
+	if maxW <= 0 || ctx.MeasureText(s, sizePt) <= maxW {
+		return s
+	}
+	r := []rune(s)
+	lo, hi := 0, len(r) // максимальный префикс, влезающий с «…»
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if ctx.MeasureText(string(r[:mid])+"…", sizePt) <= maxW {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return string(r[:lo]) + "…"
+}

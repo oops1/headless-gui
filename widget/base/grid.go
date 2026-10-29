@@ -132,7 +132,7 @@ func (g *Grid) layout() {
 		}
 
 		cellRect := image.Rect(x0, y0, x1, y1)
-		child.SetBounds(applyAlignmentRect(child, cellRect))
+		child.SetBounds(ApplyAlignmentRect(child, cellRect))
 	}
 }
 
@@ -318,19 +318,19 @@ func (g *Grid) measureAutoSizes() {
 			m = mg.GetMargin()
 		}
 
-		// Auto строка: используем desiredHeight (учитывает XAML Height, содержимое
+		// Auto строка: используем DesiredHeight (учитывает XAML Height, содержимое
 		// и margin дочерних элементов). Добавляем margin самого ребёнка в Grid.
 		if row < len(g.RowDefs) && g.RowDefs[row].Mode == GridSizeAuto {
-			dh := desiredHeight(child)
+			dh := DesiredHeight(child)
 			h := dh + m.Top + m.Bottom
 			if h > g.RowDefs[row].Min {
 				g.RowDefs[row].Min = h
 			}
 		}
 
-		// Auto столбец: аналогично desiredWidth + margin.
+		// Auto столбец: аналогично DesiredWidth + margin.
 		if col < len(g.ColDefs) && g.ColDefs[col].Mode == GridSizeAuto {
-			w := desiredWidth(child) + m.Left + m.Right
+			w := DesiredWidth(child) + m.Left + m.Right
 			if w > g.ColDefs[col].Min {
 				g.ColDefs[col].Min = w
 			}

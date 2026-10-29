@@ -30,22 +30,3 @@ func TestToolBar_ChildrenStayInside_AfterCanvasMove(t *testing.T) {
 		}
 	}
 }
-
-func TestDockPane_ContentStaysInside_AfterCanvasMove(t *testing.T) {
-	useTestMeasurer(t)
-
-	c := NewCanvas()
-	pane := NewDockPane("pane1", "Панель", NewButton("Внутри"))
-	c.AddChildAt(pane, CanvasAttached{Left: 10, Top: 10, Right: -1, Bottom: -1}, 300, 200)
-	c.SetBounds(image.Rect(0, 0, 500, 400))
-	c.SetBounds(image.Rect(200, 100, 700, 500))
-
-	content := pane.Content()
-	if content == nil {
-		t.Fatal("у панели нет содержимого")
-	}
-	if !content.Bounds().In(pane.Bounds()) {
-		t.Errorf("содержимое %v вылезло за границы панели %v",
-			content.Bounds(), pane.Bounds())
-	}
-}

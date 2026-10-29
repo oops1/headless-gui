@@ -175,7 +175,7 @@ widget (фасад)   → все выше                  алиасы, обё�
 | core → chrome, text, dock | `accessibility.go` выбирает роль и значение по конкретному типу (`Window`, `TextBox`, `TextInput`, `DockPanel`) | интерфейс-возможность `AccessDescriber` в `base` (роль, имя, значение, состояния); виджеты подпакетов реализуют его, как уже делают `dialog_access.go`, `menubar_access.go`, `popupmenu_access.go` | `base` + подпакеты |
 | core → text | `base.go` подбирает размер по умолчанию по типу (`case *TextInput`) | интерфейс `DefaultSizer` (`DefaultSize() (w, h int)`) в `base`, `TextInput` его реализует; не `DesiredSize`: `DesiredOf` ставит его выше размера из разметки, и поле с `Width` в XAML сжалось бы до 120 (с 8.3) | `base`, `text` |
 | core → text | `loader.go` (JSON-загрузчик) строит `TextInput` | загрузчик — верхний уровень, остаётся в фасаде | `widget` |
-| core → dock | `bgrole.go` объявляет метод `DockPanel.SetBackgroundRole` | метод уезжает с типом; `BackgroundRole` и `themeBackground` остаются | `dock` |
+| core → dock | `bgrole.go` объявляет метод `DockPanel.SetBackgroundRole` | метод уезжает с типом; `BackgroundRole` и `ThemeBackground` (служебная с 8.6) остаются | `dock` |
 | chrome → dock | `window_tabs.go` смотрит `Background` у `Panel`, `Canvas`, `Grid`, `DockPanel` по типу | интерфейс `BackgroundColorer` (`BackgroundColor() (color.RGBA, bool)`; имя не совпадает с полем `Background`) в `base`; четыре типа реализуют | `base`, `dock` |
 | dock → chrome | `winEdge`, его стороны и `winResizeBorder` нужны и окну, и панели дока | экспортированный тип `ResizeEdge` с константами и `ResizeBorder` в `base` | `base/resizeedge.go` |
 | chrome ⇄ dialog | `titlebar.go` и `dialog_chrome.go` держат методы обоих типов; `titleNavBtn` общий | файлы делятся по типу приёмника: методы `Dialog` — в `dialog`, методы `Window` — в `chrome`; `titleNavBtn` — экспортированный `chrome.TitleNavButton`; `dlgPad` остаётся в `dialog` | `chrome`, `dialog` |
@@ -203,11 +203,10 @@ widget (фасад)   → все выше                  алиасы, обё�
 приложения, встраивающий такой контейнер, теперь проходит ветки по
 интерфейсу (фон корешка вкладки окна, «свой SetBounds»).
 
-Переходное (8.3–8.6): диалоги ядра (ввод строки, имя файла) строят своё
-поле через `base.SetTextInputFactory`, которую задаёт `widget/text` при
-загрузке. Это единственное `init`-связывание этапа; оно уходит на 8.6, когда
-`dialog` импортирует `text` напрямую. Тесты ядра ставят свою заглушку
-поля.
+Переходное (8.3–8.6, снято на 8.6): диалоги ядра строили своё поле через
+`base.SetTextInputFactory`, которую задавал `widget/text` при загрузке; с
+8.6 `dialog` импортирует `text` напрямую, фабрика и заглушка поля в тестах
+ядра удалены.
 
 ### 4. Реестр XAML и регистрация
 
@@ -243,7 +242,7 @@ error)`. Логика контейнера живёт в строителе, в 
 | 8.3 | `widget/text`: `TextBox`, `TextInput`, `ime.go`; `accesstext` методы с типами; `DefaultSizer` вместо ветки по типу; помощники в `base/textutil.go`; реестр §4 (`xaml.Registry`, `Element`, `Loader`, `Builder`) — первый строитель вне `xaml`; `text.RegisterXAML`; `LoadUIFromXAML*` в фасаде с регистрацией по первому вызову (генератор: `Config.Prelude`); JSON-загрузчик — в фасаде | то же; `depmap`: `core → text` и `xaml → text` исчезли |
 | 8.4 | `widget/richtext` (после `text`); `richtext.RegisterXAML`; метод `RichText.OwnsMarkupChildren` — загрузчик не строит детей-абзацев у любого `RichText` (и из пользовательского тега), вместо ветки по типу в загрузчике | `core → richtext`, `xaml → richtext` исчезли |
 | 8.5 | `widget/chrome`: `Window`; `ResizeEdge`, `WindowTitleStyle`, цветовые помощники в `base`; `TitleNavButton` — в `base` (общая с диалогом до 8.6); методы `Window` из `navhost.go`, `dialog_chrome.go`, `titlebar.go` — по файлам типа (вместо `NavTitleHost`: каждый тип держит свои методы, `NavHost` не нужен); `BackgroundColorer`, `ChildLayouter`, `AccessDescriber` у `Window`; `InputBindingList` у `Window` и `Canvas`; строитель-контейнер `xaml.Registry.RegisterComplete` и `Loader` (`Offset`, `BuildChild`, `BuildPopupMenu`, `SetName`); `chrome.RegisterXAML`; тесты `xaml` с корнем `<Window>` — во внешнем пакете `xaml_test` (`export_test.go`) | `core → chrome`, `xaml → chrome`, `chrome → dialog`, `chrome → dock` исчезли (и `dock → chrome`) |
-| 8.6 | `widget/dialog` (после `chrome`, `text`) и `widget/dock`; `ChildLayouter`, `AccessDescriber`; `dialog.RegisterXAML`, `dock.RegisterXAML`; убрать `base.SetTextInputFactory` (диалог → `text` напрямую) | оставшиеся обратные рёбра исчезли; база `depmap` пуста |
+| 8.6 | `widget/dialog` (→ `text` напрямую; фабрика `base.SetTextInputFactory` и заглушка поля в тестах ядра сняты) и `widget/dock` (с `Border` — он устроен через `DockPanel`); методы `Dialog` из `navhost.go` — в `dialog`; `EllipsizeText` и `SetWidgetVisible` — в `base`; `ChildLayouter` у `Dialog`, `DockPanel`, `DockManager`, `DockPane`; `AccessDescriber` у `DockPanel`; `Dialog.SetShowLocaleIndicator`; `dock.RegisterXAML` (строители-контейнеры); XAML-тегов у диалога нет — `dialog.RegisterXAML` не нужна | оставшиеся обратные рёбра исчезли; база `depmap` пуста |
 | 8.7 | `platform/clipboard`; `ClipboardProvider` в `base`; импорт из `window` и фасада | буфер обмена в showcase и tests без правок |
 | 8.8 | не отдельная задача: фасад генерируется на каждом шаге; остаётся проверка `go vet` и `Deprecated`-пометок нет — старые имена не устаревают, они фасад | |
 

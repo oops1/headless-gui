@@ -101,7 +101,7 @@ func (ts *ToggleSwitch) IsOn() bool {
 // которым тик анимации трогает состояние виджета (без доступа к приватным
 // полям напрямую), как и требует контракт AnimateOwned/tick.
 func (ts *ToggleSwitch) setKnobPos(v float64) {
-	nv := uint32(math.Round(max01(v) * float64(math.MaxUint32)))
+	nv := uint32(math.Round(Max01(v) * float64(math.MaxUint32)))
 	if ts.knobPos.Swap(nv) != nv {
 		ts.Invalidate()
 	}
@@ -201,7 +201,7 @@ func (ts *ToggleSwitch) Draw(ctx DrawContext) {
 		cx = onOff
 	}
 	cy := capY + toggleH/2
-	drawFilledCircle(ctx, cx, cy, toggleThumbR, ts.ThumbColor)
+	DrawFilledCircle(ctx, cx, cy, toggleThumbR, ts.ThumbColor)
 
 	// Текст
 	if ts.Text != "" {

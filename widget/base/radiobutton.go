@@ -148,11 +148,11 @@ func (rb *RadioButton) Draw(ctx DrawContext) {
 		// Классика Win2000: утопленный белый круг (как чекбокс) — двойное
 		// направленное кольцо: тёмные дуги сверху-слева, светлые снизу-справа,
 		// чёрная точка выбора.
-		drawFilledCircle(ctx, cx, cy, diam/2-1, rb.CircleBG)
+		DrawFilledCircle(ctx, cx, cy, diam/2-1, rb.CircleBG)
 		drawSunkenRing(ctx, cx, cy, diam/2, st.BevelShadow, st.BevelLight)
 		drawSunkenRing(ctx, cx, cy, diam/2-1, st.BevelDark, win10.WindowBG)
 		if rb.IsSelected() {
-			drawFilledCircle(ctx, cx, cy, 3, win10.CheckMark) // классика: тёмная точка
+			DrawFilledCircle(ctx, cx, cy, 3, win10.CheckMark) // классика: тёмная точка
 		}
 	} else {
 		// Фон кружка
@@ -164,12 +164,12 @@ func (rb *RadioButton) Draw(ctx DrawContext) {
 		}
 
 		// Рисуем закрашенный круг
-		drawFilledCircle(ctx, cx, cy, diam/2, bg)
+		DrawFilledCircle(ctx, cx, cy, diam/2, bg)
 		drawCircleOutline(ctx, cx, cy, diam/2, rb.CircleBord)
 
 		// Точка выбора (маленький белый кружок внутри)
 		if rb.IsSelected() {
-			drawFilledCircle(ctx, cx, cy, 4, rb.DotColor)
+			DrawFilledCircle(ctx, cx, cy, 4, rb.DotColor)
 		}
 	}
 
@@ -271,8 +271,12 @@ func (rb *RadioButton) RemoveFromGroup() {
 
 // ─── Вспомогательные функции рисования кругов ────────────────────────────────
 
-// drawFilledCircle рисует закрашенный круг (AA при поддержке, иначе Midpoint fill).
-func drawFilledCircle(ctx DrawContext, cx, cy, r int, col color.RGBA) {
+// DrawFilledCircle рисует закрашенный круг (AA при поддержке, иначе Midpoint fill).
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func DrawFilledCircle(ctx DrawContext, cx, cy, r int, col color.RGBA) {
 	if aa, ok := ctx.(AAShapes); ok {
 		aa.FillEllipseAA(cx, cy, r, r, col)
 		return

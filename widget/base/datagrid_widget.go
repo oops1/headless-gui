@@ -107,7 +107,7 @@ func (a *drawContextAdapter) StrokeEllipseAA(cx, cy, rx, ry int, thickness float
 }
 
 func (a *drawContextAdapter) FillPolygonAA(pts []image.Point, col color.RGBA) {
-	fillPolygon(a.ctx, pts, col)
+	FillPolygon(a.ctx, pts, col)
 }
 
 // ─── DataGridWidget ────────────────────────────────────────────────────────

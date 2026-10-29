@@ -363,7 +363,7 @@ func dvArrowButton(ctx DrawContext, cx, cy, r int, col, ring color.RGBA, pointRi
 	}
 	tip, tail := image.Pt(cx+dir*5, cy), image.Pt(cx-dir*5, cy)
 	drawThickLine(ctx, tail.X, tail.Y, tip.X-dir*2, tip.Y, 2, white)
-	fillPolygon(ctx, []image.Point{
+	FillPolygon(ctx, []image.Point{
 		{X: tip.X + dir, Y: tip.Y},
 		{X: tip.X - dir*4, Y: tip.Y - 4},
 		{X: tip.X - dir*4, Y: tip.Y + 4},

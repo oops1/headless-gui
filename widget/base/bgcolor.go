@@ -25,5 +25,4 @@ var (
 	_ BackgroundColorer = (*Panel)(nil)
 	_ BackgroundColorer = (*Canvas)(nil)
 	_ BackgroundColorer = (*Grid)(nil)
-	_ BackgroundColorer = (*DockPanel)(nil)
 )

@@ -1,16 +1,13 @@
 package base
 
-// depmap_test.go — карта зависимостей пакета по будущим подпакетам
-// (ADR-0012, этап 8). XAML с 8.2b, ввод текста с 8.3, RichText с 8.4 и
-// окно с 8.5 — отдельные пакеты widget/xaml, widget/text, widget/richtext,
-// widget/chrome: их рёбра проверяет компилятор (они → base, обратного
-// импорта нет). Группы — по
-// именам файлов; порядок — целевой граф пакетов: всё → base (core);
-// richtext → text; dialog → chrome, text;
-// text, richtext, dialog, dock, chrome → xaml (регистрация строителей);
-// clipboard — провайдер в ядре, реализация в platform. Остальное —
-// обратные рёбра, которые этап разрывает; сегодняшние перечислены в базе:
-// проверка падает, если появится новое, и сообщает, когда базовое исчезло.
+// depmap_test.go — карта зависимостей пакета по группам файлов (ADR-0012,
+// этап 8). XAML (8.2b), ввод текста (8.3), RichText (8.4), окно (8.5), док и
+// диалоги (8.6) — отдельные пакеты widget/xaml, widget/text,
+// widget/richtext, widget/chrome, widget/dock, widget/dialog: их рёбра
+// проверяет компилятор (они → base, обратного импорта нет). В ядре осталась
+// одна группа — буфер обмена (провайдер в ядре, реализации по ОС уезжают в
+// platform/clipboard на 8.7): ядро может им пользоваться, а он ядром, других
+// рёбер нет. База нарушений пуста: проверка падает на любом новом.
 
 import (
 	"regexp"
@@ -22,31 +19,15 @@ import (
 // Глобальное состояние пакета тест не трогает: только чтение исходников.
 func TestDepMap_SubpackageOrder(t *testing.T) {
 	re := regexp.MustCompile
-	allowed := map[string]map[string]bool{
-		"dialog": {"chrome": true, "text": true, "xaml": true},
-		"dock":   {"xaml": true},
-	}
 	depmap.Run(t, depmap.Config{
 		Dir:  ".",
 		Path: "widget/base",
 		Groups: []depmap.Group{
-			{Name: "dialog", Match: re(`^dialog|^messagebox`)},
-			{Name: "dock", Match: re(`^dock`)},
 			{Name: "clipboard", Match: re(`^clipboard`)},
 		},
 		Default: "core",
 		Allowed: func(from, to string) bool {
-			if to == "core" || to == "clipboard" {
-				return true
-			}
-			return allowed[from][to]
-		},
-		// Сегодняшние обратные рёбра (см. ADR-0012, таблица разрыва). Каждый
-		// шаг этапа 8 убирает свои строки.
-		Baseline: []string{
-			"core → dialog",
-			"core → dock",
-			"dock → dialog",
+			return to == "core" || to == "clipboard"
 		},
 		Top: 6,
 	})

@@ -9,66 +9,12 @@
 // заголовка, а подпись движок докладывает поверх — так цвет панели доходит до
 // края окна, а заголовок остаётся на месте, как в вертикальных вкладках
 // браузера.
+//
+// Здесь — общие помощники; методы панели у окна (widget/chrome) и диалога
+// (widget/dialog) живут с их типами.
 package base
 
 import "image"
-
-// ─── Диалог ─────────────────────────────────────────────────────────────────
-
-// SetNavPanel назначает боковую панель навигации.
-//
-// Панель занимает левую колонку ВО ВСЮ ВЫСОТУ диалога, включая полосу
-// заголовка, а область содержимого (ContentBounds) отступает вправо от неё.
-// Ширину панель называет сама (DesiredSize), поэтому свёрнутая полоска с
-// иконками отдаёт освободившееся место содержимому без единой строки в
-// приложении.
-//
-//	nav := widget.NewNavPanel()
-//	nav.AddItem(iconGeneral, "Общие")
-//	dlg.SetNavPanel(nav)
-//	dlg.SetNavButton(true) // «≡» в полосе сворачивает эту же панель
-//
-// Панель — не обязательно NavPanel: годится любой виджет. Ширину у него
-// спрашивают через DesiredSize, а сворачивание — через SetCollapsed(bool),
-// если он это умеет.
-func (d *Dialog) SetNavPanel(w Widget) {
-	if d.navPanel == w {
-		return
-	}
-	if d.navPanel != nil {
-		d.RemoveChild(d.navPanel)
-	}
-	d.navPanel = w
-	if w != nil {
-		d.AddChild(w)
-		// Панель рисуется ПЕРВОЙ: поверх неё идут и подпись заголовка, и «≡»,
-		// и виджет приложения в полосе. Добавленная последней, она закрыла бы
-		// их собой.
-		MoveChildToBack(&d.Base, w)
-		if np, ok := w.(*NavPanel); ok {
-			np.setOnLayout(func() {
-				d.SetBounds(d.bounds)
-				d.Invalidate()
-			})
-		}
-	}
-	d.SetBounds(d.bounds)
-	d.Invalidate()
-}
-
-// NavPanel возвращает боковую панель навигации (nil — не задана).
-func (d *Dialog) NavPanel() Widget { return d.navPanel }
-
-// NavPanelBounds — колонка боковой панели: от верхнего края диалога до
-// нижнего.
-func (d *Dialog) NavPanelBounds() image.Rectangle {
-	if d.navPanel == nil {
-		return image.Rectangle{}
-	}
-	b := d.bounds
-	w := NavWidthOf(d.navPanel, b.Dx())
-	return image.Rect(b.Min.X, b.Min.Y, b.Min.X+w, b.Max.Y)
-}
 
 // NavWidthOf — ширина боковой панели, ограниченная половиной окна: панель,
 // занявшая всё окно, оставила бы содержимое без места и без объяснений.
@@ -85,18 +31,6 @@ func NavWidthOf(w Widget, hostW int) int {
 		pw = max
 	}
 	return pw
-}
-
-// layoutNavPanel ставит панель в её колонку и сообщает ей, сколько сверху
-// занято подписью заголовка.
-func (d *Dialog) layoutNavPanel() {
-	if d.navPanel == nil {
-		return
-	}
-	if ti, ok := d.navPanel.(interface{ SetTopInset(int) }); ok {
-		ti.SetTopInset(d.titleH())
-	}
-	d.navPanel.SetBounds(d.NavPanelBounds())
 }
 
 // MoveChildToBack переставляет ребёнка в начало списка — он рисуется первым,

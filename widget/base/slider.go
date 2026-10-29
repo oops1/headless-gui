@@ -160,13 +160,13 @@ func (s *Slider) Draw(ctx DrawContext) {
 		if s.hovered || s.dragging {
 			thumbCol = s.ThumbHover
 		}
-		drawFilledCircle(ctx, cx, cy, s.ThumbRadius, thumbCol)
+		DrawFilledCircle(ctx, cx, cy, s.ThumbRadius, thumbCol)
 		drawCircleOutline(ctx, cx, cy, s.ThumbRadius, s.BorderColor)
 
 		// Меньший белый кружок в центре для красоты
 		innerR := s.ThumbRadius - 3
 		if innerR > 2 {
-			drawFilledCircle(ctx, cx, cy, innerR, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+			DrawFilledCircle(ctx, cx, cy, innerR, color.RGBA{R: 255, G: 255, B: 255, A: 255})
 		}
 	}
 

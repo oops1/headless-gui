@@ -382,20 +382,24 @@ func (c *Canvas) layoutChild(idx int) {
 	// Min согласован с координатами его детей — без сдвига дети навсегда
 	// отставали от контейнера (заголовок «двоился» под титлбаром).
 	if (dx != 0 || dy != 0) && !HasOwnLayout(child) {
-		shiftDescendants(child, dx, dy)
+		ShiftDescendants(child, dx, dy)
 	}
 }
 
-// shiftDescendants рекурсивно сдвигает bounds всех потомков виджета на (dx, dy).
+// ShiftDescendants рекурсивно сдвигает bounds всех потомков виджета на (dx, dy).
 // Для виджетов с собственным layout (Canvas, Grid, DockPanel, TabControl,
 // StackPanel, VirtualizingItemsControl) вызов SetBounds уже перестраивает
 // дочерние позиции, поэтому рекурсия не нужна.
-func shiftDescendants(w Widget, dx, dy int) {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ShiftDescendants(w Widget, dx, dy int) {
 	delta := image.Pt(dx, dy)
 	for _, child := range w.Children() {
 		child.SetBounds(child.Bounds().Add(delta))
 		if !HasOwnLayout(child) {
-			shiftDescendants(child, dx, dy)
+			ShiftDescendants(child, dx, dy)
 		}
 	}
 }
@@ -406,7 +410,7 @@ func shiftDescendants(w Widget, dx, dy int) {
 // VirtualizingItemsControl тоже здесь: его SetBounds вызывает updateVisible,
 // который заново раскладывает материализованные строки от новых bounds. Без
 // регистрации Canvas/TabControl/DockPane догоняли уже переложенные строки
-// вызовом shiftDescendants и задваивали смещение родителя — при первом показе
+// вызовом ShiftDescendants и задваивали смещение родителя — при первом показе
 // вкладки список рисовался сдвинутым, а ближайшая перерисовка окна (скролл)
 // «чинила» его следующим updateVisible.
 func HasOwnLayout(w Widget) bool {
@@ -419,7 +423,7 @@ func HasOwnLayout(w Widget) bool {
 	// переезда контейнера. В витрине это было видно так: панель «только
 	// значки» оставалась пустой коробкой, а её кнопки рисовались поверх
 	// соседнего заголовка — на столько, на сколько вкладка сместилась в окне.
-	case *Canvas, *Grid, *DockPanel, *TabControl, *StackPanel, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *DockManager, *VirtualizingItemsControl, *Panel, *Dialog, *ToolBar, *DockPane:
+	case *Canvas, *Grid, *TabControl, *StackPanel, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *VirtualizingItemsControl, *Panel, *ToolBar:
 		return true
 	case ChildLayouter:
 		// Контейнеры вне ядра (окно — widget/chrome) отвечают сами.

@@ -78,7 +78,7 @@ func TestWrapTextPx_Boundaries(t *testing.T) {
 		{"оченьдлинноесловобезпробелов", 40},
 	}
 	for _, c := range cases {
-		got := wrapTextPx(c.text, c.maxW, DefaultFontSizePt)
+		got := WrapTextPx(c.text, c.maxW, DefaultFontSizePt)
 		want := refWrapTextPx(c.text, c.maxW, DefaultFontSizePt)
 		if len(got) != len(want) {
 			t.Fatalf("%q: строк %d, эталон %d (%q / %q)", c.text, len(got), len(want), got, want)
@@ -124,7 +124,7 @@ func BenchmarkWrapTextPx(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		wrapTextPx(text, 300, DefaultFontSizePt)
+		WrapTextPx(text, 300, DefaultFontSizePt)
 	}
 }
 

@@ -63,19 +63,27 @@ func (b *Base) setContentShifter(src ContentOffsetter) {
 	b.shifter.Store(&contentShifter{src: src})
 }
 
-// adoptChild записывает ребёнку его контейнер. Зовётся из Base.AddChild; тем
+// AdoptChild записывает ребёнку его контейнер. Зовётся из Base.AddChild; тем
 // же должны заниматься контейнеры, которые держат детей мимо Base (TabControl,
 // DockManager), иначе область перерисовки их содержимого внутри прокрутки не
 // будет переведена на экран.
-func adoptChild(parent *Base, child Widget) {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func AdoptChild(parent *Base, child Widget) {
 	if bp, ok := child.(baseProvider); ok {
 		bp.baseRef().parent.Store(parent)
 	}
 }
 
-// releaseChild снимает запись, если ребёнок всё ещё числится за этим
+// ReleaseChild снимает запись, если ребёнок всё ещё числится за этим
 // контейнером (за время удаления его мог усыновить другой).
-func releaseChild(parent *Base, child Widget) {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ReleaseChild(parent *Base, child Widget) {
 	if bp, ok := child.(baseProvider); ok {
 		b := bp.baseRef()
 		b.parent.CompareAndSwap(parent, nil)

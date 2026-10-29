@@ -330,14 +330,6 @@ func buildXAMLWidgetAt(el Element, reg map[string]base.Widget, parentOff image.P
 		"datagridcheckboxcolumn", "datagridcomboboxcolumn":
 		return nil, nil
 
-	// ── DockPanel — контейнер с dock-layout ────────────────────────────────
-	case "dockpanel":
-		return buildXAMLDockPanel(el, reg, parentOff, baseDir, depth)
-
-	// ── DockManager — зона докинга (инструментальные панели VS-стиля) ──────
-	case "dockmanager":
-		return buildXAMLDockManager(el, reg, parentOff, baseDir, depth)
-
 	// ── DockPane вне DockManager — игнорируем (валиден только как child) ───
 	case "dockpane":
 		return nil, nil
@@ -369,10 +361,6 @@ func buildXAMLWidgetAt(el Element, reg map[string]base.Widget, parentOff image.P
 	// ── DataGrid — полноценный табличный виджет ─────────────────────────────
 	case "datagrid":
 		w = buildXAMLDataGrid(el)
-
-	// ── Border — контейнер с фоном и одним потомком ─────────────────────────
-	case "border":
-		return buildXAMLBorder(el, reg, parentOff, baseDir, depth)
 
 	// ── Canvas — контейнер с абсолютным позиционированием (WPF Canvas) ──────
 	case "canvas":
@@ -496,7 +484,7 @@ func buildXAMLWidgetAt(el Element, reg map[string]base.Widget, parentOff image.P
 	default:
 		// Теги пакетов виджетов вне xaml (ввод текста — widget/text,
 		// RichText — widget/richtext, окно — widget/chrome): реестр
-		// Default(), заполненный их RegisterXAML.
+		// Default(), заполненный их RegisterXAML (док и Border — widget/dock).
 		if e, ok := Default().lookup(tag); ok {
 			l := &Loader{baseDir: baseDir, reg: reg, off: parentOff, depth: depth}
 			if e.complete {
@@ -549,7 +537,7 @@ func buildXAMLWidgetAt(el Element, reg map[string]base.Widget, parentOff image.P
 
 	// Attached properties: Grid.*, DockPanel.Dock, Margin, Alignment, IsEnabled,
 	// ToolTip, Visibility, ShowLocaleIndicator.
-	applyCommonProps(w, el)
+	ApplyCommonProps(w, el)
 
 	// Регистрация по имени
 	if id := el.Name(); id != "" {
@@ -1243,7 +1231,7 @@ func buildXAMLSplitPanel(el Element, reg map[string]base.Widget, parentOff image
 
 	absBounds := el.Bounds().Add(parentOff)
 	sp.SetBounds(absBounds)
-	applyCommonProps(sp, el)
+	ApplyCommonProps(sp, el)
 	if id := el.Name(); id != "" {
 		reg[id] = sp
 	}

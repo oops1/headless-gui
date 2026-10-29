@@ -62,7 +62,7 @@ func NewProgressBarColor(fill color.RGBA) *ProgressBar {
 // Остаётся синхронным ради обратной совместимости и тестов — для плавного
 // перехода используйте AnimateValue.
 func (pb *ProgressBar) SetValue(v float64) {
-	v = max01(v)
+	v = Max01(v)
 	nv := uint32(math.Round(v * float64(math.MaxUint32)))
 	if pb.value.Swap(nv) != nv {
 		pb.Invalidate()
@@ -83,7 +83,7 @@ const progressAnimDur = 200 * time.Millisecond
 // повторный вызов до завершения предыдущей анимации останавливает её и
 // продолжает лерп от ТЕКУЩЕГО отображаемого значения — без "дёргания".
 func (pb *ProgressBar) AnimateValue(newValue float64) {
-	newValue = max01(newValue)
+	newValue = Max01(newValue)
 	if currentStyle().Classic3D {
 		pb.SetValue(newValue)
 		return
@@ -254,7 +254,10 @@ func (pb *ProgressBar) ApplyTheme(t *Theme) {
 	pb.BorderColor = t.Border
 }
 
-func max01(v float64) float64 {
+// Max01 — служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func Max01(v float64) float64 {
 	if v < 0 {
 		return 0
 	}

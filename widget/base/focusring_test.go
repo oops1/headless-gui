@@ -101,10 +101,10 @@ func TestButton_FocusRingOnlyInDialogs(t *testing.T) {
 	old := CurrentTheme()
 	t.Cleanup(func() { ApplyGlobalTheme(old) })
 	ApplyGlobalTheme(Win11LightTheme()) // не классика: у неё фокус — пунктир
-	ring := trBtn("dlg.ok", true)
-	if !ring.FocusRing {
-		t.Fatal("кнопка диалога без FocusRing")
-	}
+	// Кнопка как у диалогов (widget/dialog ставит FocusRing своим кнопкам —
+	// TestDialogButtons_UseSharedFocusRing там).
+	ring := NewWin10AccentButton("OK")
+	ring.FocusRing = true
 	plain := NewButton("Обычная")
 	if plain.FocusRing {
 		t.Fatal("обычная кнопка не должна менять вид фокуса")
@@ -150,30 +150,6 @@ func TestFocusRing_RoundTripThroughProfile(t *testing.T) {
 		st := Materialize(themeResolved(t, ProfileFromTheme(ThemeByName(name)))).Style
 		if st.FocusRingWidth != 0 || st.FocusRing.A != 0 {
 			t.Errorf("%s: пресет без объявлений получил рамку фокуса %d/%+v", name, st.FocusRingWidth, st.FocusRing)
-		}
-	}
-}
-
-// Все кнопки диалогов движка рисуют фокус общей рамкой: MessageBox, диалог
-// подтверждения, диалог ввода.
-func TestDialogButtons_UseSharedFocusRing(t *testing.T) {
-	sh := &fakeShower{}
-	mb := NewMessageBox(sh)
-	for name, dlg := range map[string]*Dialog{
-		"MessageBox":    mb.ShowYesNoCancel("Вопрос", "Сохранить?", nil),
-		"Подтверждение": NewConfirmDialog("Подтверждение", "Удалить?", nil),
-	} {
-		n := 0
-		for _, c := range dlg.Children() {
-			if b, ok := c.(*Button); ok {
-				n++
-				if !b.FocusRing {
-					t.Errorf("%s: кнопка %q без общей рамки фокуса", name, b.Text)
-				}
-			}
-		}
-		if n == 0 {
-			t.Errorf("%s: кнопок в диалоге не найдено", name)
 		}
 	}
 }

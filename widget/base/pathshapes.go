@@ -55,7 +55,7 @@ func fillPath(ctx DrawContext, pts []Point2F, col color.RGBA) {
 		ps.FillPathAA(pts, col)
 		return
 	}
-	fillPolygon(ctx, roundPoints(pts), col)
+	FillPolygon(ctx, roundPoints(pts), col)
 }
 
 // roundPoints округляет дробные точки, выбрасывая совпавшие подряд: после

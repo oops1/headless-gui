@@ -139,7 +139,7 @@ func (tb *ToolBar) applyIconsOnly() {
 
 // itemWidth возвращает желаемую ширину элемента панели.
 //
-// Кнопку меряем сами: общий desiredWidth отдаёт для неё круглые 80 пикселей, и
+// Кнопку меряем сами: общий DesiredWidth отдаёт для неё круглые 80 пикселей, и
 // панель из шести кнопок разъезжалась бы вдвое шире нужного, а в режиме иконок
 // — во столько же раз уже.
 func (tb *ToolBar) itemWidth(w Widget, h int) int {
@@ -151,7 +151,7 @@ func (tb *ToolBar) itemWidth(w Widget, h int) int {
 	}
 	btn := toolBarButton(w)
 	if btn == nil {
-		return desiredWidth(w)
+		return DesiredWidth(w)
 	}
 	if xw, _ := xamlSizeOf(btn); xw > 0 {
 		return xw
@@ -175,7 +175,7 @@ func toolBarButton(w Widget) *Button {
 }
 
 // buttonContentWidth — ширина кнопки по содержимому: значок, зазор, подпись и
-// поля. Одна функция на панель инструментов и общий авторазмер (desiredWidth):
+// поля. Одна функция на панель инструментов и общий авторазмер (DesiredWidth):
 // посчитай их по-разному — и одна и та же кнопка в панели и в DockPanel вышла
 // бы разной ширины. h — высота кнопки: от неё зависит значок без IconSize.
 func buttonContentWidth(btn *Button, h int) int {

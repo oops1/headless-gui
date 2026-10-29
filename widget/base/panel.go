@@ -221,7 +221,7 @@ func (p *Panel) drawWinHeader(ctx DrawContext, b image.Rectangle, hh int, bg, tc
 		ctx.FillRect(x, y+hh, w, r, p.Background)
 	} else {
 		// Классика Win2000 — градиент navy→голубой (Theme.TitleBG2).
-		fillTitleBar(ctx, image.Rect(x, y, x+w, y+hh), bg)
+		FillTitleBar(ctx, image.Rect(x, y, x+w, y+hh), bg)
 	}
 
 	// Разделительная линия
@@ -320,7 +320,7 @@ func (p *Panel) SetBounds(r image.Rectangle) {
 	dx := r.Min.X - old.Min.X
 	dy := r.Min.Y - old.Min.Y
 	if dx != 0 || dy != 0 {
-		shiftDescendants(p, dx, dy)
+		ShiftDescendants(p, dx, dy)
 	}
 }
 

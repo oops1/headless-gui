@@ -180,13 +180,17 @@ func DrawBevelSunken(ctx DrawContext, x, y, w, h int, st ThemeStyle) {
 		st.BevelLight, st.BevelShadow, st.BevelDark, true)
 }
 
-// fillTitleBar заливает полосу заголовка: горизонтальный градиент
+// FillTitleBar заливает полосу заголовка: горизонтальный градиент
 // TitleBG→TitleBG2 (классика Win2000: navy→голубой) либо сплошной цвет.
-func fillTitleBar(ctx DrawContext, r image.Rectangle, bg color.RGBA) {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func FillTitleBar(ctx DrawContext, r image.Rectangle, bg color.RGBA) {
 	FillTitleBarColors(ctx, r, bg, win10.TitleBG2)
 }
 
-// FillTitleBarColors — как fillTitleBar, но с явным вторым цветом градиента
+// FillTitleBarColors — как FillTitleBar, но с явным вторым цветом градиента
 // (для неактивного окна: серый градиент Win2000).
 //
 // Служебная: для подпакетов widget, в фасад не входит.

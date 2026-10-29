@@ -146,7 +146,7 @@ func ApplyVisibility(w base.Widget, el Element) {
 // ─── ShowLocaleIndicator ────────────────────────────────────────────────────
 
 // applyLocaleIndicator читает ShowLocaleIndicator из XAML-атрибутов и
-// устанавливает соответствующее поле у Dialog/Panel (у Window — его строитель,
+// устанавливает соответствующее поле у Panel и Dialog (у Window — его строитель,
 // widget/chrome).
 func applyLocaleIndicator(w base.Widget, el Element) {
 	v := el.Attr("ShowLocaleIndicator", "ShowLocale")
@@ -155,10 +155,11 @@ func applyLocaleIndicator(w base.Widget, el Element) {
 	}
 	on := strings.EqualFold(v, "true") || v == "1"
 	switch t := w.(type) {
-	case *base.Dialog:
-		t.ShowLocaleIndicator = on
 	case *base.Panel:
 		t.ShowLocaleIndicator = on
+	case interface{ SetShowLocaleIndicator(bool) }:
+		// Dialog (widget/dialog).
+		t.SetShowLocaleIndicator(on)
 	}
 }
 
@@ -178,11 +179,15 @@ func applyTabIndex(w base.Widget, el Element) {
 
 // ─── Общий набор attached-свойств ──────────────────────────────────────────
 
-// applyCommonProps применяет полный набор общих XAML-свойств к виджету:
+// ApplyCommonProps применяет полный набор общих XAML-свойств к виджету:
 // Grid.*, DockPanel.Dock, Margin, Alignment, IsEnabled, ToolTip, Visibility,
 // ShowLocaleIndicator, Cursor. Используется как контейнерами, так и листовыми
 // виджетами, чтобы поведение было единообразным (см. BUG-1).
-func applyCommonProps(w base.Widget, el Element) {
+//
+// Служебное: для пакетов виджетов (их XAML-строителей), в фасад не входит.
+//
+//facadegen:skip
+func ApplyCommonProps(w base.Widget, el Element) {
 	applyGridAttachedProps(w, el)
 	applyDockAttachedProp(w, el)
 	applyMargin(w, el)

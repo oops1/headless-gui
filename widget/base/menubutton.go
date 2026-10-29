@@ -118,7 +118,7 @@ func (mb *MenuButton) openMenu(at image.Point, byMouse bool) bool {
 	if !byMouse {
 		// Отпускания, которое надо пропустить, не будет; с клавиатуры сразу
 		// подсвечен первый доступный пункт — Enter выбирает его.
-		mb.menu.armed = false
+		mb.menu.Armed = false
 		m.setHoverIdx(m.nextActiveItem(-1))
 	}
 	mb.Invalidate()

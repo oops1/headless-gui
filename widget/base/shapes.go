@@ -116,8 +116,12 @@ func drawEllipseOutline(ctx DrawContext, cx, cy, rx, ry, t int, col color.RGBA) 
 	}
 }
 
-// fillPolygon заливает многоугольник (scanline).
-func fillPolygon(ctx DrawContext, pts []image.Point, col color.RGBA) {
+// FillPolygon заливает многоугольник (scanline).
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func FillPolygon(ctx DrawContext, pts []image.Point, col color.RGBA) {
 	if col.A == 0 || len(pts) < 3 {
 		return
 	}
@@ -301,7 +305,7 @@ func (p *Polygon) Draw(ctx DrawContext) {
 	}
 	pts := shiftedPoints(p.Points, p.bounds)
 	if p.Fill.A > 0 {
-		fillPolygon(ctx, pts, p.Fill)
+		FillPolygon(ctx, pts, p.Fill)
 	}
 	if p.Stroke.A > 0 {
 		th := p.StrokeThickness

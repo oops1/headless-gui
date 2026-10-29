@@ -99,7 +99,7 @@ func (tc *TabControl) AddTab(header string, content Widget) {
 	cm := tc.capMgr
 	tc.tabs = append(tc.tabs, TabItem{Header: header, Content: content})
 	if content != nil {
-		adoptChild(&tc.Base, content) // родитель нужен переводу области перерисовки (см. contentoffset.go)
+		AdoptChild(&tc.Base, content) // родитель нужен переводу области перерисовки (см. contentoffset.go)
 	}
 	tc.mu.Unlock()
 	// Если CaptureManager уже инжектирован — раздаём его новому контенту.
@@ -229,7 +229,7 @@ func (tc *TabControl) RemoveTab(idx int) {
 		tc.mu.Unlock()
 		return
 	}
-	releaseChild(&tc.Base, tc.tabs[idx].Content)
+	ReleaseChild(&tc.Base, tc.tabs[idx].Content)
 	tc.tabs = append(tc.tabs[:idx], tc.tabs[idx+1:]...)
 	if tc.active >= len(tc.tabs) {
 		tc.active = len(tc.tabs) - 1
@@ -247,7 +247,7 @@ func (tc *TabControl) ClearTabs() {
 	tc.mu.Lock()
 	changed := len(tc.tabs) > 0
 	for _, tab := range tc.tabs {
-		releaseChild(&tc.Base, tab.Content)
+		ReleaseChild(&tc.Base, tab.Content)
 	}
 	tc.tabs = nil
 	tc.active = 0
@@ -317,7 +317,7 @@ func (tc *TabControl) layoutContent() {
 		dx := cr.Min.X - old.Min.X
 		dy := cr.Min.Y - old.Min.Y
 		if dx != 0 || dy != 0 {
-			shiftDescendants(c, dx, dy)
+			ShiftDescendants(c, dx, dy)
 		}
 	}
 }

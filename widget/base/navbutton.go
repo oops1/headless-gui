@@ -24,7 +24,7 @@ const (
 	// Её ширина зависит от подписи локали и известна только на отрисовке, а
 	// раскладка начинки идёт в SetBounds — берём заведомо достаточное.
 	LocaleBadgeReserve = 44
-	dlgVPad            = 12 // вертикальный отступ содержимого диалога
+	DlgVPad            = 12 // вертикальный отступ содержимого диалога
 )
 
 // TitleNavButton — кнопка в левой части полосы заголовка, сворачивающая боковую
@@ -127,4 +127,19 @@ func (nb *TitleNavButton) OnMouseButton(e MouseEvent) bool {
 		nb.Toggle()
 	}
 	return true
+}
+
+// SetWidgetVisible прячет виджет, если он это умеет.
+//
+// Начинку полосы даёт приложение, и это произвольный Widget: интерфейс не
+// обязывает уметь SetVisible. Пустых границ мало — виджет, рисующий себя без
+// оглядки на них, оставил бы след поверх заголовка.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func SetWidgetVisible(w Widget, v bool) {
+	if s, ok := w.(interface{ SetVisible(bool) }); ok {
+		s.SetVisible(v)
+	}
 }

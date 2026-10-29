@@ -38,7 +38,7 @@ type RowMenuHost struct {
 	// openedAt — точка, в которой меню открыли, и признак «отпускание этой же
 	// кнопки ещё не пришло». См. routeMouse.
 	openedAt image.Point
-	armed    bool
+	Armed    bool
 }
 
 // Build собирает меню из пунктов и запоминает его. (x, y) — точка, в которой
@@ -55,7 +55,7 @@ func (h *RowMenuHost) Build(host Widget, x, y int, items []MenuItem) *PopupMenu 
 	m.SetItems(items)
 	h.menu = m
 	h.openedAt = image.Pt(x, y)
-	h.armed = true
+	h.Armed = true
 	return m
 }
 
@@ -97,11 +97,11 @@ func (h *RowMenuHost) RouteMouse(e MouseEvent) bool {
 		return false
 	}
 	pt := image.Pt(e.X, e.Y)
-	if h.armed && !e.Pressed && nearPoint(pt, h.openedAt) {
-		h.armed = false
+	if h.Armed && !e.Pressed && nearPoint(pt, h.openedAt) {
+		h.Armed = false
 		return true
 	}
-	h.armed = false
+	h.Armed = false
 	if pt.In(h.menu.Bounds()) {
 		return h.menu.OnMouseButton(e)
 	}

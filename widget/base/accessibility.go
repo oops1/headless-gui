@@ -412,7 +412,7 @@ func accessInfoFor(w Widget) AccessInfo {
 		}
 	case *ImageWidget:
 		info.Role = RoleImage
-	case *Panel, *Canvas, *Grid, *StackPanel, *DockPanel:
+	case *Panel, *Canvas, *Grid, *StackPanel:
 		info.Role = RolePanel
 	}
 	return info
