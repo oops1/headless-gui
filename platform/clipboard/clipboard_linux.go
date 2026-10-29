@@ -1,6 +1,6 @@
 //go:build linux
 
-package base
+package clipboard
 
 // clipboard_linux.go — запасной буфер обмена Linux через xclip/xsel.
 //
@@ -16,6 +16,8 @@ package base
 import (
 	"bytes"
 	"os/exec"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 type linuxClipboard struct {
@@ -31,7 +33,7 @@ func init() {
 	} else if path, err := exec.LookPath("xsel"); err == nil && path != "" {
 		cb.tool = "xsel"
 	}
-	defaultClipboard = cb
+	base.SetClipboardProvider(cb)
 }
 
 func (c *linuxClipboard) GetText() string {

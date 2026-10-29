@@ -1,6 +1,6 @@
 //go:build darwin
 
-package base
+package clipboard
 
 // clipboard_darwin.go — буфер обмена macOS через pbcopy/pbpaste.
 
@@ -8,12 +8,14 @@ import (
 	"bytes"
 	"os/exec"
 	"strings"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 type darwinClipboard struct{}
 
 func init() {
-	defaultClipboard = &darwinClipboard{}
+	base.SetClipboardProvider(&darwinClipboard{})
 }
 
 func (c *darwinClipboard) GetText() string {

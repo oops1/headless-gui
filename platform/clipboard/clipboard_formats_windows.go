@@ -1,9 +1,9 @@
 //go:build windows
 
-package base
+package clipboard
 
 // clipboard_formats_windows.go — какие виды содержимого лежат в буфере
-// обмена Windows (см. clipboard_formats.go).
+// обмена Windows (см. widget/base/clipboard_formats.go).
 //
 // IsClipboardFormatAvailable не открывает буфер и не просит данные у
 // владельца: система хранит список форматов сама. Поэтому ответ мгновенный и
@@ -15,6 +15,8 @@ import (
 	"sync"
 	"syscall"
 	"unsafe"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 var procFmtsAvailable = user32Clip.NewProc("IsClipboardFormatAvailable")
@@ -48,22 +50,22 @@ func fmtsAvailable(format uintptr) bool {
 
 // ClipboardFormats возвращает виды содержимого буфера по списку форматов
 // системы. Реализует widget.ClipboardFormatsProvider.
-func (c *winClipboard) ClipboardFormats() ClipboardFormatSet {
-	var s ClipboardFormatSet
+func (c *winClipboard) ClipboardFormats() base.ClipboardFormatSet {
+	var s base.ClipboardFormatSet
 	if fmtsAvailable(cfUnicodeText) {
-		s |= ClipboardFormatText
+		s |= base.ClipboardFormatText
 	}
 	if fmtsAvailable(htmlFormat()) {
-		s |= ClipboardFormatHTML
+		s |= base.ClipboardFormatHTML
 	}
 	// Картинку система сама показывает несколькими форматами: DIB «выводится»
 	// из DIBV5 и наоборот, так что достаточно проверить любой, но «PNG»
 	// приходит отдельно (Chrome, Telegram).
 	if fmtsAvailable(pngFormat()) || fmtsAvailable(cfDibV5) || fmtsAvailable(cfDib) {
-		s |= ClipboardFormatImage
+		s |= base.ClipboardFormatImage
 	}
 	if fmtsAvailable(cfHDrop) || fmtsAvailable(fmtsFileDescFormat()) {
-		s |= ClipboardFormatFiles
+		s |= base.ClipboardFormatFiles
 	}
 	return s
 }

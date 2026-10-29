@@ -8,7 +8,7 @@ import (
 // clipboard.go — кросс-платформенный буфер обмена.
 //
 // Абстракция для работы с системным буфером обмена.
-// Платформенные реализации: clipboard_windows.go, clipboard_linux.go, clipboard_darwin.go.
+// Платформенные реализации — пакет platform/clipboard (по ОС).
 
 // ClipboardProvider — интерфейс доступа к системному буферу обмена.
 type ClipboardProvider interface {

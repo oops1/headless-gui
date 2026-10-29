@@ -72,13 +72,13 @@ func TestVirtualTopLevel(t *testing.T) {
 }
 
 func TestFileTime(t *testing.T) {
-	if got := fileTime(time.Unix(0, 0)); got != 116444736000000000 {
+	if got := FileTime(time.Unix(0, 0)); got != 116444736000000000 {
 		t.Errorf("эпоха Unix = %d", got)
 	}
-	if got := fileTime(time.Unix(1, 500)); got != 116444736000000000+10_000_000+5 {
+	if got := FileTime(time.Unix(1, 500)); got != 116444736000000000+10_000_000+5 {
 		t.Errorf("секунда и 500 нс = %d", got)
 	}
-	if fileTime(time.Time{}) != 0 || fileTime(time.Date(1500, 1, 1, 0, 0, 0, 0, time.UTC)) != 0 {
+	if FileTime(time.Time{}) != 0 || FileTime(time.Date(1500, 1, 1, 0, 0, 0, 0, time.UTC)) != 0 {
 		t.Error("нулевое и допотопное время должны давать 0")
 	}
 }
@@ -92,7 +92,7 @@ func TestBuildFileGroupDescriptor(t *testing.T) {
 		{Name: "Отчёт/итог.txt", Size: 0x1_0000_0007, ModTime: mod},
 		{Name: "без времени.bin", Size: 3},
 	}
-	b, err := buildFileGroupDescriptor(files)
+	b, err := BuildFileGroupDescriptor(files)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestBuildFileGroupDescriptor(t *testing.T) {
 	if u32(e, 64) != 1 || u32(e, 68) != 7 {
 		t.Errorf("размер: старшее %d младшее %d", u32(e, 64), u32(e, 68))
 	}
-	ft := fileTime(mod)
+	ft := FileTime(mod)
 	if u32(e, 56) != uint32(ft) || u32(e, 60) != uint32(ft>>32) {
 		t.Errorf("время записи: %d %d, ждал %d", u32(e, 56), u32(e, 60), ft)
 	}
@@ -147,11 +147,11 @@ func TestBuildFileGroupDescriptor(t *testing.T) {
 
 	// Слишком длинное имя и запрещённые символы.
 	for _, n := range []string{strings.Repeat("я", 260), "a:b", "a?b", "a|b", `a"b`} {
-		if _, err := buildFileGroupDescriptor([]VirtualFile{{Name: n}}); !errors.Is(err, ErrVirtualFileName) {
+		if _, err := BuildFileGroupDescriptor([]VirtualFile{{Name: n}}); !errors.Is(err, ErrVirtualFileName) {
 			t.Errorf("имя %.12q принято: %v", n, err)
 		}
 	}
-	if _, err := buildFileGroupDescriptor([]VirtualFile{{Name: strings.Repeat("я", 259)}}); err != nil {
+	if _, err := BuildFileGroupDescriptor([]VirtualFile{{Name: strings.Repeat("я", 259)}}); err != nil {
 		t.Errorf("имя в 259 символов: %v", err)
 	}
 }

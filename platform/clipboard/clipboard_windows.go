@@ -1,14 +1,14 @@
 //go:build windows
 
-package base
+package clipboard
 
 // clipboard_windows.go — буфер обмена Windows через Win32 API.
 //
 // Использует: OpenClipboard, GetClipboardData, SetClipboardData.
 // CF_UNICODETEXT = 13 — Unicode текст (UTF-16LE).
 // «HTML Format» — зарегистрированный формат оформленного текста; собирается и
-// разбирается чистыми функциями из clipboard_html.go.
-// CF_HDROP = 15 — список файлов (блок DROPFILES, clipboard_files.go) и рядом
+// разбирается чистыми функциями из widget/base/clipboard_html.go.
+// CF_HDROP = 15 — список файлов (блок DROPFILES, widget/base/clipboard_files.go) и рядом
 // «Preferred DropEffect» — копировать или переместить при вставке.
 
 import (
@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"unicode/utf16"
 	"unsafe"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 const (
@@ -81,7 +83,7 @@ func dropEffectFormat() uintptr {
 type winClipboard struct{}
 
 func init() {
-	defaultClipboard = &winClipboard{}
+	base.SetClipboardProvider(&winClipboard{})
 }
 
 func (c *winClipboard) GetText() string {
@@ -152,7 +154,7 @@ func (c *winClipboard) SetHTML(html, plain string) {
 	if format != 0 {
 		// Завершающий NUL: так принято для «HTML Format», хотя в смещения он
 		// не входит.
-		data := append(BuildCFHTML(html), 0)
+		data := append(base.BuildCFHTML(html), 0)
 		setClipboardBytes(format, data)
 	}
 }
@@ -188,7 +190,7 @@ func (c *winClipboard) GetHTML() (string, bool) {
 	}
 	data := make([]byte, size)
 	copy(data, unsafe.Slice((*byte)(unsafe.Pointer(ptr)), size))
-	return ParseCFHTML(data)
+	return base.ParseCFHTML(data)
 }
 
 // SetFiles кладёт список файлов (CF_HDROP), пометку cut (Preferred DropEffect)
@@ -206,9 +208,9 @@ func (c *winClipboard) SetFiles(paths []string, cut bool) {
 
 	procEmptyClipboard.Call()
 	setClipboardUnicode(strings.Join(paths, "\r\n"))
-	setClipboardBytes(cfHDrop, buildDropFiles(paths))
+	setClipboardBytes(cfHDrop, base.BuildDropFiles(paths))
 	if effect != 0 {
-		setClipboardBytes(effect, dropEffectBytes(cut))
+		setClipboardBytes(effect, base.DropEffectBytes(cut))
 	}
 }
 
@@ -231,7 +233,7 @@ func (c *winClipboard) GetFiles() ([]string, bool, bool) {
 		return nil, false, false
 	}
 	data := clipboardBlock(h)
-	paths, ok := parseDropFiles(data)
+	paths, ok := base.ParseDropFiles(data)
 	if !ok {
 		paths = dragQueryFiles(h)
 		ok = len(paths) > 0
@@ -242,7 +244,7 @@ func (c *winClipboard) GetFiles() ([]string, bool, bool) {
 	cut := false
 	if effect != 0 {
 		if he, _, _ := procGetClipboardData.Call(effect); he != 0 {
-			cut = dropEffectIsCut(clipboardBlock(he))
+			cut = base.DropEffectIsCut(clipboardBlock(he))
 		}
 	}
 	return paths, cut, true

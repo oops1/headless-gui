@@ -1,9 +1,11 @@
 //go:build windows
 
-package base
+package clipboard
 
 import (
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // fmtsTestPut очищает буфер и кладёт указанные форматы одним открытием.
@@ -26,12 +28,12 @@ func TestWinClipboard_FormatsWithoutOpening(t *testing.T) {
 
 	c.SetFiles([]string{`C:\Users\u\Отчёт.docx`}, false)
 	got := c.ClipboardFormats()
-	if !got.Has(ClipboardFormatFiles) || !got.Has(ClipboardFormatText) || got.Has(ClipboardFormatImage) {
+	if !got.Has(base.ClipboardFormatFiles) || !got.Has(base.ClipboardFormatText) || got.Has(base.ClipboardFormatImage) {
 		t.Errorf("после SetFiles: %v", got)
 	}
 
 	c.SetText("просто текст")
-	if got := c.ClipboardFormats(); got != ClipboardFormatText {
+	if got := c.ClipboardFormats(); got != base.ClipboardFormatText {
 		t.Errorf("после SetText: %v", got)
 	}
 
@@ -43,7 +45,7 @@ func TestWinClipboard_FormatsWithoutOpening(t *testing.T) {
 	}
 	held := c.ClipboardFormats()
 	procCloseClipboard.Call()
-	if !held.Has(ClipboardFormatFiles) {
+	if !held.Has(base.ClipboardFormatFiles) {
 		t.Errorf("при открытом буфере: %v", held)
 	}
 }
@@ -53,21 +55,21 @@ func TestWinClipboard_FormatsKinds(t *testing.T) {
 	c := needSysClipboard(t)
 
 	c.SetHTML("<b>x</b>", "x")
-	if got := c.ClipboardFormats(); got != ClipboardFormatText|ClipboardFormatHTML {
+	if got := c.ClipboardFormats(); got != base.ClipboardFormatText|base.ClipboardFormatHTML {
 		t.Errorf("HTML: %v", got)
 	}
 
 	if err := c.SetImage(winTestImage()); err != nil {
 		t.Fatal(err)
 	}
-	if got := c.ClipboardFormats(); !got.Has(ClipboardFormatImage) || got.Has(ClipboardFormatFiles) {
+	if got := c.ClipboardFormats(); !got.Has(base.ClipboardFormatImage) || got.Has(base.ClipboardFormatFiles) {
 		t.Errorf("картинка: %v", got)
 	}
 
 	// Обещанные файлы: только FileGroupDescriptorW, списка CF_HDROP нет.
 	fmtsTestPut(t, map[uintptr][]byte{fmtsFileDescFormat(): make([]byte, 8)})
 	got := c.ClipboardFormats()
-	if !got.Has(ClipboardFormatFiles) {
+	if !got.Has(base.ClipboardFormatFiles) {
 		t.Errorf("FileGroupDescriptorW не признан файлами: %v", got)
 	}
 
@@ -81,16 +83,16 @@ func TestWinClipboard_FormatsKinds(t *testing.T) {
 // Через публичный API: widget.ClipboardHasFiles смотрит в системный провайдер.
 func TestWinClipboard_HasFilesViaPublicAPI(t *testing.T) {
 	c := needSysClipboard(t)
-	old := GetClipboardProvider()
-	defer SetClipboardProvider(old)
-	SetClipboardProvider(c)
+	old := base.GetClipboardProvider()
+	defer base.SetClipboardProvider(old)
+	base.SetClipboardProvider(c)
 
 	c.SetFiles([]string{`C:\a`}, false)
-	if !ClipboardHasFiles() {
+	if !base.ClipboardHasFiles() {
 		t.Error("ClipboardHasFiles = false при файлах в буфере")
 	}
 	c.SetText("x")
-	if ClipboardHasFiles() {
+	if base.ClipboardHasFiles() {
 		t.Error("ClipboardHasFiles = true при тексте")
 	}
 }

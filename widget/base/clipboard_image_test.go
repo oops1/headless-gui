@@ -104,15 +104,15 @@ func TestFirstDecodableImage_Order(t *testing.T) {
 	plain := dib.EncodeDIB(src)
 
 	var asked []string
-	mk := func(name string, data []byte, dec func([]byte) (image.Image, error)) clipImageSource {
-		return clipImageSource{get: func() []byte { asked = append(asked, name); return data }, decode: dec}
+	mk := func(name string, data []byte, dec func([]byte) (image.Image, error)) ClipImageSource {
+		return ClipImageSource{Get: func() []byte { asked = append(asked, name); return data }, Decode: dec}
 	}
 	decPNG := clipimage.DecodePNG
 	decDIB := dib.Decode
 
 	// Есть всё — берётся PNG, остальные не трогаются.
 	asked = nil
-	img, ok := firstDecodableImage(mk("png", pngData, decPNG), mk("v5", v5, decDIB), mk("dib", plain, decDIB))
+	img, ok := FirstDecodableImage(mk("png", pngData, decPNG), mk("v5", v5, decDIB), mk("dib", plain, decDIB))
 	if !ok || !reflect.DeepEqual(asked, []string{"png"}) {
 		t.Errorf("все три: ok=%v asked=%v", ok, asked)
 	}
@@ -122,7 +122,7 @@ func TestFirstDecodableImage_Order(t *testing.T) {
 
 	// PNG нет — DIBV5, с альфой.
 	asked = nil
-	img, ok = firstDecodableImage(mk("png", nil, decPNG), mk("v5", v5, decDIB), mk("dib", plain, decDIB))
+	img, ok = FirstDecodableImage(mk("png", nil, decPNG), mk("v5", v5, decDIB), mk("dib", plain, decDIB))
 	if !ok || !reflect.DeepEqual(asked, []string{"png", "v5"}) {
 		t.Errorf("без PNG: ok=%v asked=%v", ok, asked)
 	}
@@ -132,7 +132,7 @@ func TestFirstDecodableImage_Order(t *testing.T) {
 
 	// PNG битый, DIBV5 нет — CF_DIB, непрозрачный.
 	asked = nil
-	img, ok = firstDecodableImage(mk("png", []byte("не png"), decPNG), mk("v5", nil, decDIB), mk("dib", plain, decDIB))
+	img, ok = FirstDecodableImage(mk("png", []byte("не png"), decPNG), mk("v5", nil, decDIB), mk("dib", plain, decDIB))
 	if !ok || !reflect.DeepEqual(asked, []string{"png", "v5", "dib"}) {
 		t.Errorf("битый PNG: ok=%v asked=%v", ok, asked)
 	}
@@ -141,7 +141,7 @@ func TestFirstDecodableImage_Order(t *testing.T) {
 	}
 
 	// Ничего годного.
-	if _, ok := firstDecodableImage(mk("png", nil, decPNG), mk("v5", []byte{1, 2}, decDIB)); ok {
+	if _, ok := FirstDecodableImage(mk("png", nil, decPNG), mk("v5", []byte{1, 2}, decDIB)); ok {
 		t.Error("нечитаемое принято за картинку")
 	}
 }

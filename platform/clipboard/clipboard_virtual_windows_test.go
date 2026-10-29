@@ -1,6 +1,6 @@
 //go:build windows
 
-package base
+package clipboard
 
 import (
 	"bytes"
@@ -14,6 +14,8 @@ import (
 	"testing/iotest"
 	"time"
 	"unsafe"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // Тесты COM-объектов виртуальных файлов. Первые не трогают системный буфер: они
@@ -60,13 +62,13 @@ func (r vfTestReader) Close() error { r.closed.Add(1); return nil }
 // vfTestSource — тестовый источник: три файла и счётчики open/close.
 type vfTestSource struct {
 	opens, closes atomic.Int32
-	files         []VirtualFile
+	files         []base.VirtualFile
 	body          map[int]string
 }
 
 func newVFTestSource() *vfTestSource {
 	return &vfTestSource{
-		files: []VirtualFile{
+		files: []base.VirtualFile{
 			{Name: "Отчёт", IsDir: true, ModTime: time.Unix(1_700_000_000, 0)},
 			{Name: "Отчёт/итог.txt", Size: 11, ModTime: time.Unix(1_700_000_000, 0)},
 			{Name: "пусто.bin"},
@@ -88,7 +90,7 @@ func (s *vfTestSource) open(i int) (io.ReadCloser, error) {
 // newObj собирает объект данных без обращения к буферу обмена.
 func (s *vfTestSource) newObj(t *testing.T) (obj uintptr, d *vfData) {
 	t.Helper()
-	desc, err := buildFileGroupDescriptor(s.files)
+	desc, err := base.BuildFileGroupDescriptor(s.files)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +241,7 @@ func TestVirtualCOM_GetDataDescriptor(t *testing.T) {
 	vfReleaseMedium(&med)
 
 	med, hr = vfGetData(obj, vfFE(drop, -1, vfTymedHGlobal))
-	if blk := clipboardBlock(med.data); hr != 0 || len(blk) != 4 || blk[0] != dropEffectCopy || dropEffectIsCut(blk) {
+	if blk := clipboardBlock(med.data); hr != 0 || len(blk) != 4 || blk[0] != base.DropEffectCopy || base.DropEffectIsCut(blk) {
 		t.Errorf("Preferred DropEffect: %#x %v", hr, blk)
 	}
 	vfReleaseMedium(&med)
@@ -339,7 +341,7 @@ func TestVirtualCOM_ContentsStream(t *testing.T) {
 	// Stat не читает содержимого.
 	var st vfStatStg
 	if hr := vfInvoke(stm, 12 /*Stat*/, uintptr(unsafe.Pointer(&st)), 1); hr != 0 ||
-		st.cbSize != 11 || st.typ != 2 || st.mtime != fileTime(time.Unix(1_700_000_000, 0)) {
+		st.cbSize != 11 || st.typ != 2 || st.mtime != base.FileTime(time.Unix(1_700_000_000, 0)) {
 		t.Errorf("Stat = %#x %+v", hr, st)
 	}
 	if src.opens.Load() != 0 {
@@ -463,7 +465,7 @@ func TestVirtualCOM_StreamEdgeCases(t *testing.T) {
 
 	// Читатель, отдающий по байту: блок Read всё равно заполняется целиком,
 	// иначе короткое чтение приняли бы за конец файла.
-	descAll, _ := buildFileGroupDescriptor(src.files)
+	descAll, _ := base.BuildFileGroupDescriptor(src.files)
 	dd := &vfData{files: src.files, desc: descAll, open: func(int) (io.ReadCloser, error) {
 		return io.NopCloser(iotest.OneByteReader(strings.NewReader("hello world"))), nil
 	}}
@@ -479,7 +481,7 @@ func TestVirtualCOM_StreamEdgeCases(t *testing.T) {
 
 	// Ошибка в середине: прочитанное отдаётся, ошибка — следующим вызовом.
 	boom := errors.New("обрыв")
-	desc, _ := buildFileGroupDescriptor(src.files)
+	desc, _ := base.BuildFileGroupDescriptor(src.files)
 	d := &vfData{files: src.files, desc: desc, open: func(int) (io.ReadCloser, error) {
 		return io.NopCloser(io.MultiReader(strings.NewReader("abc"), errReader{boom})), nil
 	}}
@@ -581,7 +583,7 @@ func TestWinClipboard_VirtualFilesLive(t *testing.T) {
 	c := needSysClipboard(t)
 	src := newVFTestSource()
 	released := make(chan struct{}, 2)
-	if err := c.SetVirtualFiles(src.files, src.open, VirtualFilesOptions{Release: func() { released <- struct{}{} }}); err != nil {
+	if err := c.SetVirtualFiles(src.files, src.open, base.VirtualFilesOptions{Release: func() { released <- struct{}{} }}); err != nil {
 		t.Fatal(err)
 	}
 	defer c.Cleanup()
@@ -626,7 +628,7 @@ func TestWinClipboard_VirtualFilesLive(t *testing.T) {
 		}
 		blk := clipboardBlock(med.data)
 		vfReleaseMedium(&med)
-		if want, _ := buildFileGroupDescriptor(src.files); !bytes.Equal(blk, want) {
+		if want, _ := base.BuildFileGroupDescriptor(src.files); !bytes.Equal(blk, want) {
 			t.Errorf("дескрипторы через OLE: %d байт, ждал %d", len(blk), len(want))
 		}
 		if src.opens.Load() != 0 {
@@ -673,7 +675,7 @@ func TestWinClipboard_VirtualFilesLive(t *testing.T) {
 	if _, ok := c.GetVirtualFiles(); ok {
 		t.Error("обещание пережило замену буфера")
 	}
-	if _, err := c.OpenVirtualFile(1); !errors.Is(err, ErrVirtualFileNotFound) {
+	if _, err := c.OpenVirtualFile(1); !errors.Is(err, base.ErrVirtualFileNotFound) {
 		t.Errorf("OpenVirtualFile после замены: %v", err)
 	}
 }
@@ -684,7 +686,7 @@ func TestWinClipboard_VirtualFilesCleanup(t *testing.T) {
 	src := newVFTestSource()
 	var once sync.Once
 	released := make(chan struct{})
-	if err := c.SetVirtualFiles(src.files, src.open, VirtualFilesOptions{Release: func() { once.Do(func() { close(released) }) }}); err != nil {
+	if err := c.SetVirtualFiles(src.files, src.open, base.VirtualFilesOptions{Release: func() { once.Do(func() { close(released) }) }}); err != nil {
 		t.Fatal(err)
 	}
 	if rc, err := c.OpenVirtualFile(1); err != nil {
@@ -718,14 +720,14 @@ func TestWinClipboard_VirtualFilesCleanup(t *testing.T) {
 func TestWinClipboard_VirtualFilesNeedsOpen(t *testing.T) {
 	c := needSysClipboard(t)
 	vfTestSetText(t, c, "до")
-	err := c.SetVirtualFiles([]VirtualFile{{Name: "a"}}, nil, VirtualFilesOptions{Materialize: func(int) (string, error) { return "", nil }})
-	if !errors.Is(err, ErrClipboardVirtualNoSource) {
+	err := c.SetVirtualFiles([]base.VirtualFile{{Name: "a"}}, nil, base.VirtualFilesOptions{Materialize: func(int) (string, error) { return "", nil }})
+	if !errors.Is(err, base.ErrClipboardVirtualNoSource) {
 		t.Errorf("без open: %v", err)
 	}
 	if got := vfTestGetText(c); got != "до" {
 		t.Errorf("отказ изменил буфер: %q", got)
 	}
-	if err := c.SetVirtualFiles([]VirtualFile{{Name: "a:b"}}, func(int) (io.ReadCloser, error) { return nil, nil }, VirtualFilesOptions{}); !errors.Is(err, ErrVirtualFileName) {
+	if err := c.SetVirtualFiles([]base.VirtualFile{{Name: "a:b"}}, func(int) (io.ReadCloser, error) { return nil, nil }, base.VirtualFilesOptions{}); !errors.Is(err, base.ErrVirtualFileName) {
 		t.Errorf("имя с двоеточием: %v", err)
 	}
 }

@@ -104,25 +104,33 @@ func (c *memoryClipboard) GetImage() (image.Image, bool) {
 	return clipimage.Clone(img), true
 }
 
-// clipImageSource — один из форматов, в которых изображение лежит в буфере: как
+// ClipImageSource — один из форматов, в которых изображение лежит в буфере: как
 // его достать (пусто — такого формата нет) и как разобрать.
-type clipImageSource struct {
-	get    func() []byte
-	decode func([]byte) (image.Image, error)
+//
+// Служебный: для platform/clipboard, в фасад не входит.
+//
+//facadegen:skip
+type ClipImageSource struct {
+	Get    func() []byte
+	Decode func([]byte) (image.Image, error)
 }
 
-// firstDecodableImage перебирает форматы по порядку предпочтения и возвращает
+// FirstDecodableImage перебирает форматы по порядку предпочтения и возвращает
 // первое изображение, которое удалось разобрать. Формат, который есть, но
 // битый, не мешает следующему: чужая программа могла положить хороший CF_DIB
 // рядом с испорченным «PNG». Следующие источники не запрашиваются, как только
 // нашёлся годный.
-func firstDecodableImage(sources ...clipImageSource) (image.Image, bool) {
+//
+// Служебная: для подпакетов widget и platform/clipboard, в фасад не входит.
+//
+//facadegen:skip
+func FirstDecodableImage(sources ...ClipImageSource) (image.Image, bool) {
 	for _, s := range sources {
-		data := s.get()
+		data := s.Get()
 		if len(data) == 0 {
 			continue
 		}
-		if img, err := s.decode(data); err == nil && img != nil && !img.Bounds().Empty() {
+		if img, err := s.Decode(data); err == nil && img != nil && !img.Bounds().Empty() {
 			return img, true
 		}
 	}

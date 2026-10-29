@@ -18,7 +18,7 @@ package base
 // На проводе:
 //   - Windows: IDataObject с CFSTR_FILEDESCRIPTORW и CFSTR_FILECONTENTS
 //     (TYMED_ISTREAM, поток читает из open по требованию), OleSetClipboard;
-//     Проводник просит содержимое файла при вставке (clipboard_virtual_windows.go);
+//     Проводник просит содержимое файла при вставке (platform/clipboard/clipboard_virtual_windows.go);
 //   - X11 и Wayland: стандартного протокола «виртуальных файлов» нет, а
 //     вставляющему нужны настоящие пути (text/uri-list,
 //     x-special/gnome-copied-files). Поэтому в ответ на запрос этих форматов
@@ -394,9 +394,13 @@ const (
 // fileTimeEpochDiff — секунд между 1601-01-01 (начало FILETIME) и 1970-01-01.
 const fileTimeEpochDiff = 11644473600
 
-// fileTime переводит время в FILETIME (100-нс интервалы с 1601 года); время
+// FileTime переводит время в FILETIME (100-нс интервалы с 1601 года); время
 // до 1601 года и нулевое дают 0.
-func fileTime(t time.Time) uint64 {
+//
+// Служебная: для подпакетов widget и platform/clipboard, в фасад не входит.
+//
+//facadegen:skip
+func FileTime(t time.Time) uint64 {
 	if t.IsZero() {
 		return 0
 	}
@@ -407,11 +411,15 @@ func fileTime(t time.Time) uint64 {
 	return uint64(sec)*10_000_000 + uint64(t.Nanosecond()/100)
 }
 
-// buildFileGroupDescriptor собирает FILEGROUPDESCRIPTORW. Имена — с обратной
+// BuildFileGroupDescriptor собирает FILEGROUPDESCRIPTORW. Имена — с обратной
 // косой чертой; недопустимые в Windows символы и пути длиннее MAX_PATH-1
 // (259 единиц UTF-16) — ErrVirtualFileName: Проводник отказал бы во всей
 // вставке.
-func buildFileGroupDescriptor(files []VirtualFile) ([]byte, error) {
+//
+// Служебная: для подпакетов widget и platform/clipboard, в фасад не входит.
+//
+//facadegen:skip
+func BuildFileGroupDescriptor(files []VirtualFile) ([]byte, error) {
 	b := make([]byte, 4+len(files)*fileDescriptorSize)
 	putU32(b[0:], uint32(len(files)))
 	for i, f := range files {
@@ -432,7 +440,7 @@ func buildFileGroupDescriptor(files []VirtualFile) ([]byte, error) {
 			putU32(e[64:], uint32(uint64(f.Size)>>32))
 			putU32(e[68:], uint32(f.Size))
 		}
-		if ft := fileTime(f.ModTime); ft != 0 {
+		if ft := FileTime(f.ModTime); ft != 0 {
 			flags |= fdWritesTime
 			putU32(e[56:], uint32(ft))
 			putU32(e[60:], uint32(ft>>32))

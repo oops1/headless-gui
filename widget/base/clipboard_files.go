@@ -90,8 +90,12 @@ func (c *memoryClipboard) GetFiles() ([]string, bool, bool) {
 // BOOL fWide.
 const dropFilesHeaderSize = 20
 
-// buildDropFiles собирает CF_HDROP с путями в UTF-16.
-func buildDropFiles(paths []string) []byte {
+// BuildDropFiles собирает CF_HDROP с путями в UTF-16.
+//
+// Служебная: для подпакетов widget и platform/clipboard, в фасад не входит.
+//
+//facadegen:skip
+func BuildDropFiles(paths []string) []byte {
 	var u []uint16
 	for _, p := range paths {
 		u = append(u, utf16.Encode([]rune(p))...)
@@ -110,13 +114,17 @@ func buildDropFiles(paths []string) []byte {
 	return b
 }
 
-// parseDropFiles разбирает CF_HDROP с путями в UTF-16. ok == false, если блок
+// ParseDropFiles разбирает CF_HDROP с путями в UTF-16. ok == false, если блок
 // битый или пути в однобайтовой кодировке (их разбирает система, см.
-// clipboard_windows.go).
+// platform/clipboard/clipboard_windows.go).
 //
 // Блок чужой, поэтому каждое смещение сверяется с его размером: прочитать
 // за границей нельзя, сколько бы ни обещал заголовок.
-func parseDropFiles(b []byte) (paths []string, ok bool) {
+//
+// Служебная: для подпакетов widget и platform/clipboard, в фасад не входит.
+//
+//facadegen:skip
+func ParseDropFiles(b []byte) (paths []string, ok bool) {
 	if len(b) < dropFilesHeaderSize {
 		return nil, false
 	}
@@ -146,23 +154,35 @@ func parseDropFiles(b []byte) (paths []string, ok bool) {
 }
 
 // Preferred DropEffect — DWORD рядом с CF_HDROP: что сделать при вставке.
+//
+// Служебные: для platform/clipboard, в фасад не входят.
+//
+//facadegen:skip
 const (
-	dropEffectCopy = 1
-	dropEffectMove = 2
+	DropEffectCopy = 1
+	DropEffectMove = 2
 )
 
-// dropEffectBytes — значение Preferred DropEffect для cut и copy.
-func dropEffectBytes(cut bool) []byte {
-	v := uint32(dropEffectCopy)
+// DropEffectBytes — значение Preferred DropEffect для cut и copy.
+//
+// Служебная: для подпакетов widget и platform/clipboard, в фасад не входит.
+//
+//facadegen:skip
+func DropEffectBytes(cut bool) []byte {
+	v := uint32(DropEffectCopy)
 	if cut {
-		v = dropEffectMove
+		v = DropEffectMove
 	}
 	b := make([]byte, 4)
 	binary.LittleEndian.PutUint32(b, v)
 	return b
 }
 
-// dropEffectIsCut — Preferred DropEffect говорит «переместить».
-func dropEffectIsCut(b []byte) bool {
-	return len(b) >= 4 && binary.LittleEndian.Uint32(b)&dropEffectMove != 0
+// DropEffectIsCut — Preferred DropEffect говорит «переместить».
+//
+// Служебная: для подпакетов widget и platform/clipboard, в фасад не входит.
+//
+//facadegen:skip
+func DropEffectIsCut(b []byte) bool {
+	return len(b) >= 4 && binary.LittleEndian.Uint32(b)&DropEffectMove != 0
 }

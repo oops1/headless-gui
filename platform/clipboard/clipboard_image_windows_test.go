@@ -1,6 +1,6 @@
 //go:build windows
 
-package base
+package clipboard
 
 import (
 	"encoding/binary"

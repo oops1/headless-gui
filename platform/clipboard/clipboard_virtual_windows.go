@@ -1,6 +1,6 @@
 //go:build windows
 
-package base
+package clipboard
 
 // clipboard_virtual_windows.go — виртуальные файлы в буфере обмена Windows (v3.42).
 //
@@ -8,7 +8,7 @@ package base
 // запросу (OleSetClipboard). Проводник при вставке:
 //
 //  1. перечисляет форматы объекта и находит «FileGroupDescriptorW» (FILEGROUPDESCRIPTORW:
-//     имена, размеры, время, атрибуты — clipboard_virtual.go);
+//     имена, размеры, время, атрибуты — widget/base/clipboard_virtual.go);
 //  2. для каждого файла зовёт GetData("FileContents", lindex = номер файла,
 //     TYMED_ISTREAM) и читает поток.
 //
@@ -45,6 +45,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // ─── Импорты и константы ─────────────────────────────────────────────────────
@@ -216,7 +218,7 @@ func vfFormats() (desc, contents, drop uint16) {
 
 // vfData — то, что обещано буферу: список файлов и источник содержимого.
 type vfData struct {
-	files []VirtualFile
+	files []base.VirtualFile
 	open  func(int) (io.ReadCloser, error)
 	desc  []byte // готовый FILEGROUPDESCRIPTORW
 	obj   uintptr
@@ -485,7 +487,7 @@ func vfDataGetData(this, pfe, pmed uintptr) uintptr {
 		}
 		*med = vfStgMedium{tymed: vfTymedHGlobal, data: h}
 	default: // Preferred DropEffect: копирование
-		h := vfNewGlobal([]byte{dropEffectCopy, 0, 0, 0})
+		h := vfNewGlobal([]byte{base.DropEffectCopy, 0, 0, 0})
 		if h == 0 {
 			return vfEFail
 		}
@@ -669,17 +671,17 @@ func vfStreamSeek(this, move, origin, pnew uintptr) uintptr {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var base int64
+	var origPos int64
 	switch uint32(origin) {
 	case 0: // STREAM_SEEK_SET
 	case 1: // STREAM_SEEK_CUR
-		base = s.pos
+		origPos = s.pos
 	case 2: // STREAM_SEEK_END
-		base = s.size
+		origPos = s.size
 	default:
 		return vfEInvalidArg
 	}
-	target := base + int64(move)
+	target := origPos + int64(move)
 	if target < 0 {
 		return vfSTGSeekError
 	}
@@ -753,7 +755,7 @@ func vfStreamStat(this, pstat, flag uintptr) uintptr {
 	*vfPtrAt[vfStatStg](pstat) = vfStatStg{
 		typ:    2, // STGTY_STREAM
 		cbSize: uint64(s.size),
-		mtime:  fileTime(s.mod),
+		mtime:  base.FileTime(s.mod),
 	}
 	return 0
 }
@@ -852,15 +854,15 @@ func (t *vfThread) run(fn func()) error {
 // SetVirtualFiles кладёт обещанные файлы в буфер объектом IDataObject.
 //
 // Реализует widget.ClipboardVirtualFilesProvider.
-func (c *winClipboard) SetVirtualFiles(files []VirtualFile, open func(int) (io.ReadCloser, error), opts VirtualFilesOptions) error {
-	norm, err := NormalizeVirtualFiles(files)
+func (c *winClipboard) SetVirtualFiles(files []base.VirtualFile, open func(int) (io.ReadCloser, error), opts base.VirtualFilesOptions) error {
+	norm, err := base.NormalizeVirtualFiles(files)
 	if err != nil {
 		return err
 	}
 	if open == nil {
-		return ErrClipboardVirtualNoSource // Проводнику нужно содержимое: Materialize здесь не годится
+		return base.ErrClipboardVirtualNoSource // Проводнику нужно содержимое: Materialize здесь не годится
 	}
-	desc, err := buildFileGroupDescriptor(norm)
+	desc, err := base.BuildFileGroupDescriptor(norm)
 	if err != nil {
 		return err
 	}
@@ -907,19 +909,19 @@ func vfOleSetClipboard(dataObj uintptr) uintptr {
 }
 
 // GetVirtualFiles возвращает обещанные нами файлы, пока они в буфере.
-func (c *winClipboard) GetVirtualFiles() ([]VirtualFile, bool) {
+func (c *winClipboard) GetVirtualFiles() ([]base.VirtualFile, bool) {
 	d := vfCur.Load()
 	if d == nil || d.freed.Load() {
 		return nil, false
 	}
-	return append([]VirtualFile(nil), d.files...), true
+	return append([]base.VirtualFile(nil), d.files...), true
 }
 
 // OpenVirtualFile открывает содержимое нашего обещанного файла.
 func (c *winClipboard) OpenVirtualFile(index int) (io.ReadCloser, error) {
 	d := vfCur.Load()
 	if d == nil || d.freed.Load() || index < 0 || index >= len(d.files) || d.files[index].IsDir {
-		return nil, ErrVirtualFileNotFound
+		return nil, base.ErrVirtualFileNotFound
 	}
 	return d.open(index)
 }

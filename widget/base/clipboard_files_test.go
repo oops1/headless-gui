@@ -7,8 +7,8 @@ import (
 
 func TestDropFiles_RoundTrip(t *testing.T) {
 	paths := []string{`C:\Users\u\Отчёт.docx`, `D:\a b\c.txt`, `\\server\share\😀.png`}
-	b := buildDropFiles(paths)
-	got, ok := parseDropFiles(b)
+	b := BuildDropFiles(paths)
+	got, ok := ParseDropFiles(b)
 	if !ok || !reflect.DeepEqual(got, paths) {
 		t.Fatalf("разбор: %v %v", got, ok)
 	}
@@ -20,31 +20,31 @@ func TestDropFiles_RoundTrip(t *testing.T) {
 }
 
 func TestDropFiles_RejectsBroken(t *testing.T) {
-	good := buildDropFiles([]string{`C:\a`})
+	good := BuildDropFiles([]string{`C:\a`})
 	ansi := append([]byte(nil), good...)
 	ansi[16] = 0 // fWide = 0
 	far := append([]byte(nil), good...)
 	far[0] = 0xFF // смещение за концом блока
 	for name, b := range map[string][]byte{
 		"короткий": good[:10], "ANSI": ansi, "смещение": far,
-		"пусто": buildDropFiles(nil),
+		"пусто": BuildDropFiles(nil),
 	} {
-		if p, ok := parseDropFiles(b); ok {
+		if p, ok := ParseDropFiles(b); ok {
 			t.Errorf("%s: принят %v", name, p)
 		}
 	}
 	// Без завершающих нулей — не читаем за край, последний путь не теряем.
 	short := good[:len(good)-4]
-	if p, ok := parseDropFiles(short); !ok || !reflect.DeepEqual(p, []string{`C:\a`}) {
+	if p, ok := ParseDropFiles(short); !ok || !reflect.DeepEqual(p, []string{`C:\a`}) {
 		t.Errorf("без конца списка: %v %v", p, ok)
 	}
 }
 
 func TestDropEffect(t *testing.T) {
-	if dropEffectIsCut(dropEffectBytes(false)) || !dropEffectIsCut(dropEffectBytes(true)) {
+	if DropEffectIsCut(DropEffectBytes(false)) || !DropEffectIsCut(DropEffectBytes(true)) {
 		t.Error("Preferred DropEffect: copy/cut перепутаны")
 	}
-	if dropEffectIsCut([]byte{2}) {
+	if DropEffectIsCut([]byte{2}) {
 		t.Error("короткий блок принят")
 	}
 }

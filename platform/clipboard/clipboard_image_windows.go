@@ -1,6 +1,6 @@
 //go:build windows
 
-package base
+package clipboard
 
 // clipboard_image_windows.go — изображение в буфере обмена Windows.
 //
@@ -26,6 +26,7 @@ import (
 
 	"github.com/oops1/headless-gui/v3/internal/clipimage"
 	"github.com/oops1/headless-gui/v3/internal/dib"
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 const (
@@ -72,7 +73,7 @@ func openClipboardRetry() bool {
 // своей горутины, не из горутины движка.
 func (c *winClipboard) SetImage(img image.Image) error {
 	if img == nil || img.Bounds().Empty() {
-		return ErrClipboardImageEmpty
+		return base.ErrClipboardImageEmpty
 	}
 	snap := clipimage.Clone(img)
 	pngData, err := clipimage.EncodePNG(snap)
@@ -121,9 +122,9 @@ func (c *winClipboard) GetImage() (image.Image, bool) {
 			return clipboardBlock(h)
 		}
 	}
-	return firstDecodableImage(
-		clipImageSource{block(format), clipimage.DecodePNG},
-		clipImageSource{block(cfDibV5), dib.Decode},
-		clipImageSource{block(cfDib), dib.Decode},
+	return base.FirstDecodableImage(
+		base.ClipImageSource{Get: block(format), Decode: clipimage.DecodePNG},
+		base.ClipImageSource{Get: block(cfDibV5), Decode: dib.Decode},
+		base.ClipImageSource{Get: block(cfDib), Decode: dib.Decode},
 	)
 }
