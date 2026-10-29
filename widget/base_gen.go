@@ -1765,7 +1765,7 @@ const (
 	KeyF23 = base.KeyF23
 	KeyF24 = base.KeyF24
 	// Цифровой ряд: виртуальные коды здесь совпадают с кодом самого символа
-	// (0x30..0x39), как их и разбирает разметка (parseKeyName).
+	// (0x30..0x39), как их и разбирает разметка (ParseKeyName).
 	Key0 = base.Key0
 	Key1 = base.Key1
 	Key2 = base.Key2
@@ -3214,6 +3214,42 @@ type RadioButton = base.RadioButton
 // NewRadioButton создаёт переключатель с меткой и именем группы.
 func NewRadioButton(text, group string) *RadioButton { return base.NewRadioButton(text, group) }
 
+// ── resources.go ──
+
+// ErrResourceOutsideBase — путь ресурса выводит за пределы каталога XAML-файла.
+var ErrResourceOutsideBase = base.ErrResourceOutsideBase
+
+const (
+	// MaxImageFileBytes — предельный размер файла изображения. Больше этого
+	// не читаем вовсе: PNG/JPEG таких размеров в UI не бывает, а вот «файл»
+	// из /dev/zero или сетевой шары может быть бесконечным.
+	MaxImageFileBytes = base.MaxImageFileBytes // 256 МБ
+)
+
+// MaxImagePixels возвращает текущий предел площади декодируемого изображения
+// (в пикселях).
+func MaxImagePixels() int64 { return base.MaxImagePixels() }
+
+// SetMaxImagePixels меняет предел площади декодируемого изображения.
+// Значение ≤ 0 возвращает предел по умолчанию (64 Мпикс).
+func SetMaxImagePixels(n int64) { base.SetMaxImagePixels(n) }
+
+// DecodeImageBounded декодирует изображение из r с защитой от
+// декомпрессионной бомбы (SEC-9).
+//
+// Сначала читается ТОЛЬКО заголовок (image.DecodeConfig) и проверяется
+// заявленная площадь: если она превышает MaxImagePixels, декодирование не
+// начинается вовсе — то есть память под гигабайтный растр не выделяется.
+// Дополнительно поток ограничен MaxImageFileBytes.
+//
+// Экспортирована, чтобы движок (engine.SetBackgroundFile) читал изображения
+// через ту же проверку: engine импортирует widget, обратное невозможно.
+func DecodeImageBounded(r io.Reader) (image.Image, error) { return base.DecodeImageBounded(r) }
+
+// LoadImageFile загружает PNG или JPEG файл и возвращает *image.RGBA.
+// Экспортирован для использования в приложениях (иконки TreeView, и т.д.).
+func LoadImageFile(path string) (*image.RGBA, error) { return base.LoadImageFile(path) }
+
 // ── retain.go ──
 
 // DirectDrawer — см. draw.DirectDrawer: виджет, которого нельзя записать
@@ -3722,7 +3758,7 @@ type IconSet = base.IconSet
 // NewIconSet создаёт пустой набор иконок. baseDir — каталог, относительно
 // которого разрешаются пути IconRef.Source; выход за его пределы («../…»)
 // отклоняется тем же способом, что и ресурсы XAML (SEC-8,
-// resolveXAMLResource) — см. widget/xaml_props.go.
+// ResolveResource) — см. resources.go.
 func NewIconSet(baseDir string) *IconSet { return base.NewIconSet(baseDir) }
 
 // NewIconSetFS создаёт набор иконок, читающий SVG-файлы IconRef.Source из
@@ -4064,171 +4100,3 @@ type WrapPanel = base.WrapPanel
 
 // NewWrapPanel создаёт WrapPanel.
 func NewWrapPanel(orient Orientation) *WrapPanel { return base.NewWrapPanel(orient) }
-
-// ── xaml.go ──
-
-// LoadUIFromXAMLFile читает XAML-файл и строит дерево виджетов.
-// Возвращает корневой виджет и map[name]Widget для именованных элементов.
-func LoadUIFromXAMLFile(path string) (Widget, map[string]Widget, error) {
-	return base.LoadUIFromXAMLFile(path)
-}
-
-// LoadUIFromXAML разбирает XAML и строит дерево виджетов.
-// Ресурсы (изображения) не могут загружаться — baseDir пустой.
-func LoadUIFromXAML(data []byte) (Widget, map[string]Widget, error) { return base.LoadUIFromXAML(data) }
-
-// LoadUIFromXAMLWithBase разбирает XAML и строит дерево виджетов.
-// baseDir используется для загрузки ресурсов (BackgroundImage и пр.).
-func LoadUIFromXAMLWithBase(data []byte, baseDir string) (Widget, map[string]Widget, error) {
-	return base.LoadUIFromXAMLWithBase(data, baseDir)
-}
-
-// LoadUIFromXAMLFS разбирает XAML и строит дерево виджетов, читая ресурсы
-// разметки (Image Source, Button Icon/IconSource, Panel BackgroundImage,
-// SVGIcon Source, Window TrayIcon) из fsys вместо каталога на диске (GG-7).
-//
-// Нужна для однофайловых сборок (embed.FS и т.п.): у такого приложения нет
-// каталога с ресурсами на диске, поэтому LoadUIFromXAMLWithBase здесь не
-// применить. Путь в разметке резолвится и удерживается внутри fsys ровно по
-// той же политике SEC-8, что и baseDir на диске — абсолютный путь или выход
-// за пределы корня отклоняется с ErrResourceOutsideBase (см. openXAMLResource).
-func LoadUIFromXAMLFS(data []byte, fsys fs.FS) (Widget, map[string]Widget, error) {
-	return base.LoadUIFromXAMLFS(data, fsys)
-}
-
-// LoadUIFromXAMLWithContext разбирает XAML и привязывает {Binding Path} к
-// dataContext. Привязки живые: при INotifyPropertyChanged у dataContext UI
-// обновляется автоматически, TwoWay-поля пишут обратно в модель.
-// Возвращаемый BindingScope удерживается подписками, поэтому привязки работают
-// даже если scope не сохранён вызывающим кодом.
-func LoadUIFromXAMLWithContext(data []byte, dataContext interface{}) (Widget, map[string]Widget, error) {
-	return base.LoadUIFromXAMLWithContext(data, dataContext)
-}
-
-// LoadUIFromXAMLBindings — как LoadUIFromXAMLWithContext, но возвращает BindingScope
-// для ручного управления (SetDataContext / Refresh).
-func LoadUIFromXAMLBindings(data []byte, dataContext interface{}) (Widget, map[string]Widget, *BindingScope, error) {
-	return base.LoadUIFromXAMLBindings(data, dataContext)
-}
-
-// LoadUIFromXAMLFileWithContext — как LoadUIFromXAMLFile, но с DataContext для {Binding}.
-func LoadUIFromXAMLFileWithContext(path string, dataContext interface{}) (Widget, map[string]Widget, error) {
-	return base.LoadUIFromXAMLFileWithContext(path, dataContext)
-}
-
-// LoadUIFromXAMLFileBindings — как LoadUIFromXAMLFileWithContext, но с BindingScope.
-func LoadUIFromXAMLFileBindings(path string, dataContext interface{}) (Widget, map[string]Widget, *BindingScope, error) {
-	return base.LoadUIFromXAMLFileBindings(path, dataContext)
-}
-
-// ── xaml_binding.go ──
-
-// ValueConverter — преобразователь значений привязки (WPF IValueConverter).
-type ValueConverter = base.ValueConverter
-
-// RegisterValueConverter регистрирует IValueConverter под ключом для
-// использования в XAML: Converter={StaticResource key}. Потокобезопасно.
-func RegisterValueConverter(key string, c ValueConverter) { base.RegisterValueConverter(key, c) }
-
-// BindingMode — направление привязки (как в WPF).
-type BindingMode = base.BindingMode
-
-const (
-	BindOneWay  = base.BindOneWay  // модель → UI (по умолчанию)
-	BindTwoWay  = base.BindTwoWay  // модель ↔ UI
-	BindOneTime = base.BindOneTime // однократно на момент загрузки
-)
-
-// BindingScope управляет набором привязок одного загруженного XAML-дерева.
-type BindingScope = base.BindingScope
-
-// ReleaseXAML освобождает дерево, загруженное любой из функций LoadUIFromXAML*:
-// отписывает его от смены языка, от модели и коллекций и забывает его
-// переводимые строки меню, вкладок, списков и заголовков колонок.
-//
-//	root, reg, err := widget.LoadUIFromXAML(data)
-//	...
-//	widget.ReleaseXAML(root) // окно закрыто, дерево больше не нужно
-//
-// Без этого каждое загруженное и выброшенное дерево оставалось подписанным, и
-// одна смена языка переводила и перекладывала все мёртвые деревья (GG-75).
-// Для дерева из LoadUIFromXAMLBindings то же делает scope.Dispose. Повторный
-// вызов и корень, который нечего освобождать, безопасны.
-func ReleaseXAML(root Widget) { base.ReleaseXAML(root) }
-
-// ── xaml_loc_items.go ──
-
-// ClearLocalizedItems забывает все зарегистрированные «свёрнутые» строки.
-// Нужен, когда разметка перезагружается заново (иначе цели прежнего дерева
-// остались бы висеть) и в тестах.
-func ClearLocalizedItems() { base.ClearLocalizedItems() }
-
-// ── xaml_parse.go ──
-
-// ErrXAMLTooDeep — разметка вложена глубже maxXAMLDepth.
-var ErrXAMLTooDeep = base.ErrXAMLTooDeep
-
-// ── xaml_props.go ──
-
-// ErrResourceOutsideBase — путь ресурса выводит за пределы каталога XAML-файла.
-var ErrResourceOutsideBase = base.ErrResourceOutsideBase
-
-const (
-	// MaxImageFileBytes — предельный размер файла изображения. Больше этого
-	// не читаем вовсе: PNG/JPEG таких размеров в UI не бывает, а вот «файл»
-	// из /dev/zero или сетевой шары может быть бесконечным.
-	MaxImageFileBytes = base.MaxImageFileBytes // 256 МБ
-)
-
-// MaxImagePixels возвращает текущий предел площади декодируемого изображения
-// (в пикселях).
-func MaxImagePixels() int64 { return base.MaxImagePixels() }
-
-// SetMaxImagePixels меняет предел площади декодируемого изображения.
-// Значение ≤ 0 возвращает предел по умолчанию (64 Мпикс).
-func SetMaxImagePixels(n int64) { base.SetMaxImagePixels(n) }
-
-// DecodeImageBounded декодирует изображение из r с защитой от
-// декомпрессионной бомбы (SEC-9).
-//
-// Сначала читается ТОЛЬКО заголовок (image.DecodeConfig) и проверяется
-// заявленная площадь: если она превышает MaxImagePixels, декодирование не
-// начинается вовсе — то есть память под гигабайтный растр не выделяется.
-// Дополнительно поток ограничен MaxImageFileBytes.
-//
-// Экспортирована, чтобы движок (engine.SetBackgroundFile) читал изображения
-// через ту же проверку: engine импортирует widget, обратное невозможно.
-func DecodeImageBounded(r io.Reader) (image.Image, error) { return base.DecodeImageBounded(r) }
-
-// LoadImageFile загружает PNG или JPEG файл и возвращает *image.RGBA.
-// Экспортирован для использования в приложениях (иконки TreeView, и т.д.).
-func LoadImageFile(path string) (*image.RGBA, error) { return base.LoadImageFile(path) }
-
-// ── xaml_registry.go ──
-
-// XAMLAttrs предоставляет доступ к атрибутам XAML-элемента.
-// Передаётся в XAMLWidgetBuilder, чтобы внешние пакеты могли
-// читать атрибуты без доступа к внутреннему типу xElement.
-type XAMLAttrs = base.XAMLAttrs
-
-// XAMLWidgetBuilder — функция-конструктор пользовательского XAML-виджета.
-// Получает атрибуты XAML-элемента, возвращает готовый виджет.
-type XAMLWidgetBuilder = base.XAMLWidgetBuilder
-
-// RegisterXAMLWidget регистрирует пользовательский виджет для использования в XAML.
-// tag — имя тега (регистронезависимое), например "diffview".
-// builder — функция-конструктор, вызываемая при встрече тега в XAML.
-//
-// Пример:
-//
-//	widget.RegisterXAMLWidget("DiffView", func(attrs widget.XAMLAttrs) (widget.Widget, error) {
-//	    dv := diffview.New()
-//	    if t := attrs.Attr("Theme"); strings.EqualFold(t, "light") {
-//	        dv.Colors = diffview.DefaultLightColors()
-//	    }
-//	    return dv, nil
-//	})
-func RegisterXAMLWidget(tag string, builder XAMLWidgetBuilder) { base.RegisterXAMLWidget(tag, builder) }
-
-// UnregisterXAMLWidget удаляет пользовательский виджет из реестра.
-func UnregisterXAMLWidget(tag string) { base.UnregisterXAMLWidget(tag) }

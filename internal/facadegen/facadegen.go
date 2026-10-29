@@ -8,7 +8,8 @@
 // один на всех ОС. Имя в сигнатуре — либо встроенный тип, либо тип того же
 // пакета (в фасаде у него алиас с тем же именем), либо `pkg.Name` из импорта
 // файла; импорты переносятся в фасад, совпадающие имена разных путей
-// получают псевдонимы. Обобщённые объявления не поддерживаются (их в
+// получают псевдонимы. Имя с директивой //facadegen:skip в документации в
+// фасад не идёт (служебное, для соседних подпакетов). Обобщённые объявления не поддерживаются (их в
 // пакетах нет); экспортированная функция с неэкспортированным типом в
 // сигнатуре и одно имя в двух файлах — ошибка генерации.
 //
@@ -65,19 +66,19 @@ func Names(dir string) (map[string]string, error) {
 		for _, d := range f.file.Decls {
 			switch d := d.(type) {
 			case *ast.FuncDecl:
-				if d.Recv == nil && d.Name.IsExported() {
+				if d.Recv == nil && d.Name.IsExported() && !Skipped(d.Doc) {
 					out[d.Name.Name] = "func"
 				}
 			case *ast.GenDecl:
 				for _, s := range d.Specs {
 					switch s := s.(type) {
 					case *ast.TypeSpec:
-						if s.Name.IsExported() {
+						if s.Name.IsExported() && !Skipped(d.Doc, s.Doc) {
 							out[s.Name.Name] = "type"
 						}
 					case *ast.ValueSpec:
 						for _, n := range s.Names {
-							if n.IsExported() {
+							if n.IsExported() && !Skipped(d.Doc, s.Doc) {
 								out[n.Name] = strings.ToLower(d.Tok.String())
 							}
 						}
@@ -285,8 +286,28 @@ type gen struct {
 	errs        []string
 }
 
-func (g *gen) skip(id *ast.Ident) bool {
-	return !id.IsExported() || g.cfg.Skip[id.Name]
+func (g *gen) skip(id *ast.Ident, docs ...*ast.CommentGroup) bool {
+	return !id.IsExported() || g.cfg.Skip[id.Name] || Skipped(docs...)
+}
+
+// SkipDirective — строка документации, которая убирает имя из фасада:
+// служебное имя пакета, экспортированное для соседних подпакетов (ADR-0012).
+// Как директива (без пробела после //) она не видна в go doc.
+const SkipDirective = "//facadegen:skip"
+
+// Skipped сообщает, что в документации есть SkipDirective.
+func Skipped(docs ...*ast.CommentGroup) bool {
+	for _, cg := range docs {
+		if cg == nil {
+			continue
+		}
+		for _, c := range cg.List {
+			if strings.TrimSpace(c.Text) == SkipDirective {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // importName — имя пакета p в фасаде; при совпадении имён разных путей —
@@ -362,7 +383,7 @@ func (g *gen) doc(out *bytes.Buffer, cg *ast.CommentGroup) {
 }
 
 func (g *gen) funcDecl(out *bytes.Buffer, d *ast.FuncDecl) {
-	if d.Recv != nil || g.skip(d.Name) {
+	if d.Recv != nil || g.skip(d.Name, d.Doc) {
 		return
 	}
 	if d.Type.TypeParams != nil {
@@ -456,7 +477,7 @@ func (g *gen) genDecl(out *bytes.Buffer, d *ast.GenDecl) {
 		groupDoc := len(d.Specs) > 1 && d.Doc != nil
 		for _, s := range d.Specs {
 			ts := s.(*ast.TypeSpec)
-			if g.skip(ts.Name) {
+			if g.skip(ts.Name, d.Doc, ts.Doc) {
 				continue
 			}
 			if groupDoc {
@@ -480,7 +501,7 @@ func (g *gen) genDecl(out *bytes.Buffer, d *ast.GenDecl) {
 			vs := s.(*ast.ValueSpec)
 			var names, vals []string
 			for _, id := range vs.Names {
-				if g.skip(id) {
+				if g.skip(id, d.Doc, vs.Doc) {
 					continue
 				}
 				names = append(names, id.Name)

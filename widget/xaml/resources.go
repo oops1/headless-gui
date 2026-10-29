@@ -1,4 +1,4 @@
-// xaml_resources.go — WPF Resources, Styles и markup-расширения (P0).
+// resources.go — WPF Resources, Styles и markup-расширения (P0).
 //
 // Реализовано как пред-обработка дерева xElement ДО построения виджетов:
 //   1. collect  — собирает ResourceDictionary / <X.Resources>: скалярные
@@ -22,15 +22,15 @@
 //
 // Не входит в этот этап (следующие итерации): ControlTemplate/DataTemplate,
 // триггеры, TwoWay/live-биндинг с INotifyPropertyChanged, конвертеры.
-package base
+package xaml
 
 import (
 	"fmt"
 	"log"
-	"reflect"
 	"strings"
 	"sync"
 
+	"github.com/oops1/headless-gui/v3/widget/base"
 	dgridPkg "github.com/oops1/headless-gui/v3/widget/datagrid"
 )
 
@@ -89,7 +89,7 @@ func preprocessXAML(root *xElement, ctx interface{}) *xamlEnv {
 //
 // collect / process / cloneXElement обходят дерево рекурсивно. Парсер уже
 // держит глубину ≤ maxXAMLDepth, но эти же функции работают и с деревьями,
-// собранными в обход parseXAML (клоны DataTemplate из xaml_binding.go), —
+// собранными в обход parseXAML (клоны DataTemplate из binding.go), —
 // поэтому предел проверяется и здесь. Превышение не ошибка, а обрезка:
 // пред-обработка не критична для корректности, а падать процессом нельзя.
 
@@ -310,7 +310,7 @@ func collectSetters(el *xElement, s *xamlStyle) {
 // ─── Применение ─────────────────────────────────────────────────────────────
 
 // process — точка входа обработки поддерева (глубина 0). Сигнатуру используют
-// живые перестроения из xaml_binding.go, поэтому она сохранена как есть.
+// живые перестроения из binding.go, поэтому она сохранена как есть.
 func (env *xamlEnv) process(el *xElement, ctx interface{}) {
 	env.processAt(el, ctx, 0)
 }
@@ -491,21 +491,21 @@ func (env *xamlEnv) resolveAttrs(el *xElement, ctx interface{}) {
 			continue
 		}
 		if tv == "{Loc}" || strings.HasPrefix(tv, "{Loc ") || strings.HasPrefix(tv, "{Loc}") {
-			key := parseLocKey(tv)
+			key := base.ParseLocKey(tv)
 			if env.inItemTemplate {
-				el.attrs[k] = Tr(key) // внутри DataTemplate — одноразовый перевод
+				el.attrs[k] = base.Tr(key) // внутри DataTemplate — одноразовый перевод
 				continue
 			}
 			if isFoldedItemTag(el.Tag) {
 				// Вкладки, пункты меню и элементы списков виджетами не
 				// становятся — их сворачивает в себя родитель. Разметку
 				// оставляем как есть: перевод и подписку на смену языка
-				// заведёт сборщик родителя (см. xaml_loc_items.go).
+				// заведёт сборщик родителя (см. loc_items.go).
 				continue
 			}
 			name := env.ensureName(el)
 			env.locs = append(env.locs, pendingLoc{name: name, prop: k, key: key})
-			el.attrs[k] = Tr(key) // начальное значение для первого рендера
+			el.attrs[k] = base.Tr(key) // начальное значение для первого рендера
 			continue
 		}
 		if nv, ok := env.resolveMarkup(v, ctx); ok {
@@ -533,7 +533,7 @@ func (env *xamlEnv) expandItemsControl(el *xElement, ctx interface{}) bool {
 	if !ok {
 		return false
 	}
-	items := collectionItems(val)
+	items := base.CollectionItems(val)
 
 	// Сохраняем СЫРОЙ шаблон (до обработки) для живого перестроения.
 	rawTmpl := cloneXElement(tmpl)
@@ -585,31 +585,6 @@ func findDataTemplateRoot(el *xElement) *xElement {
 				}
 			}
 		}
-	}
-	return nil
-}
-
-// collectionItems извлекает элементы из CollectionView, ObservableCollection или среза.
-func collectionItems(v interface{}) []interface{} {
-	if cv, ok := v.(*CollectionView); ok {
-		return cv.Items()
-	}
-	if oc, ok := v.(*dgridPkg.ObservableCollection); ok {
-		return oc.Items()
-	}
-	rv := reflect.ValueOf(v)
-	for rv.Kind() == reflect.Ptr || rv.Kind() == reflect.Interface {
-		if rv.IsNil() {
-			return nil
-		}
-		rv = rv.Elem()
-	}
-	if rv.Kind() == reflect.Slice {
-		out := make([]interface{}, rv.Len())
-		for i := 0; i < rv.Len(); i++ {
-			out[i] = rv.Index(i).Interface()
-		}
-		return out
 	}
 	return nil
 }
@@ -667,7 +642,7 @@ func (env *xamlEnv) applyStyleTo(el *xElement, ctx interface{}) {
 	if len(st.triggers) > 0 && !env.inItemTemplate {
 		name := env.ensureName(el)
 		var defs []triggerDef
-		base := map[string]string{}
+		baseVals := map[string]string{}
 		for _, tr := range st.triggers {
 			d := triggerDef{conds: tr.conds, setters: map[string]string{}}
 			for p, v := range tr.setters {
@@ -675,13 +650,13 @@ func (env *xamlEnv) applyStyleTo(el *xElement, ctx interface{}) {
 					v = nv
 				}
 				d.setters[p] = v
-				if _, seen := base[p]; !seen {
-					base[p] = el.attrs[p] // базовое значение (после слияния стиля)
+				if _, seen := baseVals[p]; !seen {
+					baseVals[p] = el.attrs[p] // базовое значение (после слияния стиля)
 				}
 			}
 			defs = append(defs, d)
 		}
-		env.triggers = append(env.triggers, pendingTrigger{name: name, defs: defs, base: base})
+		env.triggers = append(env.triggers, pendingTrigger{name: name, defs: defs, base: baseVals})
 	}
 }
 

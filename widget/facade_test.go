@@ -1,6 +1,7 @@
 package widget
 
 import (
+	"flag"
 	"go/ast"
 	"go/constant"
 	"go/importer"
@@ -102,9 +103,14 @@ func TestFacade_TypesIdentical(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, name := range src.Scope().Names() {
+		// Имена фасада — экспортированные без //facadegen:skip.
+		names, err := facadegen.Names(f.Config.Dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name := range names {
 			b := src.Scope().Lookup(name)
-			if !b.Exported() || f.Config.Skip[name] {
+			if b == nil || f.Config.Skip[name] {
 				continue
 			}
 			w := facade.Scope().Lookup(name)
@@ -191,4 +197,50 @@ func facadeNames(t *testing.T) map[string]string {
 		}
 	}
 	return out
+}
+
+var updateAPI = flag.Bool("update-api", false, "переписать testdata/api.txt по фасаду")
+
+// Снимок открытого API фасада: имена и виды. Тесты выше сверяют фасад с
+// исходными пакетами тем же разбором, что и генератор, поэтому лишняя
+// директива //facadegen:skip на публичном имени прошла бы их молча — имя
+// просто исчезло бы из widget. Снимок ловит это: любое изменение набора
+// имён — осознанное, с правкой testdata/api.txt
+// (go test ./widget -run APISnapshot -update-api).
+func TestFacade_APISnapshot(t *testing.T) {
+	got := facadeNames(t)
+	lines := make([]string, 0, len(got))
+	for n, kind := range got {
+		lines = append(lines, kind+" "+n)
+	}
+	sort.Strings(lines)
+	const file = "testdata/api.txt"
+	if *updateAPI {
+		if err := os.WriteFile(file, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{}
+	for _, l := range strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n") {
+		if l != "" {
+			want[l] = true
+		}
+	}
+	have := map[string]bool{}
+	for _, l := range lines {
+		have[l] = true
+		if !want[l] {
+			t.Errorf("новое имя в фасаде: %s (если осознанно — -update-api)", l)
+		}
+	}
+	for l := range want {
+		if !have[l] {
+			t.Errorf("из фасада пропало: %s", l)
+		}
+	}
 }

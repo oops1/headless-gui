@@ -1,6 +1,6 @@
-package base
+package xaml
 
-// richtext_xaml.go — тег <RichText> в разметке, по образцу FlowDocument из WPF:
+// richtext.go — тег <RichText> в разметке, по образцу FlowDocument из WPF:
 //
 //	<RichText x:Name="help" Foreground="#DDD" FontSize="10" Padding="8,6">
 //	    <Paragraph FontSize="20" FontWeight="Bold" Margin="0,0,0,6">Справка</Paragraph>
@@ -30,19 +30,21 @@ package base
 import (
 	"strconv"
 	"strings"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // xrStyle — оформление, наследуемое вложенными элементами (как в WPF).
 // Жирность и курсив хранятся флагами, а не именем шрифта: имя выбирается в
 // конце, когда известно, не задал ли элемент свой FontFamily.
 type xrStyle struct {
-	run          RichRun
+	run          base.RichRun
 	bold, italic bool
 }
 
 // buildXAMLRichText строит RichText из элемента разметки.
-func buildXAMLRichText(el xElement) Widget {
-	t := NewRichText()
+func buildXAMLRichText(el xElement) base.Widget {
+	t := base.NewRichText()
 	applyColor(&t.Background, el, "Background")
 	applyColor(&t.TextColor, el, "Foreground")
 	applyColor(&t.LinkColor, el, "LinkForeground")
@@ -74,7 +76,7 @@ func buildXAMLRichText(el xElement) Widget {
 		t.AcceptTab = true
 	}
 
-	var paras []RichParagraph
+	var paras []base.RichParagraph
 	for _, ch := range el.Children {
 		if !strings.EqualFold(ch.Tag, "Paragraph") {
 			continue
@@ -92,13 +94,13 @@ func buildXAMLRichText(el xElement) Widget {
 }
 
 // xrParagraph разбирает <Paragraph>.
-func xrParagraph(el xElement) RichParagraph {
-	var p RichParagraph
+func xrParagraph(el xElement) base.RichParagraph {
+	var p base.RichParagraph
 	switch strings.ToLower(el.attr("TextAlignment", "HorizontalContentAlignment")) {
 	case "center":
-		p.Align = TextAlignCenter
+		p.Align = base.TextAlignCenter
 	case "right":
-		p.Align = TextAlignRight
+		p.Align = base.TextAlignRight
 	}
 	// Margin абзаца WPF → отступ слева и места до и после.
 	if v := el.attr("Margin"); v != "" {
@@ -115,14 +117,14 @@ func xrParagraph(el xElement) RichParagraph {
 		p.SpaceAfter = xatoi(v)
 	}
 
-	base := xrStyle{}
-	xrApply(&base, el)
+	baseStyle := xrStyle{}
+	xrApply(&baseStyle, el)
 	// Текст самого <Paragraph> (без вложенных тегов) — один ран.
 	if el.Text != "" {
-		p.Runs = append(p.Runs, xrRun(base, el.Text))
+		p.Runs = append(p.Runs, xrRun(baseStyle, el.Text))
 	}
 	for _, ch := range el.Children {
-		p.Runs = xrInline(ch, base, p.Runs, 0)
+		p.Runs = xrInline(ch, baseStyle, p.Runs, 0)
 	}
 	return p
 }
@@ -163,17 +165,17 @@ func xrApply(st *xrStyle, el xElement) {
 // xrRun собирает RichRun: шрифт по флагам жирности и курсива, если элемент не
 // назвал свой — синтетического «утолщения» в движке нет, а встроенные
 // начертания есть.
-func xrRun(st xrStyle, text string) RichRun {
+func xrRun(st xrStyle, text string) base.RichRun {
 	r := st.run
 	r.Text = text
 	if r.Font == "" {
 		switch {
 		case st.bold && st.italic:
-			r.Font = BuiltinFontBoldItalic
+			r.Font = base.BuiltinFontBoldItalic
 		case st.bold:
-			r.Font = BuiltinFontBold
+			r.Font = base.BuiltinFontBold
 		case st.italic:
-			r.Font = BuiltinFontItalic
+			r.Font = base.BuiltinFontItalic
 		}
 	}
 	return r
@@ -184,15 +186,15 @@ func xrRun(st xrStyle, text string) RichRun {
 const maxXRichDepth = 32
 
 // xrInline разбирает вложенный элемент абзаца и дописывает раны в out.
-func xrInline(el xElement, base xrStyle, out []RichRun, depth int) []RichRun {
+func xrInline(el xElement, baseStyle xrStyle, out []base.RichRun, depth int) []base.RichRun {
 	if depth > maxXRichDepth {
 		return out
 	}
 	tag := strings.ToLower(el.Tag)
 	if tag == "linebreak" {
-		return append(out, xrRun(base, "\n"))
+		return append(out, xrRun(baseStyle, "\n"))
 	}
-	st := base
+	st := baseStyle
 	switch tag {
 	case "run", "span":
 	case "bold":

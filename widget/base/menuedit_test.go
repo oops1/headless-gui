@@ -277,46 +277,6 @@ func TestMenuBar_EditingClosesTheOpenSubmenu(t *testing.T) {
 
 // ─── XAML ──────────────────────────────────────────────────────────────────
 
-func TestXAML_MenuItemChecked(t *testing.T) {
-	const src = `<Window Width="400" Height="300">
-  <Menu Name="bar">
-    <MenuItem Header="Вид">
-      <MenuItem Header="Тёмная" IsChecked="True" GroupName="theme"/>
-      <MenuItem Header="Светлая" GroupName="theme"/>
-      <MenuItem Header="Панель" IsCheckable="True"/>
-      <MenuItem Header="Обычный"/>
-    </MenuItem>
-  </Menu>
-</Window>`
-
-	_, reg, err := LoadUIFromXAML([]byte(src))
-	if err != nil {
-		t.Fatalf("разбор XAML: %v", err)
-	}
-	mb, ok := reg["bar"].(*MenuBar)
-	if !ok {
-		t.Fatalf("в разметке нет полосы меню: %T", reg["bar"])
-	}
-
-	dark, ok := mb.ItemAt(0, 0)
-	if !ok {
-		t.Fatal("пункт «Тёмная» не найден")
-	}
-	if !dark.Checked || !dark.Checkable || dark.RadioGroup != "theme" {
-		t.Errorf("IsChecked/GroupName не дошли из разметки: %+v", dark)
-	}
-
-	panel, _ := mb.ItemAt(0, 2)
-	if !panel.Checkable || panel.Checked {
-		t.Errorf("IsCheckable без IsChecked дал %+v", panel)
-	}
-
-	plain, _ := mb.ItemAt(0, 3)
-	if plain.Checkable || plain.Checked {
-		t.Errorf("обычный пункт объявлен отмечаемым: %+v", plain)
-	}
-}
-
 // ─── GG-2: функциональные клавиши в KeyBinding ─────────────────────────────
 
 func TestParseKeyName_FunctionAndFriends(t *testing.T) {
@@ -333,8 +293,8 @@ func TestParseKeyName_FunctionAndFriends(t *testing.T) {
 		{"A", KeyA}, {"z", KeyZ},
 		{"5", KeyCode('5')},
 	} {
-		if got := parseKeyName(tc.in); got != tc.want {
-			t.Errorf("parseKeyName(%q) = %d, ждали %d", tc.in, got, tc.want)
+		if got := ParseKeyName(tc.in); got != tc.want {
+			t.Errorf("ParseKeyName(%q) = %d, ждали %d", tc.in, got, tc.want)
 		}
 	}
 }
@@ -344,45 +304,13 @@ func TestParseKeyName_FunctionAndFriends(t *testing.T) {
 // Одиночная «f» в список не входит: это законная буквенная клавиша, и
 // Key="F" обязан означать именно её, а не начало F-ряда.
 func TestParseKeyName_RejectsNonsense(t *testing.T) {
-	if got := parseKeyName("f"); got != KeyCode('F') {
-		t.Errorf("parseKeyName(\"f\") = %d, ждали буквенную клавишу F", got)
+	if got := ParseKeyName("f"); got != KeyCode('F') {
+		t.Errorf("ParseKeyName(\"f\") = %d, ждали буквенную клавишу F", got)
 	}
 	for _, in := range []string{"", "f0", "f25", "f100", "file", "fx", "f1x", " "} {
-		if got := parseKeyName(in); got != KeyUnknown {
-			t.Errorf("parseKeyName(%q) = %d, ждали KeyUnknown", in, got)
+		if got := ParseKeyName(in); got != KeyUnknown {
+			t.Errorf("ParseKeyName(%q) = %d, ждали KeyUnknown", in, got)
 		}
-	}
-}
-
-// Горячая клавиша из разметки доходит до привязки — ради этого запрос и подан.
-func TestXAML_KeyBindingUnderstandsFunctionKeys(t *testing.T) {
-	const src = `<Window Width="400" Height="300">
-  <Window.InputBindings>
-    <KeyBinding Key="F5" Command="Refresh"/>
-    <KeyBinding Key="F12" Modifiers="Ctrl" Command="Tools"/>
-  </Window.InputBindings>
-  <StackPanel/>
-</Window>`
-
-	root, _, err := LoadUIFromXAML([]byte(src))
-	if err != nil {
-		t.Fatalf("разбор XAML: %v", err)
-	}
-	win, ok := root.(*Window)
-	if !ok {
-		t.Fatalf("корень разметки — %T, ждали окно", root)
-	}
-	if len(win.InputBindings) != 2 {
-		t.Fatalf("разобрано %d привязок, ждали две", len(win.InputBindings))
-	}
-	if got := win.InputBindings[0].Key; got != KeyF5 {
-		t.Errorf("Key=\"F5\" разобран как %d, ждали %d", got, KeyF5)
-	}
-	if got := win.InputBindings[1].Key; got != KeyF12 {
-		t.Errorf("Key=\"F12\" разобран как %d, ждали %d", got, KeyF12)
-	}
-	if win.InputBindings[1].Mods&ModCtrl == 0 {
-		t.Error("модификатор Ctrl потерян")
 	}
 }
 
@@ -447,8 +375,8 @@ func TestGrid_FixedRowKeepsItsHeightWhenChildHides(t *testing.T) {
 // Вспомогательное: имена клавиш разбираются без учёта регистра.
 func TestParseKeyName_CaseInsensitive(t *testing.T) {
 	for _, in := range []string{"F5", "f5", "F5 ", " f5"} {
-		if got := parseKeyName(in); got != KeyF5 {
-			t.Errorf("parseKeyName(%q) = %d", strings.TrimSpace(in), got)
+		if got := ParseKeyName(in); got != KeyF5 {
+			t.Errorf("ParseKeyName(%q) = %d", strings.TrimSpace(in), got)
 		}
 	}
 }

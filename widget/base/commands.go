@@ -60,8 +60,12 @@ func matchInputBinding(bindings []InputBinding, code KeyCode, mod KeyMod) (IComm
 	return nil, nil, false
 }
 
-// parseKeyName переводит имя клавиши (XAML Key) в KeyCode.
-func parseKeyName(s string) KeyCode {
+// ParseKeyName переводит имя клавиши (XAML Key) в KeyCode.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ParseKeyName(s string) KeyCode {
 	s = strings.TrimSpace(s)
 	if len(s) == 1 {
 		r := s[0]
@@ -216,8 +220,12 @@ func parseFunctionKey(lower string) KeyCode {
 	return KeyF1 + KeyCode(n-1)
 }
 
-// parseModifiers переводит WPF Modifiers ("Ctrl+Shift") в KeyMod.
-func parseModifiers(s string) KeyMod {
+// ParseModifiers переводит WPF Modifiers ("Ctrl+Shift") в KeyMod.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ParseModifiers(s string) KeyMod {
 	var m KeyMod
 	for _, part := range strings.FieldsFunc(s, func(r rune) bool { return r == '+' || r == ',' || r == ' ' }) {
 		switch strings.ToLower(strings.TrimSpace(part)) {

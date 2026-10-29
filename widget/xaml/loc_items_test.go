@@ -1,6 +1,10 @@
-package base
+package xaml
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
+)
 
 // locItemsXAML — разметка со всеми видами «свёрнутых» строк: заголовки
 // вкладок, пункты меню с подменю, элементы выпадающего списка и подсказка
@@ -32,16 +36,16 @@ const locItemsXAML = `<Window Title="T" Width="400" Height="300">
 // и подсказка поля. Раньше они оставались на языке загрузки — из-за чего
 // приложение выглядело переведённым лишь наполовину.
 func TestLocalizedFoldedItems(t *testing.T) {
-	keepStrings(t)
-	ClearStrings()
+	saveStrings(t)
+	base.ClearStrings()
 	ClearLocalizedItems()
 	t.Cleanup(func() {
-		ClearStrings()
+		base.ClearStrings()
 		ClearLocalizedItems()
-		SetLanguage("EN")
+		base.SetLanguage("EN")
 	})
 
-	RegisterStrings("RU", map[string]string{
+	base.RegisterStrings("RU", map[string]string{
 		"File":          "Файл",
 		"Open":          "Открыть",
 		"Exit":          "Выход",
@@ -53,8 +57,8 @@ func TestLocalizedFoldedItems(t *testing.T) {
 		"Guest":         "Гость",
 		"Enter a name":  "Введите имя",
 	})
-	SetFallbackLanguage("EN")
-	SetLanguage("EN")
+	base.SetFallbackLanguage("EN")
+	base.SetLanguage("EN")
 
 	_, reg, scope, err := LoadUIFromXAMLBindings([]byte(locItemsXAML), nil)
 	if err != nil {
@@ -62,10 +66,10 @@ func TestLocalizedFoldedItems(t *testing.T) {
 	}
 	_ = scope
 
-	tabs, _ := reg["tabs"].(*TabControl)
-	menu, _ := reg["menu"].(*MenuBar)
-	combo, _ := reg["combo"].(*Dropdown)
-	edit, _ := reg["edit"].(*TextInput) // <TextBox> без AcceptsReturn — однострочное поле
+	tabs, _ := reg["tabs"].(*base.TabControl)
+	menu, _ := reg["menu"].(*base.MenuBar)
+	combo, _ := reg["combo"].(*base.Dropdown)
+	edit, _ := reg["edit"].(*base.TextInput) // <TextBox> без AcceptsReturn — однострочное поле
 	if tabs == nil || menu == nil || combo == nil || edit == nil {
 		t.Fatalf("виджеты не найдены: tabs=%v menu=%v combo=%v edit=%v", tabs, menu, combo, edit)
 	}
@@ -88,7 +92,7 @@ func TestLocalizedFoldedItems(t *testing.T) {
 	}
 
 	// ── Переключаем язык ─────────────────────────────────────────────────────
-	SetLanguage("RU")
+	base.SetLanguage("RU")
 
 	if got := tabs.TabHeader(0); got != "Ввод" {
 		t.Errorf("вкладка 0 после смены языка = %q, want Ввод", got)
@@ -128,9 +132,9 @@ func TestLocalizedFoldedItems(t *testing.T) {
 }
 
 // findLabelWithText ищет среди зарегистрированных виджетов подпись с текстом.
-func findLabelWithText(reg map[string]Widget, want string) *Label {
+func findLabelWithText(reg map[string]base.Widget, want string) *base.Label {
 	for _, w := range reg {
-		if l, ok := w.(*Label); ok && l.Text() == want {
+		if l, ok := w.(*base.Label); ok && l.Text() == want {
 			return l
 		}
 	}

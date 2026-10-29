@@ -1,8 +1,10 @@
-package base
+package xaml
 
 import (
 	"image"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // GG-75: загруженное дерево можно отписать от смены языка.
@@ -11,11 +13,7 @@ import (
 // свёрнутые строки (меню, вкладки, колонки) копились в общем списке. После N
 // загрузок одна смена языка переводила и перекладывала N мёртвых деревьев.
 
-func locListenerCount() int {
-	langMu.RLock()
-	defer langMu.RUnlock()
-	return len(languageListeners)
-}
+func locListenerCount() int { return languageListenerCount() }
 
 func locItemCount() int {
 	locItemsMu.Lock()
@@ -31,17 +29,17 @@ func xamlScopeCount() int {
 
 func setupLocRelease(t *testing.T) {
 	t.Helper()
-	keepStrings(t)
-	ClearStrings()
+	saveStrings(t)
+	base.ClearStrings()
 	ClearLocalizedItems()
 	t.Cleanup(func() {
-		ClearStrings()
+		base.ClearStrings()
 		ClearLocalizedItems()
-		SetLanguage("EN")
+		base.SetLanguage("EN")
 	})
-	RegisterStrings("RU", map[string]string{"File": "Файл", "Open": "Открыть", "Login": "Логин"})
-	SetFallbackLanguage("EN")
-	SetLanguage("EN")
+	base.RegisterStrings("RU", map[string]string{"File": "Файл", "Open": "Открыть", "Login": "Логин"})
+	base.SetFallbackLanguage("EN")
+	base.SetLanguage("EN")
 }
 
 // ReleaseXAML снимает и слушатель языка, и свёрнутые строки дерева.
@@ -86,11 +84,11 @@ func TestBindingScopeDispose_OnlyOwnItems(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer scope2.Dispose()
-	menu1 := reg1["menu"].(*MenuBar)
-	menu2 := reg2["menu"].(*MenuBar)
+	menu1 := reg1["menu"].(*base.MenuBar)
+	menu2 := reg2["menu"].(*base.MenuBar)
 
 	scope1.Dispose()
-	SetLanguage("RU")
+	base.SetLanguage("RU")
 
 	if got := menu2.Items()[0].Text; got != "Файл" {
 		t.Errorf("живое дерево не перевелось: %q", got)
@@ -125,7 +123,7 @@ func TestReleaseXAML_NothingToReleaseNotTracked(t *testing.T) {
 // Width получает ширину под новую подпись.
 func TestLanguageChange_RelayoutsAutoWidth(t *testing.T) {
 	setupLocRelease(t)
-	RegisterStrings("RU", map[string]string{"Regexp": "регулярное выражение"})
+	base.RegisterStrings("RU", map[string]string{"Regexp": "регулярное выражение"})
 
 	root, reg, err := LoadUIFromXAML([]byte(`<Window Title="T" Width="600" Height="100">
   <DockPanel Name="dp" Left="0" Top="0" Width="600" Height="30">
@@ -138,12 +136,12 @@ func TestLanguageChange_RelayoutsAutoWidth(t *testing.T) {
 	}
 	defer ReleaseXAML(root)
 	root.SetBounds(image.Rect(0, 0, 600, 100))
-	cb := reg["cb"].(*CheckBox)
+	cb := reg["cb"].(*base.CheckBox)
 	before := cb.Bounds().Dx()
 
-	SetLanguage("RU")
+	base.SetLanguage("RU")
 
-	want := max(80, checkBoxContentWidth(cb))
+	want := max(80, checkBoxAutoWidth(cb))
 	if got := cb.Bounds().Dx(); got != want || got <= before {
 		t.Fatalf("ширина флажка после смены языка %d (до — %d), ждал %d", got, before, want)
 	}

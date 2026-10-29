@@ -22,14 +22,18 @@ type DesiredSizer interface {
 	DesiredSize() (w, h int)
 }
 
-// desiredOf возвращает желаемый размер виджета.
+// DesiredOf возвращает желаемый размер виджета.
 //
 // Порядок такой: сперва DesiredSize (виджет знает про себя больше всех), потом
 // размер, заданный разметкой (GetXAMLSize), и лишь потом текущие границы. Тот
 // же порядок использует раскладка DockPanel и StackPanel — иначе виджет,
 // который уже разложили, навсегда закрепил бы за собой первую попавшуюся
 // высоту.
-func desiredOf(w Widget) (int, int) {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func DesiredOf(w Widget) (int, int) {
 	dw, dh := 0, 0
 	if ds, ok := w.(DesiredSizer); ok {
 		dw, dh = ds.DesiredSize()
@@ -74,7 +78,7 @@ func (sp *StackPanel) DesiredSize() (int, int) {
 		if !IsWidgetVisible(child) {
 			continue
 		}
-		cw, ch := desiredOf(child)
+		cw, ch := DesiredOf(child)
 		m := marginOf(child)
 		if n > 0 {
 			along += sp.Spacing
@@ -112,7 +116,7 @@ func (sv *ScrollView) ContentSize() (int, int) {
 		if !IsWidgetVisible(child) {
 			continue
 		}
-		cw, ch := desiredOf(child)
+		cw, ch := DesiredOf(child)
 		m := marginOf(child)
 		// По нижнему краю ребёнка, а не суммой высот: дети прокрутки обычно
 		// расставлены абсолютными координатами внутри неё, и сумма высот дала
@@ -198,7 +202,7 @@ func (e *Expander) DesiredSize() (int, int) {
 		if !IsWidgetVisible(c) {
 			continue
 		}
-		if _, ch := desiredOf(c); ch > content {
+		if _, ch := DesiredOf(c); ch > content {
 			content = ch
 		}
 	}

@@ -252,7 +252,7 @@ var thinClock = time.Now
 
 // animateQuiet — AnimateOwned без полной инвалидации при заведении.
 //
-// Animate/AnimateOwned будят движок полной перерисовкой (notifyUIChanged →
+// Animate/AnimateOwned будят движок полной перерисовкой (NotifyUIChanged →
 // Engine.Invalidate), и это верно для анимации, которая что-то меняет на весь
 // экран. Здесь анимация меняет только узкую полосу и сама заявляет её
 // область (thinInvalidate), а таймер скрытия не меняет ничего: полная

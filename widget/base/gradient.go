@@ -9,9 +9,6 @@ package base
 import (
 	"image"
 	"image/color"
-	"sort"
-	"strconv"
-	"strings"
 )
 
 // GradientStop — опорная точка градиента (цвет на смещении 0..1).
@@ -149,84 +146,4 @@ func drawGradientScaled(ctx DrawContext, r image.Rectangle, g *LinearGradient) {
 		img.SetRGBA(0, y, g.colorAt(float64(y)/float64(h-1)))
 	}
 	ctx.DrawImageScaled(img, r.Min.X, r.Min.Y, w, h)
-}
-
-// encodeGradient кодирует <LinearGradientBrush> в строку для передачи через
-// атрибут: "h|v;#RRGGBBAA@offset;...". Возвращает "" если не градиент.
-func encodeGradient(brush *xElement) string {
-	if !strings.EqualFold(brush.Tag, "LinearGradientBrush") {
-		return ""
-	}
-	orient := "v"
-	if gradientIsHorizontal(brush.attr("StartPoint"), brush.attr("EndPoint")) {
-		orient = "h"
-	}
-	var parts []string
-	parts = append(parts, orient)
-	for i := range brush.Children {
-		s := &brush.Children[i]
-		if !strings.EqualFold(s.Tag, "GradientStop") {
-			continue
-		}
-		col := s.attr("Color")
-		off := s.attr("Offset")
-		if col == "" {
-			continue
-		}
-		parts = append(parts, col+"@"+off)
-	}
-	if len(parts) < 3 {
-		return ""
-	}
-	return strings.Join(parts, ";")
-}
-
-func gradientIsHorizontal(sp, ep string) bool {
-	sx, sy := parsePointXY(sp)
-	ex, ey := parsePointXY(ep)
-	return absf(ex-sx) > absf(ey-sy)
-}
-
-func parsePointXY(s string) (float64, float64) {
-	parts := strings.Split(strings.TrimSpace(s), ",")
-	if len(parts) != 2 {
-		return 0, 0
-	}
-	x, _ := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
-	y, _ := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-	return x, y
-}
-
-func absf(v float64) float64 {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
-
-// parseGradient разбирает строку из encodeGradient обратно в *LinearGradient.
-func parseGradient(s string) *LinearGradient {
-	parts := strings.Split(s, ";")
-	if len(parts) < 3 {
-		return nil
-	}
-	g := &LinearGradient{Horizontal: parts[0] == "h"}
-	for _, p := range parts[1:] {
-		at := strings.IndexByte(p, '@')
-		colStr, offStr := p, ""
-		if at >= 0 {
-			colStr, offStr = p[:at], p[at+1:]
-		}
-		col, err := parseXAMLColor(colStr)
-		if err != nil {
-			continue
-		}
-		off, _ := strconv.ParseFloat(strings.TrimSpace(offStr), 64)
-		g.Stops = append(g.Stops, GradientStop{Color: col, Offset: off})
-	}
-	if len(g.Stops) < 2 {
-		return nil
-	}
-	sort.SliceStable(g.Stops, func(i, j int) bool { return g.Stops[i].Offset < g.Stops[j].Offset })
-	return g
 }

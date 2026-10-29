@@ -4,7 +4,7 @@
 // не изменился, и перерисовывает только damage-область. Виджеты сообщают об
 // изменениях сами: Base.Invalidate()/Base.SetBounds шлют свой прямоугольник
 // через notifyRectChanged (точечно), слой данных (BindingScope.Refresh,
-// перестроение ItemsControl, смена языка/локали) — через notifyUIChanged
+// перестроение ItemsControl, смена языка/локали) — через NotifyUIChanged
 // (полная инвалидация).
 //
 // Сеттеры виджетов (SetText, SetValue, SetHovered, ...) уже инвалидируют
@@ -20,7 +20,7 @@ import (
 
 // Модель уведомлений — ШИРОКОВЕЩАТЕЛЬНЫЙ РЕЕСТР (а не «последний движок
 // выигрывает»). Каждый живой движок регистрирует себя через RegisterUINotifier
-// при создании и снимает регистрацию в Stop. notifyUIChanged/notifyRectChanged
+// при создании и снимает регистрацию в Stop. NotifyUIChanged/notifyRectChanged
 // рассылают уведомление ВСЕМ зарегистрированным приёмникам.
 //
 // Зачем: при ДВУХ и более живых движках (главное окно + hosted-диалог/попап,
@@ -185,11 +185,15 @@ func TextMetricsRev() uint64 { return textMetricsRev.Load() }
 // смене DPI/масштаба; приложениям обычно не нужна.
 func BumpTextMetricsRev() { textMetricsRev.Add(1) }
 
-// notifyUIChanged сообщает всем приёмникам, что содержимое UI могло измениться.
+// NotifyUIChanged сообщает всем приёмникам, что содержимое UI могло измениться.
 // Дёшево и потокобезопасно; no-op, если приёмников нет.
-func notifyUIChanged() { notifyUIChangedTo(nil) }
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func NotifyUIChanged() { notifyUIChangedTo(nil) }
 
-// notifyUIChangedTo — notifyUIChanged дерева владельца to (nil — всем):
+// notifyUIChangedTo — NotifyUIChanged дерева владельца to (nil — всем):
 // чужие движки пропускаются (owner.go).
 func notifyUIChangedTo(to Owner) {
 	uiNotifyMu.RLock()

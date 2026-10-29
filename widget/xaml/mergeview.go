@@ -1,13 +1,15 @@
-package base
+package xaml
 
 import (
 	"io"
 	"path"
 	"strconv"
 	"strings"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
-// mergeview_xaml.go — тег <MergeView> в разметке.
+// mergeview.go — тег <MergeView> в разметке.
 //
 //	<MergeView x:Name="merge" OursFile="ours.go" BaseFile="base.go" TheirsFile="theirs.go"
 //	           ShowBase="True" SyntaxHighlight="True" ReadOnly="False"
@@ -20,8 +22,8 @@ import (
 // (SEC-8). Разметка из fs.FS кладёт содержимое как текст: путей на диске у
 // вкомпилированных файлов нет.
 
-func buildXAMLMergeView(el xElement, baseDir string) Widget {
-	m := NewMergeView(el.attr("FontFamily"), el.attr("HeaderFontFamily"))
+func buildXAMLMergeView(el xElement, baseDir string) base.Widget {
+	m := base.NewMergeView(el.attr("FontFamily"), el.attr("HeaderFontFamily"))
 	if fs := el.attr("FontSize"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			m.SetFont("", "", v)
@@ -37,9 +39,9 @@ func buildXAMLMergeView(el xElement, baseDir string) Widget {
 	flag("ReadOnly", m.SetReadOnly)
 	if v := el.attr("ConflictStyle"); v != "" {
 		if strings.EqualFold(v, "diff3") {
-			m.SetStyle(MergeStyleDiff3)
+			m.SetStyle(base.MergeStyleDiff3)
 		} else {
-			m.SetStyle(MergeStyleMerge)
+			m.SetStyle(base.MergeStyleMerge)
 		}
 	}
 
@@ -48,17 +50,17 @@ func buildXAMLMergeView(el xElement, baseDir string) Widget {
 		m.SetMarkerSize(xatoi(v))
 	}
 
-	base, ours, theirs := el.attr("BaseFile"), el.attr("OursFile"), el.attr("TheirsFile")
-	if base != "" && ours != "" && theirs != "" {
-		b, okB := readXAMLText(baseDir, base)
+	baseFile, ours, theirs := el.attr("BaseFile"), el.attr("OursFile"), el.attr("TheirsFile")
+	if baseFile != "" && ours != "" && theirs != "" {
+		b, okB := readXAMLText(baseDir, baseFile)
 		o, okO := readXAMLText(baseDir, ours)
 		t, okT := readXAMLText(baseDir, theirs)
 		if okB && okO && okT {
 			m.SetTexts(b, o, t)
 			m.SetSides(
-				MergeSideInfo{Title: Tr("merge.side.ours"), Note: xamlBase(ours)},
-				MergeSideInfo{Title: Tr("merge.side.base"), Note: xamlBase(base)},
-				MergeSideInfo{Title: Tr("merge.side.theirs"), Note: xamlBase(theirs)},
+				base.MergeSideInfo{Title: base.Tr("merge.side.ours"), Note: xamlBase(ours)},
+				base.MergeSideInfo{Title: base.Tr("merge.side.base"), Note: xamlBase(baseFile)},
+				base.MergeSideInfo{Title: base.Tr("merge.side.theirs"), Note: xamlBase(theirs)},
 			)
 		}
 	}
@@ -69,7 +71,7 @@ func buildXAMLMergeView(el xElement, baseDir string) Widget {
 // Ошибка (нет файла, путь за пределами каталога) оставляет контрол пустым:
 // окно без слияния понятнее, чем окно, не открывшееся из-за одного файла.
 func readXAMLText(baseDir, src string) (string, bool) {
-	f, err := openXAMLResource(baseDir, src)
+	f, err := base.OpenResource(baseDir, src)
 	if err != nil {
 		return "", false
 	}

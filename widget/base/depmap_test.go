@@ -1,8 +1,10 @@
 package base
 
 // depmap_test.go — карта зависимостей пакета по будущим подпакетам
-// (ADR-0012, этап 8). Группы — по именам файлов; порядок — целевой граф
-// пакетов: всё → base (core); richtext → text; dialog → chrome, text;
+// (ADR-0012, этап 8). XAML с 8.2b — отдельный пакет widget/xaml: его рёбра
+// проверяет компилятор (xaml → base, обратного импорта нет). Группы — по
+// именам файлов; порядок — целевой граф пакетов: всё → base (core);
+// richtext → text; dialog → chrome, text;
 // text, richtext, dialog, dock, chrome → xaml (регистрация строителей);
 // clipboard — провайдер в ядре, реализация в platform. Остальное —
 // обратные рёбра, которые этап разрывает; сегодняшние перечислены в базе:
@@ -29,7 +31,6 @@ func TestDepMap_SubpackageOrder(t *testing.T) {
 		Dir:  ".",
 		Path: "widget/base",
 		Groups: []depmap.Group{
-			{Name: "xaml", Match: re(`^xaml`)},
 			{Name: "richtext", Match: re(`^richtext`)},
 			{Name: "text", Match: re(`^text(box|input)|^ime\.go$`)},
 			{Name: "dialog", Match: re(`^dialog|^messagebox`)},
@@ -54,14 +55,8 @@ func TestDepMap_SubpackageOrder(t *testing.T) {
 			"core → dock",
 			"core → richtext",
 			"core → text",
-			"core → xaml",
 			"dock → chrome",
 			"dock → dialog",
-			"xaml → chrome",
-			"xaml → dialog",
-			"xaml → dock",
-			"xaml → richtext",
-			"xaml → text",
 		},
 		Top: 6,
 	})

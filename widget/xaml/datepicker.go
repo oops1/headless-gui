@@ -1,12 +1,14 @@
-package base
+package xaml
 
 import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
-// datepicker_xaml.go — тег <DatePicker> в разметке.
+// datepicker.go — тег <DatePicker> в разметке.
 //
 //	<DatePicker x:Name="since" SelectedDate="2026-09-13"
 //	            DisplayDateStart="2020-01-01" DisplayDateEnd="2026-12-31"
@@ -19,8 +21,8 @@ import (
 // DateFormat принимает шаблон в духе .NET (dd, d, MM, M, yyyy, yy) или готовую
 // раскладку time.Format.
 
-func buildXAMLDatePicker(el xElement) Widget {
-	p := NewDatePicker()
+func buildXAMLDatePicker(el xElement) base.Widget {
+	p := base.NewDatePicker()
 	if v := el.attr("DateFormat", "SelectedDateFormat"); v != "" {
 		p.SetFormat(dotnetDateLayout(v))
 	}

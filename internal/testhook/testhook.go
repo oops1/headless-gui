@@ -25,3 +25,20 @@ var ResetLanguage func()
 // чтения с процессным кэшем: тесты считают по ней, какие файлы прочитаны.
 // nil — обычное чтение.
 var ReadFallbackFont func(path string) ([]byte, error)
+
+// Точки для внутренних тестов пакетов-соседей widget/base (widget/xaml и
+// другие подпакеты этапа 8): их тесты не видят неэкспортированного состояния
+// base, а вернуть его к исходному после теста нужно. Задаёт widget/base при
+// инициализации; до его загрузки nil.
+
+// SaveTextMeasurer запоминает действующий измеритель текста; restore
+// возвращает его (и сбрасывает мемоизацию замеров).
+var SaveTextMeasurer func() (restore func())
+
+// SaveStrings запоминает таблицы переводов и запасной язык; restore
+// возвращает их. Звать перед ClearStrings: встроенные таблицы регистрируются
+// один раз при загрузке пакета.
+var SaveStrings func() (restore func())
+
+// LanguageListeners — число подписчиков смены языка.
+var LanguageListeners func() int

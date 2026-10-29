@@ -1,13 +1,15 @@
-// xaml_registry.go — реестр пользовательских XAML-виджетов.
+// registry.go — реестр пользовательских XAML-виджетов.
 //
 // Позволяет внешним пакетам регистрировать свои виджеты для использования
 // в XAML-разметке. Зарегистрированные виджеты обрабатываются наравне
 // со встроенными при парсинге XAML.
-package base
+package xaml
 
 import (
 	"strings"
 	"sync"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // XAMLAttrs предоставляет доступ к атрибутам XAML-элемента.
@@ -33,7 +35,7 @@ type XAMLAttrs interface {
 
 // XAMLWidgetBuilder — функция-конструктор пользовательского XAML-виджета.
 // Получает атрибуты XAML-элемента, возвращает готовый виджет.
-type XAMLWidgetBuilder func(attrs XAMLAttrs) (Widget, error)
+type XAMLWidgetBuilder func(attrs XAMLAttrs) (base.Widget, error)
 
 // ─── Глобальный реестр ──────────────────────────────────────────────────────
 

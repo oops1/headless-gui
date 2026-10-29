@@ -1,8 +1,8 @@
-// xaml_parse.go — XAML XML-парсер и утилиты разбора.
+// parse.go — XAML XML-парсер и утилиты разбора.
 //
 // Содержит: xElement (внутреннее дерево), парсинг XML → xElement,
 // парсинг цветов, Margin и вспомогательные функции.
-package base
+package xaml
 
 import (
 	"bytes"
@@ -13,6 +13,8 @@ import (
 	"image/color"
 	"strconv"
 	"strings"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // ─── Предел вложенности (SEC-7) ─────────────────────────────────────────────
@@ -169,36 +171,36 @@ func parseXAMLEl(d *xml.Decoder, start xml.StartElement, el *xElement, depth int
 // ─── Margin ────────────────────────────────────────────────────────────────
 
 // parseMargin разбирает WPF Margin: "5", "5,10", "1,2,3,4".
-func parseMargin(s string) Margin {
+func parseMargin(s string) base.Margin {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return Margin{}
+		return base.Margin{}
 	}
 	parts := strings.Split(s, ",")
 	switch len(parts) {
 	case 1:
 		v := xatoi(parts[0])
-		return Margin{Left: v, Top: v, Right: v, Bottom: v}
+		return base.Margin{Left: v, Top: v, Right: v, Bottom: v}
 	case 2:
 		h := xatoi(parts[0])
 		v := xatoi(parts[1])
-		return Margin{Left: h, Top: v, Right: h, Bottom: v}
+		return base.Margin{Left: h, Top: v, Right: h, Bottom: v}
 	case 4:
-		return Margin{
+		return base.Margin{
 			Left:   xatoi(parts[0]),
 			Top:    xatoi(parts[1]),
 			Right:  xatoi(parts[2]),
 			Bottom: xatoi(parts[3]),
 		}
 	default:
-		return Margin{}
+		return base.Margin{}
 	}
 }
 
 // ─── Цвета ─────────────────────────────────────────────────────────────────
 
 // parseXAMLColor разбирает строку цвета: "#RRGGBB", "#RRGGBBAA" или именованный цвет.
-// Для hex-значений использует parseColor из loader.go.
+// Для hex-значений использует ParseRGBAHex из loader.go.
 func parseXAMLColor(s string) (color.RGBA, error) {
 	s = strings.TrimSpace(s)
 	switch strings.ToLower(s) {
@@ -249,7 +251,7 @@ func parseXAMLColor(s string) (color.RGBA, error) {
 	case "wheat":
 		return color.RGBA{R: 245, G: 222, B: 179, A: 255}, nil
 	default:
-		return parseColor(s) // "#RRGGBB" / "#RRGGBBAA"
+		return base.ParseRGBAHex(s) // "#RRGGBB" / "#RRGGBBAA"
 	}
 }
 

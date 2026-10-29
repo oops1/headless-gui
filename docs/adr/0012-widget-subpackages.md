@@ -104,10 +104,18 @@ ErrXAMLTooDeep = base.ErrXAMLTooDeep`). Фасад генерирует инст
 `widget/<пакет>_gen.go`); он перегенерируется на каждом шаге этапа и
 проверяется тестом: файлы совпадают с выводом генератора, все
 экспортированные имена `base` и подпакетов присутствуют в `widget` тем же
-видом, лишних нет. Генератор читает синтаксис (`go/ast`), а не типы: все
-файлы пакета, кроме тестов, независимо от тегов сборки, — вывод один на всех
-ОС и не требует проверки типов зависимостей; правильность сигнатур
-проверяет компилятор (обёртка с чужим типом параметра не соберётся).
+видом, лишних нет, и по типам они тождественны (`go/types`: алиас — тот же
+тип, сигнатуры `Identical`, у констант тип и значение). Генератор читает
+синтаксис (`go/ast`), а не типы: все файлы пакета, кроме тестов, независимо
+от тегов сборки, — вывод один на всех ОС и не требует проверки типов
+зависимостей.
+
+Исключение — служебные имена, которые `base` экспортирует только для
+соседних подпакетов (с 8.2b: `NotifyUIChanged`, `DesiredOf`, `ParseKeyName`,
+`OpenResource` и др.): в документации у них директива `//facadegen:skip`,
+и в фасад они не идут — открытый API `widget` от разбиения не растёт. Их
+тестам неэкспортированное состояние `base` отдаёт `internal/testhook`, как
+уже отдавал сброс языка.
 
 Почему это сохраняет программы без правок. Алиас — тот же тип: методы,
 встраивание (`struct{ widget.Base }`), утверждения типов
@@ -213,8 +221,8 @@ error)`. Логика контейнера живёт в строителе, в 
 | Шаг | Что | Приёмка |
 |---|---|---|
 | 8.2a | `widget/base`: перенос всего кода и тестов; `internal/facadegen`; фасад `widget`; тест полноты фасада | `go test ./...`; showcase, webshowcase, desktopdemo и Tandem без правок; `go vet`; матрица |
-| 8.2b | `widget/xaml`: парсер, реестр, загрузчик, биндинг, строители базовых виджетов; не-XAML помощники в `base/resources.go`; `LoadUIFromXAML*` в фасаде с регистрацией по первому вызову | то же; тест: программа без XAML не содержит парсера (`go tool nm`) |
-| 8.3 | `widget/text`: `TextBox`, `TextInput`, `ime.go`; `accesstext` методы с типами; `DesiredSize` вместо ветки по типу; помощники в `base/textutil.go`; `text.RegisterXAML` | то же; `depmap`: `core → text` и `xaml → text` исчезли |
+| 8.2b | `widget/xaml`: парсер, реестр, загрузчик, биндинг, строители всех виджетов (и тех, что пока в `base`); не-XAML помощники в `base/resources.go` | то же; тест: программа без XAML не содержит парсера (`go tool nm`) |
+| 8.3 | `widget/text`: `TextBox`, `TextInput`, `ime.go`; `accesstext` методы с типами; `DesiredSize` вместо ветки по типу; помощники в `base/textutil.go`; реестр §4 (`xaml.Registry`, `Element`, `Loader`, `Builder`) — первый строитель вне `xaml`; `text.RegisterXAML`; `LoadUIFromXAML*` в фасаде с регистрацией по первому вызову | то же; `depmap`: `core → text` и `xaml → text` исчезли |
 | 8.4 | `widget/richtext` (после `text`); `richtext.RegisterXAML` | `core → richtext`, `xaml → richtext` исчезли |
 | 8.5 | `widget/chrome`: `Window`; `ResizeEdge`, `WindowTitleStyle`, цветовые помощники в `base`; `TitleNavButton`; методы `Window` из `dialog_chrome.go`; `BackgroundColorer`; `NavTitleHost` и `NavHost` в фасаде; `chrome.RegisterXAML` | `core → chrome`, `xaml → chrome`, `chrome → dialog`, `chrome → dock` исчезли |
 | 8.6 | `widget/dialog` (после `chrome`, `text`) и `widget/dock`; `ChildLayouter`, `AccessDescriber`; `dialog.RegisterXAML`, `dock.RegisterXAML` | оставшиеся обратные рёбра исчезли; база `depmap` пуста |

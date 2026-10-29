@@ -1,4 +1,4 @@
-// xaml_binding.go — живая привязка данных (Data Binding) для XAML (P0+).
+// binding.go — живая привязка данных (Data Binding) для XAML (P0+).
 //
 // Поддержано:
 //   - {Binding Path}            — OneWay (модель → UI) по умолчанию
@@ -8,10 +8,10 @@
 //   - TwoWay (UI → модель) для TextBox, CheckBox, ToggleButton, RadioButton, Slider
 //   - BindingScope.SetDataContext / Refresh для ручного управления
 //
-// Реализация связывает виджеты по имени (см. ensureName в xaml_resources.go):
+// Реализация связывает виджеты по имени (см. ensureName в resources.go):
 // безымянным элементам с {Binding} присваивается авто-имя, билдер регистрирует
 // их в registry, а BindingScope резолвит имя → виджет.
-package base
+package xaml
 
 import (
 	"fmt"
@@ -22,6 +22,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/oops1/headless-gui/v3/widget/base"
 	dgridPkg "github.com/oops1/headless-gui/v3/widget/datagrid"
 )
 
@@ -98,7 +99,7 @@ type pendingBinding struct {
 
 // bindingTarget — связанная цель (виджет + свойство + спецификация).
 type bindingTarget struct {
-	w    Widget
+	w    base.Widget
 	prop string
 	spec bindingSpec
 }
@@ -127,7 +128,7 @@ type pendingTrigger struct {
 
 // triggerTarget — связанный DataTrigger.
 type triggerTarget struct {
-	w    Widget
+	w    base.Widget
 	defs []triggerDef
 	base map[string]string
 }
@@ -135,9 +136,9 @@ type triggerTarget struct {
 // elemBindingTarget — привязка свойства одного виджета к свойству другого
 // ({Binding ElementName=src, Path=srcProp}). Однонаправленно src → target.
 type elemBindingTarget struct {
-	target  Widget
+	target  base.Widget
 	prop    string
-	src     Widget
+	src     base.Widget
 	srcProp string
 	spec    bindingSpec
 }
@@ -153,11 +154,11 @@ type pendingItems struct {
 
 // itemsTarget — связанный ItemsControl (panel = развёрнутый StackPanel).
 type itemsTarget struct {
-	panel      Widget
+	panel      base.Widget
 	template   xElement
 	sourcePath string
 	env        *xamlEnv
-	reg        map[string]Widget
+	reg        map[string]base.Widget
 	baseDir    string
 }
 
@@ -170,7 +171,7 @@ type pendingLoc struct {
 
 // locTarget — связанная локализованная строка (виджет + свойство + ключ).
 type locTarget struct {
-	w    Widget
+	w    base.Widget
 	prop string
 	key  string
 }
@@ -185,11 +186,11 @@ type pendingVirtual struct {
 
 // virtualTarget — связанный VirtualizingItemsControl с шаблоном строки.
 type virtualTarget struct {
-	vic        *VirtualizingItemsControl
+	vic        *base.VirtualizingItemsControl
 	template   xElement
 	sourcePath string
 	env        *xamlEnv
-	reg        map[string]Widget
+	reg        map[string]base.Widget
 	baseDir    string
 }
 
@@ -204,8 +205,8 @@ type BindingScope struct {
 	virtuals []virtualTarget
 	locs     []locTarget
 	cmdTgts  []commandTarget
-	treeSrc  map[*TreeViewWidget]*dgridPkg.ObservableCollection // источник, уже поданный дереву
-	reg      map[string]Widget
+	treeSrc  map[*base.TreeViewWidget]*dgridPkg.ObservableCollection // источник, уже поданный дереву
+	reg      map[string]base.Widget
 	baseDir  string
 	updating atomic.Bool // защита от петли обратной связи во время Refresh
 
@@ -232,7 +233,7 @@ type BindingScope struct {
 	locOwner *locOwner
 	// root — корень дерева: при смене языка он переразмечается, потому что
 	// подписи сменили длину (GG-74), и по нему дерево освобождает ReleaseXAML.
-	root Widget
+	root base.Widget
 }
 
 // xamlScopes — scope деревьев, загруженных без возврата scope
@@ -242,7 +243,7 @@ type BindingScope struct {
 // держащем ничего, сама стала бы утечкой.
 var (
 	xamlScopesMu sync.Mutex
-	xamlScopes   = map[Widget]*BindingScope{}
+	xamlScopes   = map[base.Widget]*BindingScope{}
 )
 
 // ReleaseXAML освобождает дерево, загруженное любой из функций LoadUIFromXAML*:
@@ -257,7 +258,7 @@ var (
 // одна смена языка переводила и перекладывала все мёртвые деревья (GG-75).
 // Для дерева из LoadUIFromXAMLBindings то же делает scope.Dispose. Повторный
 // вызов и корень, который нечего освобождать, безопасны.
-func ReleaseXAML(root Widget) {
+func ReleaseXAML(root base.Widget) {
 	if root == nil {
 		return
 	}
@@ -291,7 +292,7 @@ type collSubscription struct {
 
 // viewSubscription — оформленная подписка на пересчёт CollectionView.
 type viewSubscription struct {
-	cv *CollectionView
+	cv *base.CollectionView
 	id int
 }
 
@@ -313,7 +314,7 @@ func (s *BindingScope) addCollSub(oc *dgridPkg.ObservableCollection, id int) {
 }
 
 // addViewSub запоминает дескриптор подписки на CollectionView для Dispose.
-func (s *BindingScope) addViewSub(cv *CollectionView, id int) {
+func (s *BindingScope) addViewSub(cv *base.CollectionView, id int) {
 	if cv == nil || id <= 0 {
 		return
 	}
@@ -325,7 +326,7 @@ func (s *BindingScope) addViewSub(cv *CollectionView, id int) {
 // commandTarget — привязка команды из DataContext: Button.Command или
 // именованная команда виджета (commandSetter, например DiffView.SaveCommand).
 type commandTarget struct {
-	btn  *Button
+	btn  *base.Button
 	cs   commandSetter
 	prop string
 	path string
@@ -338,12 +339,12 @@ type commandTarget struct {
 // виджетов из разметки было некуда деться: приложению приходилось доставать
 // виджет по имени и вешать обработчик кодом.
 type commandSetter interface {
-	SetCommand(name string, cmd ICommand) bool
+	SetCommand(name string, cmd base.ICommand) bool
 }
 
 // newBindingScope строит scope из собранных в env привязок/триггеров/ItemsControl,
 // резолвя имена элементов в registry.
-func newBindingScope(ctx interface{}, env *xamlEnv, reg map[string]Widget, baseDir string) *BindingScope {
+func newBindingScope(ctx interface{}, env *xamlEnv, reg map[string]base.Widget, baseDir string) *BindingScope {
 	s := &BindingScope{ctx: ctx, reg: reg, baseDir: baseDir, langListenerID: -1, subHandle: -1}
 	if env == nil {
 		return s
@@ -355,7 +356,7 @@ func newBindingScope(ctx interface{}, env *xamlEnv, reg map[string]Widget, baseD
 		}
 		// Command — привязка объекта-команды (не строкового значения).
 		if strings.EqualFold(pb.prop, "Command") {
-			if btn, ok2 := w.(*Button); ok2 {
+			if btn, ok2 := w.(*base.Button); ok2 {
 				s.cmdTgts = append(s.cmdTgts, commandTarget{btn: btn, path: pb.spec.path})
 			}
 			continue
@@ -395,7 +396,7 @@ func newBindingScope(ctx interface{}, env *xamlEnv, reg map[string]Widget, baseD
 	}
 	for _, pv := range env.virtuals {
 		if w, ok := reg[pv.name]; ok {
-			if vic, ok2 := w.(*VirtualizingItemsControl); ok2 {
+			if vic, ok2 := w.(*base.VirtualizingItemsControl); ok2 {
 				s.virtuals = append(s.virtuals, virtualTarget{
 					vic: vic, template: pv.template, sourcePath: pv.sourcePath,
 					env: pv.env, reg: reg, baseDir: baseDir,
@@ -449,11 +450,11 @@ func (s *BindingScope) ensureLangListener() {
 	if !need {
 		return
 	}
-	id := AddLanguageListener(func(string) { s.onLanguage() })
+	id := base.AddLanguageListener(func(string) { s.onLanguage() })
 	s.mu.Lock()
 	if s.langListenerID >= 0 {
 		s.mu.Unlock()
-		RemoveLanguageListener(id) // подписались параллельно — вторая не нужна
+		base.RemoveLanguageListener(id) // подписались параллельно — вторая не нужна
 		return
 	}
 	s.langListenerID = id
@@ -509,7 +510,7 @@ func (s *BindingScope) Dispose() {
 	s.mu.Unlock()
 
 	if langID >= 0 {
-		RemoveLanguageListener(langID)
+		base.RemoveLanguageListener(langID)
 	}
 	// Свёрнутые строки дерева жили в общем списке и снимались только все разом
 	// (ClearLocalizedItems) — теперь у них есть владелец (GG-75).
@@ -559,9 +560,9 @@ func (s *BindingScope) applyLocs() {
 	copy(locs, s.locs)
 	s.mu.Unlock()
 	for _, lt := range locs {
-		setWidgetProperty(lt.w, lt.prop, Tr(lt.key))
+		setWidgetProperty(lt.w, lt.prop, base.Tr(lt.key))
 	}
-	notifyUIChanged()
+	base.NotifyUIChanged()
 }
 
 // wireVirtuals настраивает фабрику строк VirtualizingItemsControl (по шаблону
@@ -569,7 +570,7 @@ func (s *BindingScope) applyLocs() {
 func (s *BindingScope) wireVirtuals() {
 	for _, vt := range s.virtuals {
 		vt := vt
-		vt.vic.SetItemBuilder(func(item interface{}, _ int) Widget {
+		vt.vic.SetItemBuilder(func(item interface{}, _ int) base.Widget {
 			c := cloneXElement(&vt.template)
 			re := &xamlEnv{
 				scalars:        vt.env.scalars,
@@ -578,7 +579,7 @@ func (s *BindingScope) wireVirtuals() {
 				inItemTemplate: true,
 			}
 			re.process(&c, item)
-			var w Widget
+			var w base.Widget
 			var err error
 			withLocOwner(s.ownerOfLocs(), func() {
 				w, err = buildXAMLWidget(c, vt.reg, image.Point{}, vt.baseDir)
@@ -597,15 +598,15 @@ func (s *BindingScope) wireVirtuals() {
 			continue
 		}
 		vic := vt.vic
-		vic.SetItems(collectionItems(val))
+		vic.SetItems(base.CollectionItems(val))
 		switch src := val.(type) {
-		case *CollectionView:
-			id := src.AddViewChangedHandle(func() { vic.SetItems(collectionItems(val)) })
+		case *base.CollectionView:
+			id := src.AddViewChangedHandle(func() { vic.SetItems(base.CollectionItems(val)) })
 			s.addViewSub(src, id)
 		case *dgridPkg.ObservableCollection:
 			// Дескриптор сохраняем: без него Dispose не отпустит коллекцию.
 			id := src.AddCollectionChanged(func(dgridPkg.CollectionChangedEvent) {
-				vic.SetItems(collectionItems(val))
+				vic.SetItems(base.CollectionItems(val))
 			})
 			s.addCollSub(src, id)
 		}
@@ -622,7 +623,7 @@ func (s *BindingScope) wireCommands() {
 		if !ok {
 			continue
 		}
-		cmd, ok := v.(ICommand)
+		cmd, ok := v.(base.ICommand)
 		if !ok {
 			continue
 		}
@@ -647,7 +648,7 @@ func (s *BindingScope) wireItems() {
 		}
 		t := it
 		switch src := val.(type) {
-		case *CollectionView:
+		case *base.CollectionView:
 			// Перестроение при изменении представления (filter/sort/group/source).
 			id := src.AddViewChangedHandle(func() { s.rebuildItems(t) })
 			s.addViewSub(src, id)
@@ -672,7 +673,7 @@ func (s *BindingScope) rebuildItems(it itemsTarget) {
 	if !ok {
 		return
 	}
-	items := collectionItems(val)
+	items := base.CollectionItems(val)
 	if cc, ok := it.panel.(interface{ ClearChildren() }); ok {
 		cc.ClearChildren()
 	}
@@ -685,7 +686,7 @@ func (s *BindingScope) rebuildItems(it itemsTarget) {
 			inItemTemplate: true,
 		}
 		re.process(&c, item)
-		var w Widget
+		var w base.Widget
 		var err error
 		withLocOwner(s.ownerOfLocs(), func() {
 			w, err = buildXAMLWidget(c, it.reg, image.Point{}, it.baseDir)
@@ -696,7 +697,7 @@ func (s *BindingScope) rebuildItems(it itemsTarget) {
 	}
 	s.ensureLangListener()
 	it.panel.SetBounds(it.panel.Bounds()) // перелейаут
-	notifyUIChanged()
+	base.NotifyUIChanged()
 }
 
 // wireTriggerSources подключает перевычисление property-триггеров при изменении
@@ -810,7 +811,7 @@ func (s *BindingScope) Refresh() {
 		}
 	}
 
-	notifyUIChanged() // данные → UI: сообщаем движку (on-demand рендер)
+	base.NotifyUIChanged() // данные → UI: сообщаем движку (on-demand рендер)
 }
 
 // valueEquals сравнивает значение модели со строкой триггера (без учёта регистра).
@@ -865,7 +866,7 @@ func (s *BindingScope) subscribe() {
 // writeBack записывает значение из UI в модель (TwoWay), применяя ConvertBack.
 // Игнорируется во время Refresh, чтобы программное обновление не зациклилось.
 // w — целевой виджет (для отображения ошибки валидации); может быть nil.
-func (s *BindingScope) writeBack(spec bindingSpec, value interface{}, w Widget) {
+func (s *BindingScope) writeBack(spec bindingSpec, value interface{}, w base.Widget) {
 	if s.updating.Load() {
 		return
 	}
@@ -883,15 +884,15 @@ func (s *BindingScope) writeBack(spec bindingSpec, value interface{}, w Widget) 
 
 // validateOne спрашивает у модели текст ошибки для свойства spec.path и
 // применяет/снимает состояние ошибки у виджета w.
-func (s *BindingScope) validateOne(ctx interface{}, spec bindingSpec, w Widget) {
+func (s *BindingScope) validateOne(ctx interface{}, spec bindingSpec, w base.Widget) {
 	if !spec.validates {
 		return
 	}
 	msg := ""
-	if dei, ok := ctx.(DataErrorInfo); ok {
+	if dei, ok := ctx.(base.DataErrorInfo); ok {
 		msg = dei.DataError(spec.path)
 	}
-	setValidationState(w, msg)
+	applyValidation(w, msg)
 }
 
 // Validate перепроверяет все TwoWay-привязки с ValidatesOnDataErrors против
@@ -911,10 +912,10 @@ func (s *BindingScope) Validate() bool {
 			continue
 		}
 		msg := ""
-		if dei, dok := ctx.(DataErrorInfo); dok {
+		if dei, dok := ctx.(base.DataErrorInfo); dok {
 			msg = dei.DataError(t.spec.path)
 		}
-		setValidationState(t.w, msg)
+		applyValidation(t.w, msg)
 		if msg != "" {
 			ok = false
 		}
@@ -933,29 +934,29 @@ func (s *BindingScope) wireTwoWay() {
 		switch strings.ToLower(t.prop) {
 		case "text":
 			switch ti := t.w.(type) {
-			case *TextInput:
+			case *base.TextInput:
 				ti.OnChange = func(v string) { s.writeBack(spec, v, tw) }
-			case *TextBox:
+			case *base.TextBox:
 				ti.OnChange = func(v string) { s.writeBack(spec, v, tw) }
 			}
 		case "ischecked", "checked":
 			switch cw := t.w.(type) {
-			case *CheckBox:
+			case *base.CheckBox:
 				cw.OnChange = func(b bool) { s.writeBack(spec, b, tw) }
-			case *ToggleSwitch:
+			case *base.ToggleSwitch:
 				cw.OnChange = func(b bool) { s.writeBack(spec, b, tw) }
-			case *RadioButton:
+			case *base.RadioButton:
 				cw.OnChange = func(b bool) { s.writeBack(spec, b, tw) }
 			}
 		case "value":
-			if sl, ok := t.w.(*Slider); ok {
+			if sl, ok := t.w.(*base.Slider); ok {
 				sl.OnChange = func(v float64) { s.writeBack(spec, v, tw) }
 			}
-			if nud, ok := t.w.(*NumericUpDown); ok {
+			if nud, ok := t.w.(*base.NumericUpDown); ok {
 				nud.OnChange = func(v float64) { s.writeBack(spec, v, tw) }
 			}
 		case "selectedindex":
-			if dd, ok := t.w.(*Dropdown); ok {
+			if dd, ok := t.w.(*base.Dropdown); ok {
 				dd.OnChange = func(idx int, _ string) { s.writeBack(spec, idx, tw) }
 			}
 		}
@@ -972,9 +973,9 @@ func (s *BindingScope) wireElementSources() {
 
 // hookSourceChange навешивает cb на изменение значения виджета, сохраняя
 // уже установленный OnChange (цепочка вызовов).
-func hookSourceChange(w Widget, cb func()) {
+func hookSourceChange(w base.Widget, cb func()) {
 	switch t := w.(type) {
-	case *TextInput:
+	case *base.TextInput:
 		prev := t.OnChange
 		t.OnChange = func(v string) {
 			if prev != nil {
@@ -982,7 +983,7 @@ func hookSourceChange(w Widget, cb func()) {
 			}
 			cb()
 		}
-	case *TextBox:
+	case *base.TextBox:
 		prev := t.OnChange
 		t.OnChange = func(v string) {
 			if prev != nil {
@@ -990,7 +991,7 @@ func hookSourceChange(w Widget, cb func()) {
 			}
 			cb()
 		}
-	case *Slider:
+	case *base.Slider:
 		prev := t.OnChange
 		t.OnChange = func(v float64) {
 			if prev != nil {
@@ -998,7 +999,7 @@ func hookSourceChange(w Widget, cb func()) {
 			}
 			cb()
 		}
-	case *CheckBox:
+	case *base.CheckBox:
 		prev := t.OnChange
 		t.OnChange = func(b bool) {
 			if prev != nil {
@@ -1006,7 +1007,7 @@ func hookSourceChange(w Widget, cb func()) {
 			}
 			cb()
 		}
-	case *ToggleSwitch:
+	case *base.ToggleSwitch:
 		prev := t.OnChange
 		t.OnChange = func(b bool) {
 			if prev != nil {
@@ -1014,7 +1015,7 @@ func hookSourceChange(w Widget, cb func()) {
 			}
 			cb()
 		}
-	case *RadioButton:
+	case *base.RadioButton:
 		prev := t.OnChange
 		t.OnChange = func(b bool) {
 			if prev != nil {
@@ -1022,7 +1023,7 @@ func hookSourceChange(w Widget, cb func()) {
 			}
 			cb()
 		}
-	case *Dropdown:
+	case *base.Dropdown:
 		prev := t.OnChange
 		t.OnChange = func(i int, txt string) {
 			if prev != nil {
@@ -1030,7 +1031,7 @@ func hookSourceChange(w Widget, cb func()) {
 			}
 			cb()
 		}
-	case *NumericUpDown:
+	case *base.NumericUpDown:
 		prev := t.OnChange
 		t.OnChange = func(v float64) {
 			if prev != nil {
@@ -1038,7 +1039,7 @@ func hookSourceChange(w Widget, cb func()) {
 			}
 			cb()
 		}
-	case *Expander:
+	case *base.Expander:
 		prev := t.OnExpandedChanged
 		t.OnExpandedChanged = func(b bool) {
 			if prev != nil {
@@ -1050,44 +1051,44 @@ func hookSourceChange(w Widget, cb func()) {
 }
 
 // getWidgetProperty читает значение свойства виджета (для ElementName-привязок).
-func getWidgetProperty(w Widget, prop string) (interface{}, bool) {
+func getWidgetProperty(w base.Widget, prop string) (interface{}, bool) {
 	switch strings.ToLower(prop) {
 	case "text", "content":
 		switch t := w.(type) {
-		case *Label:
+		case *base.Label:
 			return t.Text(), true
-		case *TextInput:
+		case *base.TextInput:
 			return t.GetText(), true
-		case *TextBox:
+		case *base.TextBox:
 			return t.GetText(), true
-		case *Button:
+		case *base.Button:
 			return t.Text, true
-		case *MenuButton:
+		case *base.MenuButton:
 			return t.Text, true
 		}
 	case "value":
 		switch t := w.(type) {
-		case *Slider:
+		case *base.Slider:
 			return t.Value(), true
-		case *ProgressBar:
+		case *base.ProgressBar:
 			return t.Value(), true
-		case *NumericUpDown:
+		case *base.NumericUpDown:
 			return t.Value(), true
 		}
 	case "ischecked", "checked":
 		switch t := w.(type) {
-		case *CheckBox:
+		case *base.CheckBox:
 			return t.IsChecked(), true
-		case *ToggleSwitch:
+		case *base.ToggleSwitch:
 			return t.IsOn(), true
-		case *RadioButton:
+		case *base.RadioButton:
 			return t.IsSelected(), true
 		}
 	case "selectedindex":
 		switch t := w.(type) {
-		case *Dropdown:
+		case *base.Dropdown:
 			return t.Selected(), true
-		case *ListView:
+		case *base.ListView:
 			return t.Selected(), true
 		}
 	case "isenabled":
@@ -1095,14 +1096,14 @@ func getWidgetProperty(w Widget, prop string) (interface{}, bool) {
 			return e.IsEnabled(), true
 		}
 	case "isexpanded":
-		if ex, ok := w.(*Expander); ok {
+		if ex, ok := w.(*base.Expander); ok {
 			return ex.IsExpanded, true
 		}
 	case "header":
 		switch t := w.(type) {
-		case *Expander:
+		case *base.Expander:
 			return t.Header, true
-		case *GroupBox:
+		case *base.GroupBox:
 			return t.Header, true
 		}
 	}
@@ -1113,7 +1114,7 @@ func getWidgetProperty(w Widget, prop string) (interface{}, bool) {
 
 // setWidgetProperty устанавливает свойство виджета по WPF-имени из строкового
 // значения. Используется живой привязкой (и пригодно для будущих триггеров).
-func setWidgetProperty(w Widget, prop, val string) {
+func setWidgetProperty(w base.Widget, prop, val string) {
 	switch strings.ToLower(prop) {
 	case "text", "content":
 		setWidgetText(w, val)
@@ -1121,30 +1122,30 @@ func setWidgetProperty(w Widget, prop, val string) {
 		// Подсказка в пустом поле — такой же пользовательский текст, как и
 		// всё остальное: её тоже нужно уметь переустановить (смена языка).
 		switch t := w.(type) {
-		case *TextInput:
+		case *base.TextInput:
 			t.Placeholder = val
-		case *TextBox:
+		case *base.TextBox:
 			t.Placeholder = val
 		}
-		notifyUIChanged()
+		base.NotifyUIChanged()
 	case "ischecked", "checked":
 		b := parseXAMLBool(val)
 		switch t := w.(type) {
-		case *CheckBox:
+		case *base.CheckBox:
 			t.SetChecked(b)
-		case *ToggleSwitch:
+		case *base.ToggleSwitch:
 			t.SetOn(b)
-		case *RadioButton:
+		case *base.RadioButton:
 			t.SetSelected(b)
 		}
 	case "value":
 		if f, err := strconv.ParseFloat(strings.TrimSpace(val), 64); err == nil {
 			switch t := w.(type) {
-			case *Slider:
+			case *base.Slider:
 				t.SetValue(f)
-			case *ProgressBar:
+			case *base.ProgressBar:
 				t.SetValue(f)
-			case *NumericUpDown:
+			case *base.NumericUpDown:
 				t.SetValue(f)
 			}
 		}
@@ -1183,83 +1184,83 @@ func setWidgetProperty(w Widget, prop, val string) {
 	case "selectedindex":
 		if i, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
 			switch t := w.(type) {
-			case *Dropdown:
+			case *base.Dropdown:
 				t.SetSelected(i)
-			case *ListView:
+			case *base.ListView:
 				t.SetSelected(i)
 			}
 		}
 	case "isexpanded":
-		if ex, ok := w.(*Expander); ok {
+		if ex, ok := w.(*base.Expander); ok {
 			ex.SetExpanded(parseXAMLBool(val))
 		}
 	case "header":
 		switch t := w.(type) {
-		case *Expander:
+		case *base.Expander:
 			t.Header = val
-		case *GroupBox:
+		case *base.GroupBox:
 			t.Header = val
 		}
 	}
 }
 
-func setWidgetText(w Widget, s string) {
+func setWidgetText(w base.Widget, s string) {
 	switch t := w.(type) {
-	case *Label:
+	case *base.Label:
 		t.SetText(s)
-	case *Button:
+	case *base.Button:
 		t.SetText(s)
-	case *MenuButton:
+	case *base.MenuButton:
 		t.SetText(s)
-	case *TextInput:
+	case *base.TextInput:
 		t.SetText(s)
-	case *TextBox:
+	case *base.TextBox:
 		t.SetText(s)
-	case *CheckBox:
+	case *base.CheckBox:
 		t.SetText(s)
-	case *RadioButton:
+	case *base.RadioButton:
 		t.SetText(s)
-	case *ToggleSwitch:
+	case *base.ToggleSwitch:
 		t.SetText(s)
 	}
 }
 
-func setWidgetForeground(w Widget, c color.RGBA) {
+func setWidgetForeground(w base.Widget, c color.RGBA) {
 	switch t := w.(type) {
-	case *Label:
+	case *base.Label:
 		t.TextColor = c
-	case *Button:
+	case *base.Button:
 		t.TextColor = c
-	case *MenuButton:
+	case *base.MenuButton:
 		t.TextColor = c
-	case *TextInput:
+	case *base.TextInput:
 		t.TextColor = c
-	case *TextBox:
+	case *base.TextBox:
 		t.TextColor = c
-	case *CheckBox:
+	case *base.CheckBox:
 		t.TextColor = c
-	case *RadioButton:
+	case *base.RadioButton:
 		t.TextColor = c
-	case *ToggleSwitch:
+	case *base.ToggleSwitch:
 		t.TextColor = c
 	}
 }
 
-func setWidgetBackground(w Widget, c color.RGBA) {
+func setWidgetBackground(w base.Widget, c color.RGBA) {
 	switch t := w.(type) {
-	case *Button:
+	case *base.Button:
 		t.Background = c
-	case *Panel:
-		t.Background = c
-		t.UseAlpha = c.A < 255
-	case *TextInput:
-		t.Background = c
-	case *TextBox:
-		t.Background = c
-	case *Grid:
+	case *base.Panel:
 		t.Background = c
 		t.UseAlpha = c.A < 255
-	case *Canvas:
+	case *base.TextInput:
+		t.Background = c
+	case *base.TextBox:
+		t.Background = c
+	case *base.Grid:
+		t.Background = c
+		t.UseAlpha = c.A < 255
+	case *base.Canvas:
 		t.Background = c
 		t.UseAlpha = c.A < 255
 	}
@@ -1374,4 +1375,12 @@ func parseXAMLBool(s string) bool {
 		return true
 	}
 	return false
+}
+
+// applyValidation применяет или снимает состояние ошибки у виджета, если он
+// это поддерживает (ValidationAware).
+func applyValidation(w base.Widget, msg string) {
+	if va, ok := w.(base.ValidationAware); ok {
+		va.SetValidationError(msg)
+	}
 }

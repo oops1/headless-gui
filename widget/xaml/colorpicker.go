@@ -1,12 +1,14 @@
-package base
+package xaml
 
 import (
 	"image/color"
 	"strconv"
 	"strings"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
-// colorpicker_xaml.go — теги <ColorPicker> и <Swatch> в разметке.
+// colorpicker.go — теги <ColorPicker> и <Swatch> в разметке.
 //
 //	<ColorPicker x:Name="accent" Value="#0078D7" FontSize="10"
 //	             Palette="#000000,#FFFFFF,#0078D7"
@@ -18,8 +20,8 @@ import (
 // цвета редактора темы у каждого приложения свои, а набор по умолчанию —
 // общий.
 
-func buildXAMLColorPicker(el xElement) Widget {
-	p := NewColorPicker()
+func buildXAMLColorPicker(el xElement) base.Widget {
+	p := base.NewColorPicker()
 	if v := el.attr("Value", "Color", "SelectedColor"); v != "" {
 		if c, err := parseXAMLColor(v); err == nil {
 			p.SetValue(c)
@@ -38,8 +40,8 @@ func buildXAMLColorPicker(el xElement) Widget {
 	return p
 }
 
-func buildXAMLSwatch(el xElement) Widget {
-	s := NewSwatch(color.RGBA{A: 255})
+func buildXAMLSwatch(el xElement) base.Widget {
+	s := base.NewSwatch(color.RGBA{A: 255})
 	if v := el.attr("Color", "Value", "Fill", "Background"); v != "" {
 		if c, err := parseXAMLColor(v); err == nil {
 			s.Color = c

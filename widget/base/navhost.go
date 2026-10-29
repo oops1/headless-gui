@@ -73,7 +73,7 @@ func (d *Dialog) NavPanelBounds() image.Rectangle {
 // navWidthOf — ширина боковой панели, ограниченная половиной окна: панель,
 // занявшая всё окно, оставила бы содержимое без места и без объяснений.
 func navWidthOf(w Widget, hostW int) int {
-	pw, _ := desiredOf(w)
+	pw, _ := DesiredOf(w)
 	if pw <= 0 {
 		pw = navExpandedW
 	}

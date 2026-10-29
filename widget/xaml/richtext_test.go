@@ -1,9 +1,11 @@
-package base
+package xaml
 
 import (
 	"image"
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 const richXAML = `<Canvas Width="400" Height="300">
@@ -27,7 +29,7 @@ func TestRichText_XAML(t *testing.T) {
 		t.Fatalf("разбор разметки: %v", err)
 	}
 	defer ReleaseXAML(root)
-	rt, ok := reg["doc"].(*RichText)
+	rt, ok := reg["doc"].(*base.RichText)
 	if !ok {
 		t.Fatalf("doc — %T, ждали *RichText", reg["doc"])
 	}
@@ -51,7 +53,7 @@ func TestRichText_XAML(t *testing.T) {
 	}
 	h := ps[0]
 	if len(h.Runs) != 1 || h.Runs[0].Text != "Title" || h.Runs[0].Size != 20 ||
-		h.Runs[0].Font != BuiltinFontBold {
+		h.Runs[0].Font != base.BuiltinFontBold {
 		t.Errorf("заголовок: %+v", h.Runs)
 	}
 	if h.Indent != 2 || h.SpaceBefore != 0 || h.SpaceAfter != 6 {
@@ -59,13 +61,13 @@ func TestRichText_XAML(t *testing.T) {
 	}
 
 	p := ps[1]
-	if p.Align != TextAlignCenter {
+	if p.Align != base.TextAlignCenter {
 		t.Errorf("выравнивание %v", p.Align)
 	}
-	want := []RichRun{
+	want := []base.RichRun{
 		{Text: "plain, "},
-		{Text: "red", Color: color.RGBA{R: 255, A: 255}, Font: BuiltinFontItalic},
-		{Text: " bold-run", Font: BuiltinFontBold},
+		{Text: "red", Color: color.RGBA{R: 255, A: 255}, Font: base.BuiltinFontItalic},
+		{Text: " bold-run", Font: base.BuiltinFontBold},
 		{Text: "site", Link: "https://example.com"},
 		{Text: "\n"},
 		{Text: "gone", Strike: true},
@@ -101,15 +103,15 @@ func TestRichText_XAMLPlainTextAndInheritance(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ReleaseXAML(root)
-	if got := reg["a"].(*RichText).Text(); got != "one" {
+	if got := reg["a"].(*base.RichText).Text(); got != "one" {
 		t.Errorf("Text=%q", got)
 	}
-	runs := reg["b"].(*RichText).Paragraphs()[0].Runs
+	runs := reg["b"].(*base.RichText).Paragraphs()[0].Runs
 	if len(runs) != 3 {
 		t.Fatalf("ранов %d", len(runs))
 	}
 	green := color.RGBA{G: 255, A: 255}
-	if runs[0].Font != BuiltinFontBold || runs[0].Color != green {
+	if runs[0].Font != base.BuiltinFontBold || runs[0].Color != green {
 		t.Errorf("ран не унаследовал оформление абзаца: %+v", runs[0])
 	}
 	if runs[1].Font != "" || runs[1].Color != green {

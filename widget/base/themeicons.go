@@ -103,7 +103,7 @@ type IconSet struct {
 // NewIconSet создаёт пустой набор иконок. baseDir — каталог, относительно
 // которого разрешаются пути IconRef.Source; выход за его пределы («../…»)
 // отклоняется тем же способом, что и ресурсы XAML (SEC-8,
-// resolveXAMLResource) — см. widget/xaml_props.go.
+// ResolveResource) — см. resources.go.
 func NewIconSet(baseDir string) *IconSet {
 	return &IconSet{baseDir: baseDir}
 }
@@ -176,9 +176,9 @@ func (s *IconSet) resolveNamed(name string, size int) image.Image {
 // абсолютные пути и выходы через "../" отклоняются.
 func (s *IconSet) resolveIconPath(rawSrc string) (string, error) {
 	if s.fsys == nil {
-		return resolveXAMLResource(s.baseDir, rawSrc)
+		return ResolveResource(s.baseDir, rawSrc)
 	}
-	clean, err := resolveXAMLResourceFS(rawSrc)
+	clean, err := ResolveResourceFS(rawSrc)
 	if err != nil {
 		return "", err
 	}

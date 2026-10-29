@@ -10,7 +10,6 @@ package base
 import (
 	"image"
 	"image/color"
-	"strings"
 )
 
 // menuButtonArrowW — ширина зоны стрелки.
@@ -369,32 +368,4 @@ func (mb *MenuButton) overflowItem() (MenuItem, bool) {
 		return MenuItem{Text: text, Disabled: true}, true
 	}
 	return MenuItem{Text: text, Disabled: !mb.IsEnabled(), SubItems: sub}, true
-}
-
-// buildXAMLMenuButton строит кнопку с меню из <MenuButton> или <SplitButton>:
-//
-//	<SplitButton Name="pull" Content="Pull" Icon="pull.png" IconPosition="Top">
-//	  <MenuItem Header="{Loc Fetch}"/>
-//	  <MenuItem Header="Pull (rebase)"/>
-//	</SplitButton>
-//
-// Атрибуты — как у Button; Split="True" делает разделённой и <MenuButton>,
-// IsActionEnabled/IsMenuEnabled="False" выключают части.
-func buildXAMLMenuButton(el xElement, tag, baseDir string) Widget {
-	btn, _ := buildXAMLButton(el, baseDir).(*Button)
-	if btn == nil {
-		return nil
-	}
-	mb := &MenuButton{Button: btn}
-	mb.Split = tag == "splitbutton" || strings.EqualFold(el.attr("Split"), "true")
-	mb.actionDisabled = strings.EqualFold(el.attr("IsActionEnabled"), "false")
-	mb.menuDisabled = strings.EqualFold(el.attr("IsMenuEnabled"), "false")
-	items, keys := parseMenuItems(el, baseDir)
-	mb.Items = items
-	registerLocItemList(keys, func(i int, s string) {
-		if i < len(mb.Items) {
-			mb.Items[i].Text = s
-		}
-	})
-	return mb
 }

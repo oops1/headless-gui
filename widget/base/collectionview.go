@@ -262,7 +262,7 @@ func (v *CollectionView) Refresh() {
 	groupBy := v.groupBy
 	v.mu.Unlock()
 
-	raw := collectionItems(src)
+	raw := CollectionItems(src)
 
 	// 1. Фильтрация.
 	out := make([]interface{}, 0, len(raw))
@@ -561,4 +561,33 @@ func fmtKey(v interface{}) string {
 		return s
 	}
 	return fmt.Sprintf("%v", v)
+}
+
+// CollectionItems извлекает элементы из CollectionView, ObservableCollection или среза.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func CollectionItems(v interface{}) []interface{} {
+	if cv, ok := v.(*CollectionView); ok {
+		return cv.Items()
+	}
+	if oc, ok := v.(*dgridPkg.ObservableCollection); ok {
+		return oc.Items()
+	}
+	rv := reflect.ValueOf(v)
+	for rv.Kind() == reflect.Ptr || rv.Kind() == reflect.Interface {
+		if rv.IsNil() {
+			return nil
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() == reflect.Slice {
+		out := make([]interface{}, rv.Len())
+		for i := 0; i < rv.Len(); i++ {
+			out[i] = rv.Index(i).Interface()
+		}
+		return out
+	}
+	return nil
 }

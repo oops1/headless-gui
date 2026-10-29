@@ -198,8 +198,12 @@ func LoadStringsDir(dir string) error {
 	return firstErr
 }
 
-// parseLocKey извлекает ключ из markup-расширения {Loc Key}.
-func parseLocKey(expr string) string {
+// ParseLocKey извлекает ключ из markup-расширения {Loc Key}.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ParseLocKey(expr string) string {
 	inner := strings.TrimSpace(expr)
 	inner = strings.TrimPrefix(inner, "{")
 	inner = strings.TrimSuffix(inner, "}")

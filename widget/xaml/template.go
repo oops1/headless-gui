@@ -1,13 +1,15 @@
-// xaml_template.go — ControlTemplate / ContentPresenter / TemplateBinding (P0).
+// template.go — ControlTemplate / ContentPresenter / TemplateBinding (P0).
 //
 // Реализовано как пред-обработка дерева: ContentControl с шаблоном (Template=
 // "{StaticResource ...}" или <ContentControl.Template><ControlTemplate>)
 // превращается в дерево визуала шаблона. ContentPresenter заменяется
 // содержимым контрола, а {TemplateBinding Prop} / {Binding RelativeSource=
 // {RelativeSource TemplatedParent}, Path=Prop} — значениями свойств контрола.
-package base
+package xaml
 
-import "strings"
+import (
+	"strings"
+)
 
 // expandControlTemplate раскрывает ControlTemplate для ContentControl.
 // Возвращает true, если шаблон найден и применён (el заменён деревом шаблона).

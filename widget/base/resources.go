@@ -1,8 +1,10 @@
-// xaml_props.go — применение XAML attached-свойств к виджетам.
-//
-// Содержит: applyGridAttachedProps, applyMargin, applyAlignment,
-// applyIsEnabled, applyDockAttachedProp, loadImageFile.
 package base
+
+// resources.go — ресурсы разметки, не зависящие от XAML (ADR-0012, 8.2b):
+// граница путей ресурсов (SEC-8), реестр fs.FS для LoadUIFromXAMLFS,
+// единая точка открытия ресурса и декодирование картинок с пределами.
+// Ими пользуются и XAML-загрузчик (widget/xaml), и ядро (IconSet,
+// ImageWidget).
 
 import (
 	"bufio"
@@ -11,271 +13,16 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"io/fs"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 )
-
-// ─── Grid attached properties ───────────────────────────────────────────────
-
-// applyGridAttachedProps читает Grid.Row, Grid.Column и т.д. из XAML-атрибутов
-// и устанавливает их в Base виджета.
-func applyGridAttachedProps(w Widget, el xElement) {
-	type gridSetter interface {
-		GetGridRow() int // наличие этого метода означает, что Base встроен
-	}
-	// Все наши виджеты встраивают Base, поэтому можно писать напрямую.
-	// Используем рефлексию через интерфейс не нужно — у нас есть конкретный тип.
-	// Простой подход: пишем через указатель на Base.
-	type baseAccessor interface {
-		Widget
-		GetGridRow() int
-	}
-	if _, ok := w.(baseAccessor); !ok {
-		return
-	}
-
-	row := xatoi(el.attr("Grid.Row"))
-	col := xatoi(el.attr("Grid.Column"))
-	rowSpan := xatoi(el.attr("Grid.RowSpan"))
-	colSpan := xatoi(el.attr("Grid.ColumnSpan"))
-
-	// Нужно добраться до Base. Используем сеттер-интерфейс.
-	type gridPropsSetter interface {
-		SetGridProps(row, col, rowSpan, colSpan int)
-	}
-	if gs, ok := w.(gridPropsSetter); ok {
-		gs.SetGridProps(row, col, rowSpan, colSpan)
-	}
-}
-
-// applyMargin читает Margin из XAML-атрибутов и устанавливает в Base.
-func applyMargin(w Widget, el xElement) {
-	ms := el.attr("Margin")
-	if ms == "" {
-		return
-	}
-	m := parseMargin(ms)
-	type marginSetter interface {
-		SetMargin(m Margin)
-	}
-	if setter, ok := w.(marginSetter); ok {
-		setter.SetMargin(m)
-	}
-}
-
-// applyAlignment читает HorizontalAlignment и VerticalAlignment из XAML-атрибутов.
-func applyAlignment(w Widget, el xElement) {
-	type alignSetter interface {
-		SetHAlign(a HorizontalAlignment)
-		SetVAlign(a VerticalAlignment)
-	}
-	as, ok := w.(alignSetter)
-	if !ok {
-		return
-	}
-	if ha := el.attr("HorizontalAlignment"); ha != "" {
-		switch strings.ToLower(ha) {
-		case "left":
-			as.SetHAlign(HAlignLeft)
-		case "center":
-			as.SetHAlign(HAlignCenter)
-		case "right":
-			as.SetHAlign(HAlignRight)
-		case "stretch":
-			as.SetHAlign(HAlignStretch)
-		}
-	}
-	if va := el.attr("VerticalAlignment"); va != "" {
-		switch strings.ToLower(va) {
-		case "top":
-			as.SetVAlign(VAlignTop)
-		case "center":
-			as.SetVAlign(VAlignCenter)
-		case "bottom":
-			as.SetVAlign(VAlignBottom)
-		case "stretch":
-			as.SetVAlign(VAlignStretch)
-		}
-	}
-}
-
-// ─── ToolTip ──────────────────────────────────────────────────────────────
-
-// applyToolTip читает ToolTip из XAML-атрибутов и устанавливает в Base.
-// Поддерживает простой синтаксис ToolTip="текст".
-func applyToolTip(w Widget, el xElement) {
-	tip := el.attr("ToolTip", "ToolTipService.ToolTip")
-	if tip == "" {
-		return
-	}
-	type tipSetter interface {
-		SetToolTip(s string)
-	}
-	if ts, ok := w.(tipSetter); ok {
-		ts.SetToolTip(tip)
-	}
-}
-
-// ─── Visibility ─────────────────────────────────────────────────────────────
-
-// applyVisibility читает Visibility из XAML-атрибутов (WPF):
-// "Visible" (default), "Collapsed", "Hidden" → скрытие виджета.
-func applyVisibility(w Widget, el xElement) {
-	v := el.attr("Visibility")
-	if v == "" {
-		return
-	}
-	type visSetter interface {
-		SetVisible(b bool)
-	}
-	vs, ok := w.(visSetter)
-	if !ok {
-		return
-	}
-	switch strings.ToLower(v) {
-	case "collapsed", "hidden":
-		vs.SetVisible(false)
-	case "visible":
-		vs.SetVisible(true)
-	}
-}
-
-// ─── ShowLocaleIndicator ────────────────────────────────────────────────────
-
-// applyLocaleIndicator читает ShowLocaleIndicator из XAML-атрибутов и
-// устанавливает соответствующее поле у Window/Dialog/Panel.
-func applyLocaleIndicator(w Widget, el xElement) {
-	v := el.attr("ShowLocaleIndicator", "ShowLocale")
-	if v == "" {
-		return
-	}
-	on := strings.EqualFold(v, "true") || v == "1"
-	switch t := w.(type) {
-	case *Window:
-		t.ShowLocaleIndicator = on
-	case *Dialog:
-		t.ShowLocaleIndicator = on
-	case *Panel:
-		t.ShowLocaleIndicator = on
-	}
-}
-
-// ─── TabIndex ───────────────────────────────────────────────────────────────
-
-// applyTabIndex читает TabIndex из XAML и задаёт порядок Tab-навигации.
-func applyTabIndex(w Widget, el xElement) {
-	v := el.attr("TabIndex")
-	if v == "" {
-		return
-	}
-	type tabSetter interface{ SetTabIndex(int) }
-	if ts, ok := w.(tabSetter); ok {
-		ts.SetTabIndex(xatoi(v))
-	}
-}
-
-// ─── Общий набор attached-свойств ──────────────────────────────────────────
-
-// applyCommonProps применяет полный набор общих XAML-свойств к виджету:
-// Grid.*, DockPanel.Dock, Margin, Alignment, IsEnabled, ToolTip, Visibility,
-// ShowLocaleIndicator, Cursor. Используется как контейнерами, так и листовыми
-// виджетами, чтобы поведение было единообразным (см. BUG-1).
-func applyCommonProps(w Widget, el xElement) {
-	applyGridAttachedProps(w, el)
-	applyDockAttachedProp(w, el)
-	applyMargin(w, el)
-	applyAlignment(w, el)
-	applyIsEnabled(w, el)
-	applyToolTip(w, el)
-	applyVisibility(w, el)
-	applyLocaleIndicator(w, el)
-	applyTabIndex(w, el)
-	applyCursor(w, el)
-}
-
-// applyCursor читает XAML-атрибут Cursor= и задаёт принудительный курсор виджету.
-func applyCursor(w Widget, el xElement) {
-	cs := strings.ToLower(strings.TrimSpace(el.attr("Cursor")))
-	if cs == "" {
-		return
-	}
-	sc, ok := w.(interface{ SetCursor(Cursor) })
-	if !ok {
-		return
-	}
-	switch cs {
-	case "ibeam":
-		sc.SetCursor(CursorIBeam)
-	case "hand":
-		sc.SetCursor(CursorHand)
-	case "sizewe":
-		sc.SetCursor(CursorSizeWE)
-	case "sizens":
-		sc.SetCursor(CursorSizeNS)
-	case "arrow":
-		sc.SetCursor(CursorArrow)
-	case "none":
-		sc.SetCursor(CursorNone)
-	case "grab":
-		sc.SetCursor(CursorGrab)
-	case "grabbing":
-		sc.SetCursor(CursorGrabbing)
-	case "sizeall":
-		sc.SetCursor(CursorSizeAll)
-	case "cross", "crosshair":
-		sc.SetCursor(CursorCrosshair)
-	case "wait":
-		sc.SetCursor(CursorWait)
-	}
-}
-
-// ─── IsEnabled ──────────────────────────────────────────────────────────────
-
-// applyIsEnabled читает IsEnabled из XAML-атрибутов и устанавливает в Base.
-// WPF по умолчанию IsEnabled=True, поэтому false нужно задавать явно.
-func applyIsEnabled(w Widget, el xElement) {
-	type enabledSetter interface {
-		SetEnabled(v bool)
-	}
-	es, ok := w.(enabledSetter)
-	if !ok {
-		return
-	}
-	if v := el.attr("IsEnabled"); strings.EqualFold(v, "False") {
-		es.SetEnabled(false)
-	}
-}
-
-// ─── DockPanel.Dock attached property ───────────────────────────────────────
-
-// applyDockAttachedProp читает DockPanel.Dock из XAML-атрибутов и устанавливает в Base.
-func applyDockAttachedProp(w Widget, el xElement) {
-	dock := el.attr("DockPanel.Dock")
-	if dock == "" {
-		return
-	}
-	type dockSetter interface {
-		SetDock(d DockSide)
-	}
-	if ds, ok := w.(dockSetter); ok {
-		switch strings.ToLower(dock) {
-		case "top":
-			ds.SetDock(DockTop)
-		case "bottom":
-			ds.SetDock(DockBottom)
-		case "left":
-			ds.SetDock(DockLeft)
-		case "right":
-			ds.SetDock(DockRight)
-		}
-	}
-}
-
-// ─── Резолв путей к ресурсам из XAML (SEC-8) ────────────────────────────────
 
 // ErrResourceOutsideBase — путь ресурса выводит за пределы каталога XAML-файла.
 var ErrResourceOutsideBase = errors.New("xaml: путь ресурса выходит за пределы каталога разметки")
@@ -284,7 +31,7 @@ var ErrResourceOutsideBase = errors.New("xaml: путь ресурса выхо�
 // повторяющая один и тот же плохой путь в сотне элементов, не залила журнал).
 var xamlResourceLogged sync.Map
 
-// resolveXAMLResource приводит путь ресурса из XAML-атрибута (Image Source,
+// ResolveResource приводит путь ресурса из XAML-атрибута (Image Source,
 // Button IconSource, Panel BackgroundImage, SVGIcon Source, TrayIcon) к пути
 // на диске и проверяет, что чтение остаётся в дозволенных границах.
 //
@@ -305,7 +52,11 @@ var xamlResourceLogged sync.Map
 // Символические ссылки намеренно не разыменовываются: путь проверяется
 // лексически (после filepath.Clean). Для дерева ресурсов приложения этого
 // достаточно, а EvalSymlinks на каждую иконку — лишний поход в ФС.
-func resolveXAMLResource(baseDir, src string) (string, error) {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ResolveResource(baseDir, src string) (string, error) {
 	src = strings.TrimSpace(src)
 	if src == "" {
 		return "", errors.New("xaml: пустой путь ресурса")
@@ -339,8 +90,6 @@ func logResourceRejected(src string, err error) {
 	}
 	log.Printf("xaml: ресурс отклонён: %v", err)
 }
-
-// ─── Ограничения на декодирование изображений (SEC-9) ───────────────────────
 
 const (
 	// MaxImageFileBytes — предельный размер файла изображения. Больше этого
@@ -466,4 +215,100 @@ func loadImageFile(path string) (*image.RGBA, error) {
 		}
 	}
 	return rgba, nil
+}
+
+// xamlFSMarker — префикс синтетического baseDir. Ведущий NUL-байт не может
+// встретиться в filepath.Dir(реального XAML-файла), поэтому коллизия с живым
+// диском исключена без доп. проверок.
+const xamlFSMarker = "\x00xamlfs:"
+
+var (
+	xamlFSRegistry    sync.Map // string(маркер+id) → fs.FS
+	xamlFSRegistrySeq atomic.Uint64
+)
+
+// RegisterResourceFS заводит новый синтетический baseDir для fsys.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func RegisterResourceFS(fsys fs.FS) string {
+	id := xamlFSRegistrySeq.Add(1)
+	key := xamlFSMarker + strconv.FormatUint(id, 36)
+	xamlFSRegistry.Store(key, fsys)
+	return key
+}
+
+// UnregisterResourceFS убирает запись реестра (см. LoadUIFromXAMLFS: у неё нет
+// DataContext, поэтому запись не нужна дольше одной синхронной загрузки).
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func UnregisterResourceFS(key string) {
+	xamlFSRegistry.Delete(key)
+}
+
+// IsResourceFS сообщает, что baseDir — синтетический каталог fs.FS из
+// RegisterResourceFS, а не путь на диске.
+//
+//facadegen:skip
+func IsResourceFS(baseDir string) bool {
+	_, ok := xamlFSRegistry.Load(baseDir)
+	return ok
+}
+
+// ResolveResourceFS приводит путь ресурса из атрибута разметки к виду,
+// который принимает fs.FS: разделитель всегда "/", без ведущего "/" (таково
+// требование io/fs.ValidPath). Разметку часто пишут на Windows, поэтому "\"
+// сначала заменяется на "/" — это единственное отличие от ResolveResource
+// (диск, выше); политика границы та же (SEC-8): абсолютный путь и
+// выход за пределы корня отклоняются с ErrResourceOutsideBase. fs.FS и так не
+// откроет файл вне себя (Open вернёт ошибку), но сообщение должно быть
+// понятным, а не «invalid name» из stdlib.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ResolveResourceFS(src string) (string, error) {
+	src = strings.TrimSpace(src)
+	if src == "" {
+		return "", errors.New("xaml: пустой путь ресурса")
+	}
+	slashed := strings.ReplaceAll(src, `\`, "/")
+	if strings.HasPrefix(slashed, "/") || filepath.VolumeName(src) != "" {
+		err := fmt.Errorf("%w: абсолютный путь %q", ErrResourceOutsideBase, src)
+		logResourceRejected(src, err)
+		return "", err
+	}
+	clean := path.Clean(slashed)
+	if clean == ".." || strings.HasPrefix(clean, "../") || !fs.ValidPath(clean) {
+		err := fmt.Errorf("%w: %q", ErrResourceOutsideBase, src)
+		logResourceRejected(src, err)
+		return "", err
+	}
+	return clean, nil
+}
+
+// OpenResource — ЕДИНАЯ точка чтения ресурса разметки (Image Source,
+// Button Icon/IconSource, Panel BackgroundImage, SVGIcon Source, TrayIcon):
+// решает, откуда читать (диск или fs.FS из LoadUIFromXAMLFS), и открывает файл.
+// Дальше вызывающему коду (декодирование PNG/JPEG/SVG) источник уже не важен.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func OpenResource(baseDir, src string) (io.ReadCloser, error) {
+	if v, ok := xamlFSRegistry.Load(baseDir); ok {
+		p, err := ResolveResourceFS(src)
+		if err != nil {
+			return nil, err
+		}
+		return v.(fs.FS).Open(p)
+	}
+	full, err := ResolveResource(baseDir, src)
+	if err != nil {
+		return nil, err
+	}
+	return os.Open(full)
 }

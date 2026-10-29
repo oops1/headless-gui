@@ -76,7 +76,7 @@ func SetLanguage(code string) {
 		l(code)
 	}
 	if changed {
-		notifyUIChanged() // надписи могли смениться (on-demand рендер)
+		NotifyUIChanged() // надписи могли смениться (on-demand рендер)
 	}
 }
 
@@ -96,7 +96,7 @@ func notifyLanguageChanged() {
 	for _, l := range ls {
 		l(code)
 	}
-	notifyUIChanged()
+	NotifyUIChanged()
 }
 
 // Language возвращает текущий язык интерфейса. Потокобезопасно.
@@ -171,7 +171,7 @@ func SetLocale(code string) {
 		l(code)
 	}
 	if changed {
-		notifyUIChanged() // индикатор раскладки перерисуется (on-demand рендер)
+		NotifyUIChanged() // индикатор раскладки перерисуется (on-demand рендер)
 	}
 }
 

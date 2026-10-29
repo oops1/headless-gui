@@ -1,8 +1,9 @@
-package base
+package xaml
 
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/widget/base"
 	dgridPkg "github.com/oops1/headless-gui/v3/widget/datagrid"
 )
 
@@ -63,12 +64,12 @@ func TestXAMLItemsSource_GridAndTree(t *testing.T) {
 	}
 	defer scope.Dispose()
 
-	grid := reg["grid"].(*DataGridWidget)
+	grid := reg["grid"].(*base.DataGridWidget)
 	if grid.Grid.ItemsSource() != vm.Rows {
 		t.Fatalf("таблица не получила коллекцию из привязки")
 	}
 
-	tree := reg["tree"].(*TreeViewWidget)
+	tree := reg["tree"].(*base.TreeViewWidget)
 	roots := tree.Tree.Roots()
 	if len(roots) != 1 || roots[0].Header != "widget" {
 		t.Fatalf("корни дерева: %d, %+v", len(roots), roots)

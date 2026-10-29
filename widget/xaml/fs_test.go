@@ -1,4 +1,4 @@
-package base
+package xaml
 
 // Тесты LoadUIFromXAMLFS (GG-7): ресурсы разметки (Image Source и т.п.)
 // читаются из fs.FS так же, как раньше только из каталога на диске.
@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"testing"
 	"testing/fstest"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // tinyPNGBytes — минимальный валидный PNG (8×8, непрозрачный), пригодный и
@@ -60,7 +62,7 @@ func TestLoadUIFromXAMLFS_ImageFromMapFS(t *testing.T) {
 	if w == nil {
 		t.Fatal("корневой виджет nil")
 	}
-	iw, ok := reg["pic"].(*ImageWidget)
+	iw, ok := reg["pic"].(*base.ImageWidget)
 	if !ok {
 		t.Fatalf("pic не *ImageWidget: %T", reg["pic"])
 	}
@@ -85,7 +87,7 @@ func TestLoadUIFromXAMLFS_DiskPathStillWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadUIFromXAMLWithBase: %v", err)
 	}
-	iw, ok := reg["pic"].(*ImageWidget)
+	iw, ok := reg["pic"].(*base.ImageWidget)
 	if !ok {
 		t.Fatalf("pic не *ImageWidget: %T", reg["pic"])
 	}
@@ -97,7 +99,7 @@ func TestLoadUIFromXAMLFS_DiskPathStillWorks(t *testing.T) {
 // TestLoadUIFromXAMLFS_BackslashPath — разметку часто пишут на Windows, где
 // путь может содержать "\": "icons\a.png" обязан найтись в fs.FS так же, как
 // "icons/a.png" — резолв приводит разделитель к виду, который принимает
-// fs.FS (см. resolveXAMLResourceFS в xaml.go).
+// fs.FS (см. ResolveResourceFS в xaml.go).
 func TestLoadUIFromXAMLFS_BackslashPath(t *testing.T) {
 	fsys := fstest.MapFS{
 		"icons/a.png": {Data: tinyPNGBytes(t)},
@@ -107,7 +109,7 @@ func TestLoadUIFromXAMLFS_BackslashPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadUIFromXAMLFS: %v", err)
 	}
-	iw, ok := reg["pic"].(*ImageWidget)
+	iw, ok := reg["pic"].(*base.ImageWidget)
 	if !ok {
 		t.Fatalf("pic не *ImageWidget: %T", reg["pic"])
 	}
@@ -136,7 +138,7 @@ func TestLoadUIFromXAMLFS_PathEscapeRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadUIFromXAMLFS: %v", err)
 	}
-	iw, ok := reg["pic"].(*ImageWidget)
+	iw, ok := reg["pic"].(*base.ImageWidget)
 	if !ok {
 		t.Fatalf("pic не *ImageWidget: %T", reg["pic"])
 	}
@@ -148,7 +150,7 @@ func TestLoadUIFromXAMLFS_PathEscapeRejected(t *testing.T) {
 // TestLoadUIFromXAMLFS_MissingFileNoImage — отсутствующий в fs.FS файл не
 // приводит к панике или ошибке загрузки: виджет просто остаётся без
 // картинки — ровно как ведёт себя сегодняшний код при чтении с диска
-// (resolveXAMLResource+os.Open тоже не паникует, а логирует и пропускает).
+// (ResolveResource+os.Open тоже не паникует, а логирует и пропускает).
 func TestLoadUIFromXAMLFS_MissingFileNoImage(t *testing.T) {
 	fsys := fstest.MapFS{} // пусто — "icons/a.png" отсутствует
 
@@ -162,7 +164,7 @@ func TestLoadUIFromXAMLFS_MissingFileNoImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadUIFromXAMLFS: %v", err)
 	}
-	iw, ok := reg["pic"].(*ImageWidget)
+	iw, ok := reg["pic"].(*base.ImageWidget)
 	if !ok {
 		t.Fatalf("pic не *ImageWidget: %T", reg["pic"])
 	}

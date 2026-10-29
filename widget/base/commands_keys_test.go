@@ -26,12 +26,12 @@ func TestParseKeyName_NewKeys(t *testing.T) {
 		"Escape":      KeyEscape,
 	}
 	for name, want := range cases {
-		if got := parseKeyName(name); got != want {
+		if got := ParseKeyName(name); got != want {
 			t.Errorf("имя %q разобрано как %d, ждал %d", name, got, want)
 		}
 	}
 	for _, bad := range []string{"нетакой", "", "f25", "numpad"} {
-		if got := parseKeyName(bad); got != KeyUnknown {
+		if got := ParseKeyName(bad); got != KeyUnknown {
 			t.Errorf("мусорное имя %q дало %d", bad, got)
 		}
 	}

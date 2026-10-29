@@ -24,5 +24,5 @@ func Widget(root string) []Facade {
 			Out: filepath.Join(root, "widget", alias+"_gen.go"),
 		}
 	}
-	return []Facade{pkg("base", "base")}
+	return []Facade{pkg("base", "base"), pkg("xaml", "xaml")}
 }

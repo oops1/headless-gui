@@ -8,7 +8,7 @@ package base
 // к моменту now. tick(t) получает ПРОГРЕСС ПОСЛЕ кривой (t ∈ [0,1]).
 //
 // Взаимодействие с on-demand циклом:
-//   - Animate/AnimateOwned будят спящий цикл через notifyUIChanged (тот же
+//   - Animate/AnimateOwned будят спящий цикл через NotifyUIChanged (тот же
 //     нотификатор, что регистрирует движок как e.Invalidate) — иначе анимация,
 //     запущенная из колбэка вне кадра, не начнётся до следующего события;
 //   - AnimationsActive() движок опрашивает в animationNeeded — пока есть

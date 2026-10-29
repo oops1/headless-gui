@@ -1,6 +1,6 @@
-package base
+package xaml
 
-// xaml_itemssource.go — ItemsSource="{Binding …}" у DataGrid и TreeView.
+// itemssource.go — ItemsSource="{Binding …}" у DataGrid и TreeView.
 //
 // Привязки XAML передают виджету строку: для текста, флажка или ползунка
 // этого довольно. Источник строк таблицы или узлов дерева — коллекция, а не
@@ -16,18 +16,19 @@ package base
 import (
 	"strings"
 
+	"github.com/oops1/headless-gui/v3/widget/base"
 	dgridPkg "github.com/oops1/headless-gui/v3/widget/datagrid"
 )
 
 // applyItemsSource ставит коллекцию источником строк или узлов. Возвращает
 // true, если привязка — ItemsSource таблицы или дерева: тогда строкового
 // пути для неё нет, и звать setWidgetProperty не нужно.
-func (s *BindingScope) applyItemsSource(w Widget, prop string, v interface{}) bool {
+func (s *BindingScope) applyItemsSource(w base.Widget, prop string, v interface{}) bool {
 	if !strings.EqualFold(prop, "ItemsSource") {
 		return false
 	}
 	switch w.(type) {
-	case *DataGridWidget, *TreeViewWidget:
+	case *base.DataGridWidget, *base.TreeViewWidget:
 	default:
 		return false
 	}
@@ -39,15 +40,15 @@ func (s *BindingScope) applyItemsSource(w Widget, prop string, v interface{}) bo
 		return true
 	}
 	switch t := w.(type) {
-	case *DataGridWidget:
+	case *base.DataGridWidget:
 		if t.Grid.ItemsSource() != oc {
 			t.Grid.SetItemsSource(oc)
 		}
 		return true
-	case *TreeViewWidget:
+	case *base.TreeViewWidget:
 		s.mu.Lock()
 		if s.treeSrc == nil {
-			s.treeSrc = map[*TreeViewWidget]*dgridPkg.ObservableCollection{}
+			s.treeSrc = map[*base.TreeViewWidget]*dgridPkg.ObservableCollection{}
 		}
 		prev, seen := s.treeSrc[t]
 		s.treeSrc[t] = oc

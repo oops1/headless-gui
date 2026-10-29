@@ -1,8 +1,10 @@
-package base
+package xaml
 
 import (
 	"image"
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // Элемент разметки без Width/Height раньше получал прямоугольник
@@ -17,7 +19,7 @@ const labelSizeXAML = `<Canvas Width="800" Height="400" Background="#101010">
 </Canvas>`
 
 func TestXAMLCanvas_LabelWithoutSize_GetsMeasuredBox(t *testing.T) {
-	useTestMeasurer(t)
+	useTestMeasure(t)
 
 	root, reg, err := LoadUIFromXAML([]byte(labelSizeXAML))
 	if err != nil {
@@ -26,7 +28,7 @@ func TestXAMLCanvas_LabelWithoutSize_GetsMeasuredBox(t *testing.T) {
 	defer ReleaseXAML(root)
 	root.SetBounds(image.Rect(0, 0, 800, 400))
 
-	head, ok := reg["head"].(*Label)
+	head, ok := reg["head"].(*base.Label)
 	if !ok {
 		t.Fatalf("head — %T, ждал *Label", reg["head"])
 	}
@@ -37,19 +39,19 @@ func TestXAMLCanvas_LabelWithoutSize_GetsMeasuredBox(t *testing.T) {
 		t.Errorf("подпись начинается в (%d,%d), ждал (24,264)", b.Min.X, b.Min.Y)
 	}
 	// Коробка вмещает текст: иначе он рисуется за её пределами.
-	wantW := rawMeasure(head.Text(), DefaultFontSizePt)
+	wantW := testMeasure(head.Text(), base.DefaultFontSizePt)
 	if wantW <= 0 {
 		t.Fatalf("измеритель вернул %d — тест бесполезен", wantW)
 	}
 	if b.Dx() < wantW {
 		t.Errorf("ширина коробки %d, текст занимает %d — подпись обрежется", b.Dx(), wantW)
 	}
-	if b.Dy() < int(DefaultFontSizePt) {
+	if b.Dy() < int(base.DefaultFontSizePt) {
 		t.Errorf("высота коробки %d — строка туда не помещается", b.Dy())
 	}
 
 	// Явно заданный размер разметка по-прежнему уважает.
-	fixed := reg["fixed"].(*Label)
+	fixed := reg["fixed"].(*base.Label)
 	if fb := fixed.Bounds(); fb.Dx() != 300 || fb.Dy() != 36 {
 		t.Errorf("подпись с Width/Height получила %v, ждал 300×36", fb)
 	}
@@ -58,7 +60,7 @@ func TestXAMLCanvas_LabelWithoutSize_GetsMeasuredBox(t *testing.T) {
 // Тот же перекос ломал и сдвиг: подпись, у которой ширина равна Left, при
 // переезде Canvas уезжала вместе с ним, но её коробка оставалась чужой.
 func TestXAMLCanvas_LabelBoxFollowsCanvas(t *testing.T) {
-	useTestMeasurer(t)
+	useTestMeasure(t)
 
 	root, reg, err := LoadUIFromXAML([]byte(labelSizeXAML))
 	if err != nil {
@@ -66,7 +68,7 @@ func TestXAMLCanvas_LabelBoxFollowsCanvas(t *testing.T) {
 	}
 	defer ReleaseXAML(root)
 	root.SetBounds(image.Rect(0, 0, 800, 400))
-	head := reg["head"].(*Label)
+	head := reg["head"].(*base.Label)
 	before := head.Bounds().Dx()
 
 	root.SetBounds(image.Rect(100, 50, 900, 450))

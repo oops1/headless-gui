@@ -1,13 +1,15 @@
-package base
+package xaml
 
 import (
 	"io"
 	"path"
 	"strconv"
 	"strings"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
-// diffview_xaml.go — тег <DiffView> в разметке.
+// diffview.go — тег <DiffView> в разметке.
 //
 //	<DiffView x:Name="diff" LeftFile="old/config.go" RightFile="new/config.go"
 //	          HideUnchanged="True" ContextLines="3" IgnoreWhitespace="False"
@@ -21,8 +23,8 @@ import (
 // файла — сохранять его приложение будет через SaveAs, путей на диске у
 // вкомпилированных файлов нет.
 
-func buildXAMLDiffView(el xElement, baseDir string) Widget {
-	d := NewDiffView(el.attr("FontFamily"), el.attr("HeaderFontFamily"))
+func buildXAMLDiffView(el xElement, baseDir string) base.Widget {
+	d := base.NewDiffView(el.attr("FontFamily"), el.attr("HeaderFontFamily"))
 	if fs := el.attr("FontSize"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
 			d.SetFont("", "", v)
@@ -38,12 +40,12 @@ func buildXAMLDiffView(el xElement, baseDir string) Widget {
 	flag("SyntaxHighlight", d.SetSyntaxHighlight)
 	flag("ShowHeaders", d.SetShowHeaders)
 	flag("ShowReadOnlyMark", d.SetShowReadOnlyMark)
-	flag("ReadOnlyLeft", func(v bool) { d.SetReadOnly(DiffLeft, v) })
-	flag("ReadOnlyRight", func(v bool) { d.SetReadOnly(DiffRight, v) })
+	flag("ReadOnlyLeft", func(v bool) { d.SetReadOnly(base.DiffLeft, v) })
+	flag("ReadOnlyRight", func(v bool) { d.SetReadOnly(base.DiffRight, v) })
 	if v := el.attr("ContextLines"); v != "" {
 		d.SetContextLines(xatoi(v))
 	}
-	for side, attr := range map[DiffSide]string{DiffLeft: "LeftFile", DiffRight: "RightFile"} {
+	for side, attr := range map[base.DiffSide]string{base.DiffLeft: "LeftFile", base.DiffRight: "RightFile"} {
 		if src := el.attr(attr); src != "" {
 			loadDiffXAMLFile(d, side, baseDir, src)
 		}
@@ -57,9 +59,9 @@ func buildXAMLDiffView(el xElement, baseDir string) Widget {
 // loadDiffXAMLFile загружает сторону из файла разметки. Ошибка (нет файла,
 // путь за пределами каталога, двоичный файл) оставляет сторону пустой — окно
 // с пустым сравнением понятнее, чем окно, не открывшееся из-за одного файла.
-func loadDiffXAMLFile(d *DiffView, side DiffSide, baseDir, src string) {
-	if _, isFS := xamlFSRegistry.Load(baseDir); isFS {
-		f, err := openXAMLResource(baseDir, src)
+func loadDiffXAMLFile(d *base.DiffView, side base.DiffSide, baseDir, src string) {
+	if base.IsResourceFS(baseDir) {
+		f, err := base.OpenResource(baseDir, src)
 		if err != nil {
 			return
 		}
@@ -71,7 +73,7 @@ func loadDiffXAMLFile(d *DiffView, side DiffSide, baseDir, src string) {
 		d.SetText(side, path.Base(strings.ReplaceAll(src, `\`, "/")), "", string(data))
 		return
 	}
-	full, err := resolveXAMLResource(baseDir, src)
+	full, err := base.ResolveResource(baseDir, src)
 	if err != nil {
 		return
 	}

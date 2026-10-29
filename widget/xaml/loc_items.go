@@ -1,8 +1,8 @@
-// xaml_loc_items.go — живая локализация строк, которые НЕ являются свойствами
+// loc_items.go — живая локализация строк, которые НЕ являются свойствами
 // виджета: заголовков вкладок, пунктов меню и элементов списков.
 //
 // Обычный {Loc Key} в разметке превращается в живую привязку «виджет +
-// свойство» (см. xaml_binding.go): при смене языка достаточно записать новый
+// свойство» (см. binding.go): при смене языка достаточно записать новый
 // перевод в свойство. Но <TabItem Header="…">, <MenuItem Header="…"> и
 // <ComboBoxItem Content="…"> отдельными виджетами НЕ становятся — сборщик
 // сворачивает их в родителя (TabControl.AddTab, MenuBar.AddMenu,
@@ -12,13 +12,14 @@
 //
 // Из-за этого раньше при переключении языка менялись подписи и кнопки, а
 // вкладки, меню и выпадающие списки оставались на прежнем языке.
-package base
+package xaml
 
 import (
 	"strings"
 	"sync"
 
 	"github.com/oops1/headless-gui/v3/internal/goid"
+	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
 // locItemTarget — одна «свёрнутая» строка: ключ, способ её применить и
@@ -53,7 +54,7 @@ func locMarkupKey(v string) (string, bool) {
 	if t != "{Loc}" && !strings.HasPrefix(t, "{Loc ") && !strings.HasPrefix(t, "{Loc}") {
 		return "", false
 	}
-	key := parseLocKey(t)
+	key := base.ParseLocKey(t)
 	if key == "" {
 		return "", false
 	}
@@ -65,7 +66,7 @@ func locMarkupKey(v string) (string, bool) {
 // не локализуемая).
 func locItemText(v string) (text, key string) {
 	if k, ok := locMarkupKey(v); ok {
-		return Tr(k), k
+		return base.Tr(k), k
 	}
 	return v, ""
 }
@@ -122,7 +123,7 @@ func registerLocItem(key string, apply func(text string)) {
 	owner := currentLocOwner()
 	if owner == nil {
 		locItemsOnce.Do(func() {
-			AddLanguageListener(func(string) { applyLocItems() })
+			base.AddLanguageListener(func(string) { applyLocItems() })
 		})
 	}
 	locItemsMu.Lock()
@@ -195,10 +196,10 @@ func applyLocItemsOf(o *locOwner) {
 	}
 	locItemsMu.Unlock()
 	for _, t := range targets {
-		t.apply(Tr(t.key))
+		t.apply(base.Tr(t.key))
 	}
 	if len(targets) > 0 {
-		notifyUIChanged()
+		base.NotifyUIChanged()
 	}
 }
 

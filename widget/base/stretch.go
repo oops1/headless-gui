@@ -81,12 +81,3 @@ func stretchIn(children []Widget) (idx []int, weights []int) {
 	}
 	return idx, weights
 }
-
-// buildXAMLStretch строит распорку из <Stretch/> или <ToolBarStretch/>.
-func buildXAMLStretch(el xElement) Widget {
-	s := NewStretch()
-	if w := xatoi(el.attr("Weight")); w > 0 {
-		s.Weight = w
-	}
-	return s
-}

@@ -2,7 +2,7 @@ package base
 
 // docksize_test.go — регресс на GG-1: желаемый Size стороны DockManager,
 // заданный ДО первой раскладки (как это делает XAML-загрузчик — см.
-// buildXAMLDockManager в xaml_containers.go, который вызывает SetSideSize
+// buildXAMLDockManager в widget/xaml/containers.go, который вызывает SetSideSize
 // сразу после AddPane, а SetBounds самого DockManager может к этому моменту
 // ещё нести пустые границы, если реальный размер выставляет только
 // engine.SetRoot), должен дожить до первой раскладки, а не схлопнуться до

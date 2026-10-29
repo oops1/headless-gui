@@ -5,13 +5,12 @@
 // Построители простых виджетов: Label, Button, TextInput, Dropdown, ProgressBar,
 // Separator, CheckBox, RadioButton, Slider, ToggleSwitch, ScrollView, ListView, Image.
 //
-// Контейнеры (Grid, Window, Canvas, DockPanel и др.) — в xaml_containers.go.
-// Парсинг XML, цветов и Margin — в xaml_parse.go.
-// Применение attached-свойств — в xaml_props.go.
-package base
+// Контейнеры (Grid, Window, Canvas, DockPanel и др.) — в containers.go.
+// Парсинг XML, цветов и Margin — в parse.go.
+// Применение attached-свойств — в props.go.
+package xaml
 
 import (
-	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -19,13 +18,11 @@ import (
 	"io/fs"
 	"log"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 
+	"github.com/oops1/headless-gui/v3/widget/base"
 	svgPkg "github.com/oops1/headless-gui/v3/widget/svg"
 )
 
@@ -33,7 +30,7 @@ import (
 
 // LoadUIFromXAMLFile читает XAML-файл и строит дерево виджетов.
 // Возвращает корневой виджет и map[name]Widget для именованных элементов.
-func LoadUIFromXAMLFile(path string) (Widget, map[string]Widget, error) {
+func LoadUIFromXAMLFile(path string) (base.Widget, map[string]base.Widget, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("xaml: read %q: %w", path, err)
@@ -44,14 +41,14 @@ func LoadUIFromXAMLFile(path string) (Widget, map[string]Widget, error) {
 
 // LoadUIFromXAML разбирает XAML и строит дерево виджетов.
 // Ресурсы (изображения) не могут загружаться — baseDir пустой.
-func LoadUIFromXAML(data []byte) (Widget, map[string]Widget, error) {
+func LoadUIFromXAML(data []byte) (base.Widget, map[string]base.Widget, error) {
 	w, reg, _, err := loadUIFromXAML(data, "", nil)
 	return w, reg, err
 }
 
 // LoadUIFromXAMLWithBase разбирает XAML и строит дерево виджетов.
 // baseDir используется для загрузки ресурсов (BackgroundImage и пр.).
-func LoadUIFromXAMLWithBase(data []byte, baseDir string) (Widget, map[string]Widget, error) {
+func LoadUIFromXAMLWithBase(data []byte, baseDir string) (base.Widget, map[string]base.Widget, error) {
 	w, reg, _, err := loadUIFromXAML(data, baseDir, nil)
 	return w, reg, err
 }
@@ -64,15 +61,15 @@ func LoadUIFromXAMLWithBase(data []byte, baseDir string) (Widget, map[string]Wid
 // каталога с ресурсами на диске, поэтому LoadUIFromXAMLWithBase здесь не
 // применить. Путь в разметке резолвится и удерживается внутри fsys ровно по
 // той же политике SEC-8, что и baseDir на диске — абсолютный путь или выход
-// за пределы корня отклоняется с ErrResourceOutsideBase (см. openXAMLResource).
-func LoadUIFromXAMLFS(data []byte, fsys fs.FS) (Widget, map[string]Widget, error) {
-	key := registerXAMLFS(fsys)
+// за пределы корня отклоняется с ErrResourceOutsideBase (см. OpenResource).
+func LoadUIFromXAMLFS(data []byte, fsys fs.FS) (base.Widget, map[string]base.Widget, error) {
+	key := base.RegisterResourceFS(fsys)
 	// DataContext здесь нет (у этой функции нет параметра ctx), а значит нет и
 	// живых перестроений ItemsControl/VirtualizingItemsControl — единственных
 	// мест, которые обращаются к baseDir уже ПОСЛЕ возврата из loadUIFromXAML
-	// (см. wireItems/wireVirtuals в xaml_binding.go — оба выходят рано при
+	// (см. wireItems/wireVirtuals в binding.go — оба выходят рано при
 	// ctx == nil). Поэтому запись реестра снимается сразу же, без утечки.
-	defer unregisterXAMLFS(key)
+	defer base.UnregisterResourceFS(key)
 	w, reg, _, err := loadUIFromXAML(data, key, nil)
 	return w, reg, err
 }
@@ -82,19 +79,19 @@ func LoadUIFromXAMLFS(data []byte, fsys fs.FS) (Widget, map[string]Widget, error
 // обновляется автоматически, TwoWay-поля пишут обратно в модель.
 // Возвращаемый BindingScope удерживается подписками, поэтому привязки работают
 // даже если scope не сохранён вызывающим кодом.
-func LoadUIFromXAMLWithContext(data []byte, dataContext interface{}) (Widget, map[string]Widget, error) {
+func LoadUIFromXAMLWithContext(data []byte, dataContext interface{}) (base.Widget, map[string]base.Widget, error) {
 	w, reg, _, err := loadUIFromXAML(data, "", dataContext)
 	return w, reg, err
 }
 
 // LoadUIFromXAMLBindings — как LoadUIFromXAMLWithContext, но возвращает BindingScope
 // для ручного управления (SetDataContext / Refresh).
-func LoadUIFromXAMLBindings(data []byte, dataContext interface{}) (Widget, map[string]Widget, *BindingScope, error) {
+func LoadUIFromXAMLBindings(data []byte, dataContext interface{}) (base.Widget, map[string]base.Widget, *BindingScope, error) {
 	return loadUIFromXAML(data, "", dataContext)
 }
 
 // LoadUIFromXAMLFileWithContext — как LoadUIFromXAMLFile, но с DataContext для {Binding}.
-func LoadUIFromXAMLFileWithContext(path string, dataContext interface{}) (Widget, map[string]Widget, error) {
+func LoadUIFromXAMLFileWithContext(path string, dataContext interface{}) (base.Widget, map[string]base.Widget, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("xaml: read %q: %w", path, err)
@@ -104,7 +101,7 @@ func LoadUIFromXAMLFileWithContext(path string, dataContext interface{}) (Widget
 }
 
 // LoadUIFromXAMLFileBindings — как LoadUIFromXAMLFileWithContext, но с BindingScope.
-func LoadUIFromXAMLFileBindings(path string, dataContext interface{}) (Widget, map[string]Widget, *BindingScope, error) {
+func LoadUIFromXAMLFileBindings(path string, dataContext interface{}) (base.Widget, map[string]base.Widget, *BindingScope, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("xaml: read %q: %w", path, err)
@@ -114,18 +111,18 @@ func LoadUIFromXAMLFileBindings(path string, dataContext interface{}) (Widget, m
 
 // loadUIFromXAML — общая реализация: парсинг → пред-обработка (Resources/Style/
 // markup/{Binding}) → построение дерева → активация живых привязок.
-func loadUIFromXAML(data []byte, baseDir string, dataContext interface{}) (Widget, map[string]Widget, *BindingScope, error) {
+func loadUIFromXAML(data []byte, baseDir string, dataContext interface{}) (base.Widget, map[string]base.Widget, *BindingScope, error) {
 	root, err := parseXAML(data)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	env := preprocessXAML(root, dataContext)
-	registry := make(map[string]Widget)
+	registry := make(map[string]base.Widget)
 	// Переводимые строки, свёрнутые в родителя (меню, вкладки, колонки),
 	// записываются за этой загрузкой: их переводит и снимает scope дерева, а не
 	// общий список на весь процесс (GG-75).
 	owner := &locOwner{}
-	var w Widget
+	var w base.Widget
 	withLocOwner(owner, func() {
 		w, err = buildXAMLWidget(*root, registry, image.Point{}, baseDir)
 	})
@@ -144,15 +141,15 @@ func loadUIFromXAML(data []byte, baseDir string, dataContext interface{}) (Widge
 
 // resolveWindowInputCommands связывает CommandPath из Window/Canvas.InputBindings
 // с объектами-командами из DataContext.
-func resolveWindowInputCommands(root Widget, ctx interface{}) {
+func resolveWindowInputCommands(root base.Widget, ctx interface{}) {
 	if ctx == nil {
 		return
 	}
-	var bindings []InputBinding
+	var bindings []base.InputBinding
 	switch t := root.(type) {
-	case *Window:
+	case *base.Window:
 		bindings = t.InputBindings
-	case *Canvas:
+	case *base.Canvas:
 		bindings = t.InputBindings
 	default:
 		return
@@ -163,7 +160,7 @@ func resolveWindowInputCommands(root Widget, ctx interface{}) {
 			continue
 		}
 		if v, ok := dgridGetProperty(ctx, p); ok {
-			if cmd, ok := v.(ICommand); ok {
+			if cmd, ok := v.(base.ICommand); ok {
 				bindings[i].Command = cmd
 			}
 		}
@@ -174,107 +171,36 @@ func resolveWindowInputCommands(root Widget, ctx interface{}) {
 //
 // baseDir остаётся string во ВСЕХ билдерах — ни один из ~25 buildXAML*
 // (buildXAMLWidget включительно) не меняет сигнатуру. Причина не только в
-// формулировке задачи: xaml_binding.go хранит baseDir как string-поле
+// формулировке задачи: binding.go хранит baseDir как string-поле
 // (pendingItems.baseDir, pendingVirtual.baseDir) и передаёт его обратно в
 // buildXAMLWidget при живом перестроении ItemsControl/VirtualizingItemsControl
-// — менять тип значило бы менять и xaml_binding.go, а трогать этот файл здесь
+// — менять тип значило бы менять и binding.go, а трогать этот файл здесь
 // не входит в задачу.
 //
 // Поэтому fs.FS протаскивается тем же каналом, что и baseDir: LoadUIFromXAMLFS
 // заводит СИНТЕТИЧЕСКИЙ baseDir — строку-маркер, недостижимую для реального
 // пути каталога, — и кладёт fsys в реестр под этим ключом. Единая точка
-// чтения ресурса (openXAMLResource) сначала смотрит в реестр: нашли — это
+// чтения ресурса (OpenResource) сначала смотрит в реестр: нашли — это
 // fs.FS; не нашли — обычный путь на диске (или пустой baseDir, как раньше).
 
-// xamlFSMarker — префикс синтетического baseDir. Ведущий NUL-байт не может
-// встретиться в filepath.Dir(реального XAML-файла), поэтому коллизия с живым
-// диском исключена без доп. проверок.
-const xamlFSMarker = "\x00xamlfs:"
-
-var (
-	xamlFSRegistry    sync.Map // string(маркер+id) → fs.FS
-	xamlFSRegistrySeq atomic.Uint64
-)
-
-// registerXAMLFS заводит новый синтетический baseDir для fsys.
-func registerXAMLFS(fsys fs.FS) string {
-	id := xamlFSRegistrySeq.Add(1)
-	key := xamlFSMarker + strconv.FormatUint(id, 36)
-	xamlFSRegistry.Store(key, fsys)
-	return key
-}
-
-// unregisterXAMLFS убирает запись реестра (см. LoadUIFromXAMLFS: у неё нет
-// DataContext, поэтому запись не нужна дольше одной синхронной загрузки).
-func unregisterXAMLFS(key string) {
-	xamlFSRegistry.Delete(key)
-}
-
-// resolveXAMLResourceFS приводит путь ресурса из атрибута разметки к виду,
-// который принимает fs.FS: разделитель всегда "/", без ведущего "/" (таково
-// требование io/fs.ValidPath). Разметку часто пишут на Windows, поэтому "\"
-// сначала заменяется на "/" — это единственное отличие от resolveXAMLResource
-// (диск, xaml_props.go); политика границы та же (SEC-8): абсолютный путь и
-// выход за пределы корня отклоняются с ErrResourceOutsideBase. fs.FS и так не
-// откроет файл вне себя (Open вернёт ошибку), но сообщение должно быть
-// понятным, а не «invalid name» из stdlib.
-func resolveXAMLResourceFS(src string) (string, error) {
-	src = strings.TrimSpace(src)
-	if src == "" {
-		return "", errors.New("xaml: пустой путь ресурса")
-	}
-	slashed := strings.ReplaceAll(src, `\`, "/")
-	if strings.HasPrefix(slashed, "/") || filepath.VolumeName(src) != "" {
-		err := fmt.Errorf("%w: абсолютный путь %q", ErrResourceOutsideBase, src)
-		logResourceRejected(src, err)
-		return "", err
-	}
-	clean := path.Clean(slashed)
-	if clean == ".." || strings.HasPrefix(clean, "../") || !fs.ValidPath(clean) {
-		err := fmt.Errorf("%w: %q", ErrResourceOutsideBase, src)
-		logResourceRejected(src, err)
-		return "", err
-	}
-	return clean, nil
-}
-
-// openXAMLResource — ЕДИНАЯ точка чтения ресурса разметки (Image Source,
-// Button Icon/IconSource, Panel BackgroundImage, SVGIcon Source, TrayIcon):
-// решает, откуда читать (диск или fs.FS из LoadUIFromXAMLFS), и открывает файл.
-// Дальше вызывающему коду (декодирование PNG/JPEG/SVG) источник уже не важен.
-func openXAMLResource(baseDir, src string) (io.ReadCloser, error) {
-	if v, ok := xamlFSRegistry.Load(baseDir); ok {
-		p, err := resolveXAMLResourceFS(src)
-		if err != nil {
-			return nil, err
-		}
-		return v.(fs.FS).Open(p)
-	}
-	full, err := resolveXAMLResource(baseDir, src)
-	if err != nil {
-		return nil, err
-	}
-	return os.Open(full)
-}
-
 // decodeXAMLImage читает и декодирует растровое изображение (PNG/JPEG) через
-// openXAMLResource — общая точка для Image.Source, Button.Icon и TrayIcon.
+// OpenResource — общая точка для Image.Source, Button.Icon и TrayIcon.
 // Декодирование ограничено (DecodeImageBounded, SEC-9) так же, как раньше
 // у loadImageFile/ImageWidget.SetSource.
 func decodeXAMLImage(baseDir, src string) (image.Image, error) {
-	f, err := openXAMLResource(baseDir, src)
+	f, err := base.OpenResource(baseDir, src)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	return DecodeImageBounded(f)
+	return base.DecodeImageBounded(f)
 }
 
 // decodeXAMLImageRGBA — как decodeXAMLImage, но приводит результат к
 // *image.RGBA. Нужна только для Panel.BackgroundImage: это поле типизировано
 // именно как *image.RGBA (в отличие от Image.Source/Button.Icon/TrayIcon,
 // которым достаточно интерфейса image.Image). Конвертация — копия финального
-// шага loadImageFile (xaml_props.go); отдельно, потому что читать оттуда
+// шага loadImageFile (props.go); отдельно, потому что читать оттуда
 // нельзя без правки того файла, а сам он остаётся диск-only.
 func decodeXAMLImageRGBA(baseDir, src string) (*image.RGBA, error) {
 	img, err := decodeXAMLImage(baseDir, src)
@@ -300,7 +226,7 @@ func decodeXAMLImageRGBA(baseDir, src string) (*image.RGBA, error) {
 // файла целиком в память само по себе было бы дырой — как раньше делал
 // svg.ParseFile через io.LimitReader).
 func readXAMLResourceBytes(baseDir, src string, maxBytes int64) ([]byte, error) {
-	f, err := openXAMLResource(baseDir, src)
+	f, err := base.OpenResource(baseDir, src)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +251,7 @@ func readXAMLResourceBytes(baseDir, src string, maxBytes int64) ([]byte, error) 
 // Для корневого элемента parentOff = image.Point{}.
 //
 // Это точка входа с глубины 0: рекурсия идёт через buildXAMLWidgetAt.
-func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string) (Widget, error) {
+func buildXAMLWidget(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string) (base.Widget, error) {
 	return buildXAMLWidgetAt(el, reg, parentOff, baseDir, 0)
 }
 
@@ -334,7 +260,7 @@ func buildXAMLWidget(el xElement, reg map[string]Widget, parentOff image.Point, 
 // ошибкой, не давая рекурсии исчерпать стек (SEC-7). Парсер держит ту же
 // границу, так что здесь это вторая линия обороны — на случай деревьев,
 // собранных в обход parseXAML (клоны DataTemplate/ItemsControl).
-func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
+func buildXAMLWidgetAt(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
 	if depth > maxXAMLDepth {
 		return nil, fmt.Errorf("%w (%d): <%s>", ErrXAMLTooDeep, maxXAMLDepth, el.Tag)
 	}
@@ -353,7 +279,7 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 		return nil, nil
 	}
 
-	var w Widget
+	var w base.Widget
 
 	switch tag {
 	// ── Grid ────────────────────────────────────────────────────────────────
@@ -433,7 +359,7 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 
 	// ── GridSplitter — перетаскиваемый разделитель ячеек Grid ───────────────
 	case "gridsplitter":
-		s := NewGridSplitter()
+		s := base.NewGridSplitter()
 		applyColor(&s.Background, el, "Background")
 		w = s
 
@@ -479,7 +405,7 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 		// (см. widget/togglebutton.go). Прежде тег разбирался как обычный
 		// Button, и переключатель из разметки было не получить.
 		if tag == "togglebutton" {
-			if btn, ok := w.(*Button); ok {
+			if btn, ok := w.(*base.Button); ok {
 				btn.SetToggle(true)
 			}
 		}
@@ -647,7 +573,7 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 		childTag := strings.ToLower(child.Tag)
 		// Абзацы RichText разобраны в buildXAMLRichText: это не виджеты. Теги-
 		// свойства (RichText.ContextMenu) идут обычным путём.
-		if _, ok := w.(*RichText); ok && !strings.Contains(childTag, ".") {
+		if _, ok := w.(*base.RichText); ok && !strings.Contains(childTag, ".") {
 			continue
 		}
 		if childTag == "item" || childTag == "comboboxitem" || childTag == "listboxitem" ||
@@ -655,7 +581,7 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 			continue
 		}
 		// Пункты кнопки с меню уже разобраны в buildXAMLMenuButton.
-		if _, ok := w.(*MenuButton); ok && (childTag == "menuitem" || childTag == "separator") {
+		if _, ok := w.(*base.MenuButton); ok && (childTag == "menuitem" || childTag == "separator") {
 			continue
 		}
 		// Attached ContextMenu: <X.ContextMenu><ContextMenu>…</ContextMenu></X.ContextMenu>
@@ -665,8 +591,8 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 				if err != nil {
 					return nil, err
 				}
-				if pm, ok := cw.(*PopupMenu); ok {
-					if h, ok := w.(interface{ SetContextMenu(*PopupMenu) }); ok {
+				if pm, ok := cw.(*base.PopupMenu); ok {
+					if h, ok := w.(interface{ SetContextMenu(*base.PopupMenu) }); ok {
 						h.SetContextMenu(pm)
 					}
 					w.AddChild(pm) // в дереве — чтобы движок рисовал overlay и ловил клики
@@ -712,8 +638,8 @@ func buildXAMLWidgetAt(el xElement, reg map[string]Widget, parentOff image.Point
 // кнопок и SVGIcon), абсолютный читал что угодно. Теперь путь проходит через
 // decodeXAMLImage — тот же резолв и та же граница, что у всех ресурсов
 // разметки (SEC-8), плюс умеет читать из fs.FS (LoadUIFromXAMLFS, GG-7).
-func buildXAMLImage(el xElement, baseDir string) Widget {
-	iw := NewImageWidget()
+func buildXAMLImage(el xElement, baseDir string) base.Widget {
+	iw := base.NewImageWidget()
 	if src := el.attr("Source"); src != "" {
 		if img, err := decodeXAMLImage(baseDir, src); err == nil {
 			iw.SetImage(img)
@@ -724,16 +650,16 @@ func buildXAMLImage(el xElement, baseDir string) Widget {
 	}
 	switch strings.ToLower(el.attr("Stretch")) {
 	case "uniform", "uniformtofill":
-		iw.Stretch = ImageStretchUniform
+		iw.Stretch = base.ImageStretchUniform
 	case "none":
-		iw.Stretch = ImageStretchNone
+		iw.Stretch = base.ImageStretchNone
 	default:
-		iw.Stretch = ImageStretchFill
+		iw.Stretch = base.ImageStretchFill
 	}
 	return iw
 }
 
-func buildXAMLLabel(el xElement) Widget {
+func buildXAMLLabel(el xElement) base.Widget {
 	text := el.attr("Text", "Content")
 	if text == "" {
 		text = el.Text
@@ -742,14 +668,14 @@ func buildXAMLLabel(el xElement) Widget {
 	fg := el.attr("Foreground", "TextColor", "Fill")
 	bg := el.attr("Background")
 
-	var lbl *Label
+	var lbl *base.Label
 	if fg != "" {
 		if c, err := parseXAMLColor(fg); err == nil {
-			lbl = NewLabel(text, c)
+			lbl = base.NewLabel(text, c)
 		}
 	}
 	if lbl == nil {
-		lbl = NewWin10Label(text)
+		lbl = base.NewWin10Label(text)
 	}
 
 	if bg != "" {
@@ -808,7 +734,7 @@ func buildXAMLLabel(el xElement) Widget {
 	return lbl
 }
 
-func buildXAMLButton(el xElement, baseDir string) Widget {
+func buildXAMLButton(el xElement, baseDir string) base.Widget {
 	text := el.attr("Content", "Text")
 	if text == "" {
 		text = el.Text
@@ -827,11 +753,11 @@ func buildXAMLButton(el xElement, baseDir string) Widget {
 		iconSrc = bc.IconSrc
 	}
 	style := strings.ToLower(el.attr("Tag", "Style"))
-	var btn *Button
+	var btn *base.Button
 	if style == "accent" || style == "primary" {
-		btn = NewWin10AccentButton(text)
+		btn = base.NewWin10AccentButton(text)
 	} else {
-		btn = NewButton(text)
+		btn = base.NewButton(text)
 	}
 
 	applyColor(&btn.Background, el, "Background")
@@ -872,7 +798,7 @@ func buildXAMLButton(el xElement, baseDir string) Widget {
 
 	// ── Иконка ─────────────────────────────────────────────────────────────
 	// Путь ограничен каталогом XAML-файла или fs.FS (SEC-8, GG-7) —
-	// decodeXAMLImage сама решает, откуда читать (см. openXAMLResource).
+	// decodeXAMLImage сама решает, откуда читать (см. OpenResource).
 	if iconSrc != "" {
 		if img, err := decodeXAMLImage(baseDir, iconSrc); err == nil {
 			btn.Icon = img
@@ -895,9 +821,9 @@ func buildXAMLButton(el xElement, baseDir string) Widget {
 
 	switch strings.ToLower(el.attr("IconPosition", "IconPos")) {
 	case "top":
-		btn.IconPos = IconTop
+		btn.IconPos = base.IconTop
 	case "only", "icononly":
-		btn.IconPos = IconOnly
+		btn.IconPos = base.IconOnly
 	}
 	if sz := xatoi(el.attr("IconSize")); sz > 0 {
 		btn.IconSize = sz
@@ -960,16 +886,16 @@ func extractButtonContentRec(el xElement, bc *buttonContent) {
 	}
 }
 
-func buildXAMLTextInput(el xElement, isPassword bool, baseDir string) Widget {
+func buildXAMLTextInput(el xElement, isPassword bool, baseDir string) base.Widget {
 	placeholder := el.attr("Tag", "Placeholder", "PlaceholderText", "Hint")
 	if isPassword && placeholder == "" {
 		placeholder = "Пароль"
 	}
-	var ti *TextInput
+	var ti *base.TextInput
 	if isPassword {
-		ti = NewPasswordInput(placeholder)
+		ti = base.NewPasswordInput(placeholder)
 	} else {
-		ti = NewTextInput(placeholder)
+		ti = base.NewTextInput(placeholder)
 	}
 
 	if text := el.attr("Text"); text != "" {
@@ -1002,7 +928,7 @@ func buildXAMLTextInput(el xElement, isPassword bool, baseDir string) Widget {
 	}
 
 	// Значок в начале поля (лупа у строки поиска). Путь ограничен каталогом
-	// разметки или fs.FS — тем же openXAMLResource, что и у прочих ресурсов.
+	// разметки или fs.FS — тем же OpenResource, что и у прочих ресурсов.
 	if src := el.attr("Icon", "IconSource", "LeadingIcon"); src != "" {
 		if img, err := decodeXAMLImage(baseDir, src); err == nil {
 			ti.LeadingIcon = img
@@ -1025,8 +951,8 @@ func xamlWantsMultiline(el xElement) bool {
 }
 
 // buildXAMLTextBox создаёт многострочный TextBox из XAML-элемента.
-func buildXAMLTextBox(el xElement) Widget {
-	tb := NewTextBox(el.attr("Tag", "Placeholder", "PlaceholderText", "Hint"))
+func buildXAMLTextBox(el xElement) base.Widget {
+	tb := base.NewTextBox(el.attr("Tag", "Placeholder", "PlaceholderText", "Hint"))
 
 	wrap := strings.ToLower(el.attr("TextWrapping"))
 	tb.Wrap = wrap == "" || wrap == "wrap" || wrap == "wrapwithoverflow"
@@ -1057,7 +983,7 @@ func buildXAMLTextBox(el xElement) Widget {
 	return tb
 }
 
-func buildXAMLDropdown(el xElement) Widget {
+func buildXAMLDropdown(el xElement) base.Widget {
 	var items []string
 	var keys []string // ключи {Loc …} по индексам items (пустая строка — нет)
 	if raw := el.attr("Items", "ItemsSource"); raw != "" {
@@ -1084,7 +1010,7 @@ func buildXAMLDropdown(el xElement) Widget {
 		}
 	}
 
-	dd := NewDropdown(items...)
+	dd := base.NewDropdown(items...)
 	// Элементы списка — не виджеты, поэтому обновляем их сами: при смене
 	// языка перечитываем переводы и переустанавливаем весь список.
 	registerLocItemList(keys, func(i int, s string) {
@@ -1108,16 +1034,16 @@ func buildXAMLDropdown(el xElement) Widget {
 	// ArrowStyle="Chevron" | "Triangle" | "Auto" — вид стрелки раскрытия.
 	switch strings.ToLower(el.attr("ArrowStyle")) {
 	case "chevron":
-		dd.ArrowStyle = ArrowChevron
+		dd.ArrowStyle = base.ArrowChevron
 	case "triangle":
-		dd.ArrowStyle = ArrowTriangle
+		dd.ArrowStyle = base.ArrowTriangle
 	}
 
 	return dd
 }
 
-func buildXAMLProgressBar(el xElement) Widget {
-	pb := NewProgressBar()
+func buildXAMLProgressBar(el xElement) base.Widget {
+	pb := base.NewProgressBar()
 	applyColor(&pb.FillColor, el, "Foreground", "Fill")
 	if val := el.attr("Value"); val != "" {
 		if v, err := strconv.ParseFloat(val, 64); err == nil {
@@ -1126,7 +1052,7 @@ func buildXAMLProgressBar(el xElement) Widget {
 	}
 	// Style: Bar (по умолчанию) | Glow — светящаяся голова со следом.
 	if strings.EqualFold(el.attr("Style"), "glow") {
-		pb.Style = ProgressStyleGlow
+		pb.Style = base.ProgressStyleGlow
 	}
 	if ind := el.attr("Indeterminate"); strings.EqualFold(ind, "true") || ind == "1" {
 		pb.SetIndeterminate(true)
@@ -1145,18 +1071,18 @@ func buildXAMLProgressBar(el xElement) Widget {
 // Ориентация выводится из размеров, как это делает WPF: заданная ширина без
 // высоты означает горизонтальную линию, высота без ширины — вертикальную.
 // Явный атрибут Orientation сильнее.
-func buildXAMLSeparator(el xElement) Widget {
-	s := NewSeparator()
+func buildXAMLSeparator(el xElement) base.Widget {
+	s := base.NewSeparator()
 
 	w := xatoi(el.attr("Width"))
 	h := xatoi(el.attr("Height"))
 	switch {
 	case strings.EqualFold(el.attr("Orientation"), "vertical"):
-		s.Orientation = SeparatorVertical
+		s.Orientation = base.SeparatorVertical
 	case strings.EqualFold(el.attr("Orientation"), "horizontal"):
-		s.Orientation = SeparatorHorizontal
+		s.Orientation = base.SeparatorHorizontal
 	case h > 0 && w <= 0:
-		s.Orientation = SeparatorVertical
+		s.Orientation = base.SeparatorVertical
 	}
 
 	if bg := el.attr("Background", "Fill", "Stroke"); bg != "" {
@@ -1174,28 +1100,32 @@ func buildXAMLSeparator(el xElement) Widget {
 	// Размеры по умолчанию: линия занимает всю доступную длину, а толщину
 	// берёт свою. Нули оставляем контейнеру — он сам растянет.
 	if w <= 0 && h <= 0 {
-		if s.Orientation == SeparatorVertical {
+		if s.Orientation == base.SeparatorVertical {
 			h = 24
 		} else {
 			w = 24
 		}
 	}
+	th := s.Thickness // 0 — один пиксель (Separator.Thickness)
+	if th <= 0 {
+		th = 1
+	}
 	if w <= 0 {
-		w = s.thickness()
+		w = th
 	}
 	if h <= 0 {
-		h = s.thickness()
+		h = th
 	}
 	s.SetBounds(image.Rect(0, 0, w, h))
 	return s
 }
 
-func buildXAMLCheckBox(el xElement) Widget {
+func buildXAMLCheckBox(el xElement) base.Widget {
 	text := el.attr("Content", "Text")
 	if text == "" {
 		text = el.Text
 	}
-	cb := NewCheckBox(text)
+	cb := base.NewCheckBox(text)
 	if strings.EqualFold(el.attr("IsChecked", "Checked"), "true") {
 		cb.SetChecked(true)
 	}
@@ -1209,21 +1139,21 @@ func buildXAMLCheckBox(el xElement) Widget {
 	return cb
 }
 
-func buildXAMLRadioButton(el xElement) Widget {
+func buildXAMLRadioButton(el xElement) base.Widget {
 	text := el.attr("Content", "Text")
 	if text == "" {
 		text = el.Text
 	}
 	group := el.attr("GroupName", "Group")
-	rb := NewRadioButton(text, group)
+	rb := base.NewRadioButton(text, group)
 	if strings.EqualFold(el.attr("IsChecked", "Checked", "Selected"), "true") {
 		rb.SetSelected(true)
 	}
 	return rb
 }
 
-func buildXAMLSlider(el xElement) Widget {
-	s := NewSlider()
+func buildXAMLSlider(el xElement) base.Widget {
+	s := base.NewSlider()
 	if min := el.attr("Minimum", "Min"); min != "" {
 		if v, err := strconv.ParseFloat(min, 64); err == nil {
 			s.Min = v
@@ -1242,8 +1172,8 @@ func buildXAMLSlider(el xElement) Widget {
 	return s
 }
 
-func buildXAMLVirtualizingItemsControl(el xElement) Widget {
-	v := NewVirtualizingItemsControl()
+func buildXAMLVirtualizingItemsControl(el xElement) base.Widget {
+	v := base.NewVirtualizingItemsControl()
 	if ih := el.attr("ItemHeight"); ih != "" {
 		if n := xatoi(ih); n > 0 {
 			v.ItemHeight = n
@@ -1261,8 +1191,8 @@ func buildXAMLVirtualizingItemsControl(el xElement) Widget {
 	return v
 }
 
-func buildXAMLNumericUpDown(el xElement) Widget {
-	n := NewNumericUpDown()
+func buildXAMLNumericUpDown(el xElement) base.Widget {
+	n := base.NewNumericUpDown()
 	if min := el.attr("Minimum", "Min"); min != "" {
 		if v, err := strconv.ParseFloat(min, 64); err == nil {
 			n.Min = v
@@ -1298,20 +1228,20 @@ func buildXAMLNumericUpDown(el xElement) Widget {
 	return n
 }
 
-func buildXAMLToggleSwitch(el xElement) Widget {
+func buildXAMLToggleSwitch(el xElement) base.Widget {
 	text := el.attr("Content", "Text", "Header")
 	if text == "" {
 		text = el.Text
 	}
-	ts := NewToggleSwitch(text)
+	ts := base.NewToggleSwitch(text)
 	if strings.EqualFold(el.attr("IsOn", "IsChecked", "Checked"), "true") {
 		ts.SetOn(true)
 	}
 	return ts
 }
 
-func buildXAMLScrollView(el xElement) Widget {
-	sv := NewScrollView()
+func buildXAMLScrollView(el xElement) base.Widget {
+	sv := base.NewScrollView()
 	if ch := el.attr("ContentHeight"); ch != "" {
 		sv.ContentHeight = xatoi(ch)
 	}
@@ -1319,11 +1249,11 @@ func buildXAMLScrollView(el xElement) Widget {
 	return sv
 }
 
-func buildXAMLListView(el xElement) Widget {
+func buildXAMLListView(el xElement) base.Widget {
 	var items []string
 	// keys[i] — ключ {Loc …} для i-й строки (пустой, если строка не
 	// локализуемая): строки списка не виджеты, поэтому перевод и подписку на
-	// смену языка делает сборщик (см. xaml_loc_items.go).
+	// смену языка делает сборщик (см. loc_items.go).
 	var keys []string
 	add := func(raw string) {
 		text, key := locItemText(raw)
@@ -1359,7 +1289,7 @@ func buildXAMLListView(el xElement) Widget {
 			}
 		}
 	}
-	lv := NewListView(items...)
+	lv := base.NewListView(items...)
 	registerLocItemList(keys, func(i int, s string) {
 		cur := lv.Items()
 		if i < len(cur) {
@@ -1388,12 +1318,12 @@ func buildXAMLListView(el xElement) Widget {
 
 // buildXAMLSplitPanel строит SplitPanel: две панели с перетаскиваемым
 // разделителем. Первый дочерний элемент — First, второй — Second.
-func buildXAMLSplitPanel(el xElement, reg map[string]Widget, parentOff image.Point, baseDir string, depth int) (Widget, error) {
-	orient := OrientationHorizontal
+func buildXAMLSplitPanel(el xElement, reg map[string]base.Widget, parentOff image.Point, baseDir string, depth int) (base.Widget, error) {
+	orient := base.OrientationHorizontal
 	if strings.EqualFold(el.attr("Orientation"), "vertical") {
-		orient = OrientationVertical
+		orient = base.OrientationVertical
 	}
-	sp := NewSplitPanel(orient)
+	sp := base.NewSplitPanel(orient)
 
 	if fs := el.attr("Position"); fs != "" {
 		if v, err := strconv.ParseFloat(fs, 64); err == nil && v >= 0 && v <= 1 {
@@ -1438,8 +1368,8 @@ func buildXAMLSplitPanel(el xElement, reg map[string]Widget, parentOff image.Poi
 
 // buildXAMLSVGIcon строит темизируемую векторную иконку из .svg-файла.
 // Без явного Color иконка перекрашивается под цвет текста темы.
-func buildXAMLSVGIcon(el xElement, baseDir string) Widget {
-	ic := NewSVGIcon()
+func buildXAMLSVGIcon(el xElement, baseDir string) base.Widget {
+	ic := base.NewSVGIcon()
 	if src := el.attr("Source"); src != "" {
 		// Граница по baseDir/fs.FS — SEC-8, GG-7 (см. readXAMLResourceBytes).
 		// Читаем байты сами (а не ic.SetSVGFile) — SetSVGFile умеет только диск.

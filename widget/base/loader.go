@@ -132,7 +132,7 @@ func buildPanel(n UINode) Widget {
 	case "win10":
 		p := NewWin10Panel()
 		if n.BgColor != "" {
-			if c, err := parseColor(n.BgColor); err == nil {
+			if c, err := ParseRGBAHex(n.BgColor); err == nil {
 				p.Background = c
 			}
 		}
@@ -144,7 +144,7 @@ func buildPanel(n UINode) Widget {
 	default:
 		bg := color.RGBA{R: 43, G: 43, B: 43, A: 220}
 		if n.BgColor != "" {
-			if c, err := parseColor(n.BgColor); err == nil {
+			if c, err := ParseRGBAHex(n.BgColor); err == nil {
 				bg = c
 			}
 		}
@@ -155,7 +155,7 @@ func buildPanel(n UINode) Widget {
 func buildLabel(n UINode) Widget {
 	var lbl *Label
 	if n.TextColor != "" {
-		if c, err := parseColor(n.TextColor); err == nil {
+		if c, err := ParseRGBAHex(n.TextColor); err == nil {
 			lbl = NewLabel(n.Text, c)
 		}
 	}
@@ -163,7 +163,7 @@ func buildLabel(n UINode) Widget {
 		lbl = NewWin10Label(n.Text)
 	}
 	if n.BgColor != "" {
-		if c, err := parseColor(n.BgColor); err == nil {
+		if c, err := ParseRGBAHex(n.BgColor); err == nil {
 			lbl.HasBG = true
 			lbl.Background = c
 		}
@@ -197,12 +197,12 @@ func buildTextInput(n UINode) Widget {
 		ti.SetFocused(true)
 	}
 	if n.TextColor != "" {
-		if c, err := parseColor(n.TextColor); err == nil {
+		if c, err := ParseRGBAHex(n.TextColor); err == nil {
 			ti.TextColor = c
 		}
 	}
 	if n.BgColor != "" {
-		if c, err := parseColor(n.BgColor); err == nil {
+		if c, err := ParseRGBAHex(n.BgColor); err == nil {
 			ti.Background = c
 		}
 	}
@@ -220,7 +220,7 @@ func buildDropdown(n UINode) Widget {
 func buildProgressBar(n UINode) Widget {
 	pb := NewProgressBar()
 	if n.BgColor != "" {
-		if c, err := parseColor(n.BgColor); err == nil {
+		if c, err := ParseRGBAHex(n.BgColor); err == nil {
 			pb.FillColor = c
 		}
 	}
@@ -235,7 +235,7 @@ func buildCheckBoxJSON(n UINode) Widget {
 		cb.SetChecked(true)
 	}
 	if n.TextColor != "" {
-		if c, err := parseColor(n.TextColor); err == nil {
+		if c, err := ParseRGBAHex(n.TextColor); err == nil {
 			cb.TextColor = c
 		}
 	}
@@ -287,7 +287,7 @@ func buildScrollViewJSON(n UINode) Widget {
 		}
 	}
 	if n.BgColor != "" {
-		if c, err := parseColor(n.BgColor); err == nil {
+		if c, err := ParseRGBAHex(n.BgColor); err == nil {
 			sv.Background = c
 		}
 	}
@@ -317,8 +317,12 @@ func buildTabControlJSON(n UINode) Widget {
 
 // ─── Парсинг цвета ────────────────────────────────────────────────────────────
 
-// parseColor разбирает строку "#RRGGBB" или "#RRGGBBAA" в color.RGBA.
-func parseColor(s string) (color.RGBA, error) {
+// ParseRGBAHex разбирает строку "#RRGGBB" или "#RRGGBBAA" в color.RGBA.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ParseRGBAHex(s string) (color.RGBA, error) {
 	s = strings.TrimPrefix(s, "#")
 	switch len(s) {
 	case 6:

@@ -49,11 +49,15 @@ func currentThemeBackground(role BackgroundRole) (color.RGBA, bool) {
 	return themeBackground(role, t)
 }
 
-// parseBackgroundRole разбирает значение атрибута Background="{Theme PanelBG}".
+// ParseBackgroundRole разбирает значение атрибута Background="{Theme PanelBG}".
 //
 // Имена — те же, что у полей Theme: разметку пишут, глядя на тему, и
 // изобретать для неё свои слова значило бы держать ещё один словарь.
-func parseBackgroundRole(s string) (BackgroundRole, bool) {
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ParseBackgroundRole(s string) (BackgroundRole, bool) {
 	s = strings.TrimSpace(s)
 	if !strings.HasPrefix(s, "{") || !strings.HasSuffix(s, "}") {
 		return BackgroundCustom, false
