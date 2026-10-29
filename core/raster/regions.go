@@ -40,6 +40,10 @@ func (c *Canvas) initTileMarks() {
 		c.marks = make([]tileMark, n)
 	}
 	c.ResetTileMarks(image.Rect(0, 0, c.W, c.H))
+	// Таблицы одного буфера кадра (singlebuf.go) — под ту же сетку.
+	if len(c.touched) != n {
+		c.touched, c.changed, c.flushMark = make([]bool, n), make([]bool, n), make([]bool, n)
+	}
 }
 
 // ResetTileMarks сбрасывает признаки тайлов, пересекающих r.

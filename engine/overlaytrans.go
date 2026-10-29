@@ -348,11 +348,17 @@ func (e *Engine) ovtStepOnly(canvas *Canvas) {
 // идут через ovtVisit, а погашенные — через ovtVisitClosed.
 func (e *Engine) drawOverlayLayer(layer widget.Widget, canvas *Canvas, hosted, on bool) {
 	if !on {
-		if drawOverlays(layer, canvas, hosted) {
-			e.overlayDrawn = true
-		}
+		drawOverlays(layer, canvas, hosted)
 		return
 	}
+	e.ovtSetLayer(layer)
+	e.drawOverlaysT(layer, canvas, hosted, layer, image.Point{}, 0)
+	e.ovtLayerEnd(layer)
+}
+
+// ovtSetLayer собирает переходы слоя layer по владельцам (byKey) перед его
+// обходом.
+func (e *Engine) ovtSetLayer(layer widget.Widget) {
 	t := &e.ovt
 	if t.byKey == nil {
 		t.byKey = make(map[uintptr]*overlayTrans)
@@ -363,8 +369,6 @@ func (e *Engine) drawOverlayLayer(layer widget.Widget, canvas *Canvas, hosted, o
 			t.byKey[tr.key] = tr
 		}
 	}
-	e.drawOverlaysT(layer, canvas, hosted, layer, image.Point{}, 0)
-	e.ovtLayerEnd(layer)
 }
 
 // drawOverlaysT — drawOverlaysAt с присмотром за переходами.
@@ -376,12 +380,10 @@ func (e *Engine) drawOverlaysT(w widget.Widget, canvas *Canvas, hosted bool, lay
 		switch {
 		case od.HasOverlay():
 			if !hosted || !isHostedOverlay(w) {
-				e.overlayDrawn = true
 				e.ovtVisit(w, od, canvas, layer, off)
 			}
 		case len(e.ovt.byKey) > 0:
 			if tr := e.ovt.byKey[widgetID(w)]; tr != nil {
-				e.overlayDrawn = true
 				e.ovtVisitClosed(tr, canvas)
 			}
 		}

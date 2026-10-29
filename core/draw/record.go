@@ -64,6 +64,7 @@ type Recorder struct {
 	force  []image.Rectangle
 
 	root   *List
+	frameL *List // список кадра верхнего уровня, переиспользуется
 	frames []frame
 	groups []*List // вложенные списки DrawWithOpacity
 	// clip — текущее состояние клипа по указателю: команды под одним клипом
@@ -72,6 +73,9 @@ type Recorder struct {
 	clips []ClipState
 	exit  ClipState
 
+	// scale — масштаб измерителя кадра (нужен индексу списка кадра после
+	// того, как измеритель снят).
+	scale float64
 	// Recorded, Retained — за кадр: команд записано и команд верхнего уровня
 	// взято из удержанных списков (для статистики движка; сбрасываются в
 	// BeginFrame).
@@ -103,7 +107,30 @@ var (
 	_ ImageCacheInvalidator = (*Recorder)(nil)
 	_ CullScope             = (*Recorder)(nil)
 	_ OcclusionScope        = (*Recorder)(nil)
+	_ Snapshotter           = (*Recorder)(nil)
 )
+
+// SnapshotRenderer — измеритель, умеющий отрисовать область кадра
+// воспроизведением записанных команд (ADR-0007): так рекордер отвечает на
+// Snapshot — призрак DockManager снимает панель с команд кадра, записанных к
+// этому моменту, как прямой путь снимал бы её с back после Draw дерева.
+type SnapshotRenderer interface {
+	RenderSnapshot(r image.Rectangle, draw func(ctx DrawContext)) *image.RGBA
+}
+
+// Snapshot — см. Snapshotter: область кадра, отрисованная воспроизведением
+// записанного к этому моменту списка кадра. nil — измеритель не умеет или
+// записывать ещё нечего.
+func (r *Recorder) Snapshot(rc image.Rectangle) *image.RGBA {
+	sr, ok := r.m.(SnapshotRenderer)
+	if !ok || r.frameL == nil || len(r.frames) == 0 {
+		return nil
+	}
+	list := r.frameL
+	return sr.RenderSnapshot(rc, func(ctx DrawContext) {
+		Replay(ctx, list, ReplayOpts{Damage: []image.Rectangle{rc}})
+	})
+}
 
 // NewRecorder создаёт рекордер.
 func NewRecorder() *Recorder {
@@ -119,9 +146,14 @@ func (r *Recorder) Invalidate() { r.gen.Add(1) }
 // BeginFrame готовит рекордер к кадру над холстом m: retain — брать ли
 // удержанные списки; force — ничейное повреждение кадра (логическое):
 // холдер, чей охват его задевает, перезаписывается.
+//
+// Кадр открывает список верхнего уровня без холдера (ADR-0007): в него
+// попадают ссылка на корень и всё, что движок записывает вне виджетов —
+// оверлеи, затемнение модального окна, подсказка — в порядке рисования.
 func (r *Recorder) BeginFrame(m Measurer, retain bool, force []image.Rectangle) {
 	r.m = m
 	r.w, r.h = m.LogicalSize()
+	r.scale = m.Scale()
 	r.retain = retain
 	r.force = force
 	r.root = nil
@@ -130,21 +162,55 @@ func (r *Recorder) BeginFrame(m Measurer, retain bool, force []image.Rectangle) 
 	r.clip = r.newClip(ClipState{NoClip: true})
 	r.Recorded, r.Retained = 0, 0
 	r.rerecorded = 0
+	top := r.frameL
+	if top == nil {
+		top = &List{}
+		r.frameL = top
+	}
+	clear(top.Cmds) // ссылки на холдеры прошлого кадра не держим
+	*top = List{Cmds: top.Cmds[:0], env: Env{Clip: *r.clip}, gen: r.gen.Load(), rec: r}
+	r.frames = append(r.frames, frame{kind: frameRecord, list: top})
 }
 
-// EndFrame завершает запись: возвращает список корня и клип на выходе из
-// Draw корня (воспроизведение приводит холст к нему).
+// EndFrame завершает запись: возвращает список кадра и клип на выходе из
+// записи (воспроизведение приводит холст к нему). Список кадра из одной
+// ссылки на корень схлопывается в список корня — обычный кадр без слоёв
+// поверх дерева; nil — ничего не записано.
 func (r *Recorder) EndFrame() (*List, ClipState) {
 	r.exit = *r.clip
 	r.m, r.force = nil, nil // между кадрами холст не держим
+	if n := len(r.frames); n > 0 && r.frames[n-1].holder == nil {
+		top := r.frames[n-1].list
+		r.frames = r.frames[:n-1]
+		switch {
+		case len(top.Cmds) == 0:
+			r.root = nil
+		case len(top.Cmds) == 1 && top.Cmds[0].Op == OpChild:
+			r.root = top.Cmds[0].Holder.CmdList()
+		default:
+			top.exit = r.exit
+			if len(top.Cmds) >= rowIndexMin {
+				top.buildRows(r.scaleOrOne())
+			}
+			r.root = top
+		}
+	}
 	return r.root, r.exit
+}
+
+// scaleOrOne — масштаб измерителя кадра; 1, когда измеритель уже снят.
+func (r *Recorder) scaleOrOne() float64 {
+	if r.m != nil {
+		return r.m.Scale()
+	}
+	return r.scale
 }
 
 // Abort отменяет кадр после паники в Draw: открытые холдеры снова dirty,
 // их списки не публикуются (И4).
 func (r *Recorder) Abort() {
 	for i := len(r.frames) - 1; i >= 0; i-- {
-		if r.frames[i].kind == frameRecord {
+		if r.frames[i].kind == frameRecord && r.frames[i].holder != nil {
 			r.frames[i].holder.MarkDirty()
 		}
 	}
@@ -168,8 +234,8 @@ func (r *Recorder) top() *frame {
 }
 
 // target — список, куда пишутся команды сейчас: группа DrawWithOpacity,
-// открытая в записываемом списке, либо он сам; nil — запись не идёт (корень
-// без холдера или обход удержанного списка).
+// открытая в записываемом списке, либо он сам (на верхнем уровне — список
+// кадра); nil — запись не идёт (обход удержанного списка, вне кадра).
 func (r *Recorder) target() *List {
 	t := r.top()
 	if t == nil || t.kind != frameRecord {

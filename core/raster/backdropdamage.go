@@ -23,7 +23,7 @@ import "image"
 // noteBackdrop запоминает область размытия текущего кадра (физическая).
 // Вызывается из BlurBehind.
 func (c *Canvas) noteBackdrop(r image.Rectangle) {
-	r = r.Intersect(c.back.Bounds())
+	r = r.Intersect(c.Frame())
 	if !r.Empty() {
 		c.backdropsNext = append(c.backdropsNext, r)
 	}

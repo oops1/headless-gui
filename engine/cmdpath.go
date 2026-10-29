@@ -47,12 +47,13 @@ func (e *Engine) takeForce() []image.Rectangle {
 	return e.forceFrame
 }
 
-// recordTree пишет дерево корня в рекордер и возвращает список кадра и клип
-// на выходе из Draw корня. Удержание списков включено вместе с пропуском
+// recordFrame пишет в рекордер дерево корня, а за ним слои поверх дерева
+// (toplayers.go: оверлеи, модальные, подсказка) и возвращает список кадра и
+// клип на выходе из записи. Удержание списков включено вместе с пропуском
 // поддеревьев (SetSubtreeCulling): выключенный пропуск означает «Draw каждый
 // кадр». Паника в Draw отменяет запись (Recorder.Abort: открытые виджеты
 // снова устарели, их списки не публикуются) и уходит границе кадра.
-func (e *Engine) recordTree(canvas *Canvas, root widget.Widget, force []image.Rectangle) (list *hgdraw.List, exit hgdraw.ClipState) {
+func (e *Engine) recordFrame(canvas *Canvas, root widget.Widget, modals []widget.ModalWidget, hosted, ovtOn bool, force []image.Rectangle) (list *hgdraw.List, exit hgdraw.ClipState) {
 	// Кадр ради анимации виджета с фокусом (мигающая каретка): его команды
 	// зависят от времени, а не от меток — перезаписать.
 	if f := e.focus.get(); f != nil {
@@ -71,6 +72,7 @@ func (e *Engine) recordTree(canvas *Canvas, root widget.Widget, force []image.Re
 		}
 	}()
 	widget.DrawTraced(root, rec)
+	e.recordTop(rec, canvas, root, modals, hosted, ovtOn)
 	done = true
 	list, exit = rec.EndFrame()
 	e.stats.recorded.Add(rec.Recorded)

@@ -34,10 +34,11 @@ func bgraRig(t *testing.T, format PixelFormat, bgra bool, r, g, b, a byte) *esRi
 	return rig
 }
 
-// backBytes — четыре байта back в точке, как они лежат.
+// backBytes — четыре байта кадра в точке, как они лежат (front: при одном
+// буфере кадра back холста движка — окно, ADR-0007).
 func (r *esRig) backBytes(x, y int) [4]byte {
-	o := r.e.canvas.Back().PixOffset(x, y)
-	return [4]byte(r.e.canvas.Back().Pix[o : o+4])
+	o := r.e.canvas.Front().PixOffset(x, y)
+	return [4]byte(r.e.canvas.Front().Pix[o : o+4])
 }
 
 func TestExternalSurfaceBGRAOnBGRXCanvasIsCopied(t *testing.T) {

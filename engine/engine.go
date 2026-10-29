@@ -95,9 +95,14 @@ type Engine struct {
 	// (переиспользуется, без аллокаций на кадр).
 	hashDiff atomic.Bool
 	plan     framePlan
-	// overlayDrawn — в этом кадре поверх растра дерева рисовался оверлей в
-	// холсте (горутина кадра): его тайлы на следующем кадре принуждаются.
-	overlayDrawn bool
+	// single — один буфер кадра (ADR-0007, toplayers.go, singlebuf.go холста);
+	// post, postRect, postMode, postTooltip — слои, отложенные до конца растра
+	// (переходы оверлеев), их место и признак, что обход уже откладывает.
+	single      atomic.Bool
+	post        []postItem
+	postRect    image.Rectangle
+	postMode    bool
+	postTooltip tooltipPlan
 
 	// subpixelOwn — подпиксельный текст включила или выключила тема, а не
 	// приложение; subpixelPinned — приложение распорядилось само
@@ -397,6 +402,7 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	e.cmdPath.Store(true)
 	e.hashDiff.Store(true)
 	e.tiled.Store(!offscreen)
+	e.single.Store(true)
 	// Запасная цепочка шрифтов (BUG-2; файлы читаются лениво) и встроенные
 	// жирный, курсив и моноширинный (P1).
 	e.canvas.AddDefaultFonts()
@@ -1875,9 +1881,33 @@ func (e *Engine) renderFrame() output.Frame {
 			return output.Frame{Seq: e.frameSeq.Add(1), Timestamp: time.Now(), Width: canvas.W, Height: canvas.H}
 		}
 	}
-	// Путь команд (ADR-0004, cmdpath.go): дерево пишется в рекордер ДО фона и
-	// сброса меток тайлов — запись пикселей не трогает, а паника в Draw
-	// оставляет холст нетронутым. Воспроизведение — ниже, на месте DrawTraced.
+	// Переходы оверлеев: обход оверлеев при записи решает, что уходит после
+	// растра (toplayers.go), поэтому кадр переходов открывается до записи.
+	if ovtOn {
+		e.ovtBeginFrame(!partial, damage, layers)
+	}
+	// Режим буферов холста (ADR-0007): окно back над front или два буфера.
+	canvas.SetSingleBuffer(e.single.Load())
+	own := canvas.UsingOwnBack()
+
+	// Переносы применяются к ПЕРЕДНЕМУ буферу ДО растра: он приводится в то
+	// состояние, в котором окажется буфер потребителя после копирования, и
+	// воркеры сравнивают тайлы с ним уже таким (ADR-0007) — дифф оставляет
+	// только настоящие расхождения. Без этого потребитель получал и команду
+	// переноса, и все пиксели переехавшего окна — то есть платил столько же,
+	// сколько без переноса вовсе. При полном кадре объявления просто
+	// отбрасываются: потребитель и так получает всё заново, а оставшись, они
+	// достались бы следующему кадру.
+	var moves []output.MoveRegion
+	declared := e.takeMoves()
+	if partial && len(declared) > 0 {
+		moves = canvas.ApplyMovesToFront(declared)
+	}
+
+	// Путь команд (ADR-0004, cmdpath.go): дерево, а за ним оверлеи, модальные
+	// и подсказка (toplayers.go) пишутся в рекордер ДО фона и сброса меток
+	// тайлов — запись пикселей не трогает, а паника в Draw оставляет холст
+	// нетронутым. Воспроизведение — ниже, на месте DrawTraced.
 	var rootList *hgdraw.List
 	var exitClip hgdraw.ClipState
 	// Ничейное повреждение забирается после всех ранних выходов (кадры
@@ -1885,6 +1915,9 @@ func (e *Engine) renderFrame() output.Frame {
 	// а забранное до выхода пропало бы. На прямом пути — просто дренируется.
 	force := e.takeForce()
 	cmdPath := root != nil && e.cmdPath.Load()
+	// Активен ли хост попапов: если да — оверлеи с OverlayBounds не рисуются
+	// в холст (они уходят в собственные окна-попапы, см. renderPopups ниже).
+	hosted := e.getPopupSink() != nil
 	if cmdPath {
 		if !partial && !damageAll {
 			// Кадр без заявленного повреждения (RenderOnce, рендер каждый
@@ -1893,30 +1926,43 @@ func (e *Engine) renderFrame() output.Frame {
 			e.rec.Invalidate()
 		}
 		e.beginDrawContract()
-		rootList, exitClip = e.recordTree(canvas, root, force)
+		rootList, exitClip = e.recordFrame(canvas, root, modals, hosted, ovtOn, force)
+	} else {
+		e.clearPost()
 	}
-	// Активен ли хост попапов: если да — оверлеи с OverlayBounds не рисуются
-	// в холст (они уходят в собственные окна-попапы, см. renderPopups ниже).
-	hosted := e.getPopupSink() != nil
 	// План кадра пути команд (hashdiff.go): ничейное повреждение, «всё
-	// заново» и то, что ляжет поверх растра дерева (модальные, оверлеи,
-	// подсказка, переходы, переносы), принуждают тайлы к растру.
+	// заново» и переносы принуждают тайлы к растру.
 	var plan *framePlan
 	if cmdPath && rootList != nil {
-		plan = e.planFrame(canvas, root, modals, ovtOn, len(ovtSteps) > 0, full || damageAll, force)
+		plan = e.planFrame(full || damageAll, force, len(moves) > 0)
 	}
 	if partial {
 		canvas.SetBaseClip(damage)
 		defer canvas.ClearBaseClip()
 	}
-	if plan == nil {
-		// Прямой путь: фон на весь back или на повреждение, признаки тайлов
-		// сбрасываются до него. На пути команд фон кладёт растр
-		// (tileframe.go) — только под тайлы, которые рисуются.
+	switch {
+	case plan == nil:
+		// Прямой путь (и дерево без единой команды) рисует в холст: окно back
+		// размером с кадр — сброшенное, оно равно front и остаётся (ADR-0007);
+		// фон на весь back или на повреждение, признаки тайлов сбрасываются
+		// до него.
+		if own {
+			canvas.SetBackWindow(canvas.Frame())
+			if partial {
+				canvas.Touch(damage)
+				for _, r := range ovtSteps {
+					canvas.Touch(r) // шаг перехода смешивается на месте покоя мимо повреждения
+				}
+			} else {
+				canvas.Touch(canvas.Frame())
+			}
+		}
 		e.blitBackgroundFrame(canvas, partial, damage)
-	}
-	if ovtOn {
-		e.ovtBeginFrame(!partial, damage, layers)
+	case own && len(e.post) > 0:
+		// Слои после растра (переходы оверлеев): окно back над их местами,
+		// заполненное из front; тайлы растра под ним воркеры кладут в окно.
+		canvas.SetBackWindow(e.postRect)
+		canvas.Touch(e.postRect)
 	}
 
 	// Корневое дерево: рисуем root и его overlay-слой (popup/dropdown).
@@ -1932,7 +1978,7 @@ func (e *Engine) renderFrame() output.Frame {
 			// Чужие буферы вывода (surfaces.go): тайлы, пропущенные
 			// хэш-диффом внутри области перерисовки, в back ещё не
 			// скопированы, а буфер потребителя обязан быть полным. До
-			// оверлеев: они лягут поверх.
+			// отложенных слоёв: они лягут поверх.
 			if res.hashed && surface != 0 {
 				for _, i := range res.skipped {
 					if tile := canvas.TileRect(i); tile.Overlaps(redraw) {
@@ -1940,26 +1986,26 @@ func (e *Engine) renderFrame() output.Frame {
 					}
 				}
 			}
+			if len(e.post) > 0 {
+				e.drawPost(canvas, hosted, ovtOn)
+			}
 		} else {
 			widget.DrawTraced(root, canvas)
+			e.drawOverlayLayer(root, canvas, hosted, ovtOn)
+			// Модальные виджеты: затемнение + диалог поверх всего
+			for _, m := range modals {
+				if !m.IsModal() {
+					continue
+				}
+				// Затемнение фона (логические координаты)
+				if dim := m.DimColor(); dim.A > 0 {
+					lw, lh := canvas.LogicalSize()
+					canvas.FillRectAlpha(0, 0, lw, lh, dim)
+				}
+				widget.DrawTraced(m, canvas)
+				e.drawOverlayLayer(m, canvas, hosted, ovtOn)
+			}
 		}
-		e.drawOverlayLayer(root, canvas, hosted, ovtOn)
-	}
-
-	// Модальные виджеты: затемнение + диалог поверх всего
-	for _, m := range modals {
-		if !m.IsModal() {
-			continue
-		}
-		// Затемнение фона (логические координаты)
-		dim := m.DimColor()
-		if dim.A > 0 {
-			lw, lh := canvas.LogicalSize()
-			canvas.FillRectAlpha(0, 0, lw, lh, dim)
-		}
-		// Отрисовка модального виджета
-		widget.DrawTraced(m, canvas)
-		e.drawOverlayLayer(m, canvas, hosted, ovtOn)
 	}
 	if ovtOn {
 		e.ovtEndFrame()
@@ -1973,10 +2019,8 @@ func (e *Engine) renderFrame() output.Frame {
 	}
 
 	// Всплывающая подсказка (поверх всего, включая модальные диалоги); на
-	// пути команд — по плану кадра, её тайлы уже принуждены к растру.
-	if plan != nil {
-		e.drawTooltipPlanned(canvas, plan.tooltip)
-	} else {
+	// пути команд она записана или отложена вместе со слоями.
+	if !cmdPath {
 		e.drawTooltip(canvas, root)
 	}
 	e.endDrawContract()
@@ -1984,19 +2028,6 @@ func (e *Engine) renderFrame() output.Frame {
 	// Окна программ с видео (video.go): после всей отрисовки, до диффа —
 	// метки тайлов нужны описанию кадра.
 	videos := e.collectVideos(canvas, root, modals)
-
-	// Переносы применяются к ПЕРЕДНЕМУ буферу до диффа: он приводится в то
-	// состояние, в котором окажется буфер потребителя после копирования, и
-	// дифф оставляет только настоящие расхождения. Без этого потребитель
-	// получал и команду переноса, и все пиксели переехавшего окна — то есть
-	// платил столько же, сколько без переноса вовсе.
-	var moves []output.MoveRegion
-	declared := e.takeMoves()
-	if partial && len(declared) > 0 {
-		moves = canvas.ApplyMovesToFront(declared)
-	}
-	// При полном кадре объявления просто отбрасываются: потребитель и так
-	// получает всё заново, а оставшись, они достались бы следующему кадру.
 
 	diffStart := time.Now()
 	e.stats.drawNs.Add(uint64(diffStart.Sub(drawStart)))
@@ -2006,35 +2037,55 @@ func (e *Engine) renderFrame() output.Frame {
 	var tiles []output.DirtyTile
 	canvas.SetFrameOptions(e.recycleFrames.Load(), !e.noTileData.Load())
 	switch {
-	case full:
-		tiles = canvas.AllTiles()
-	case res.hashed && !e.overlayDrawn && len(res.rendered) < hashDiffSerialMax:
-		// Хэш-дифф (ADR-0006): тайлы, которые не рисовались, равны front —
-		// сравниваются только нарисованные (плашка подсказки — среди них:
-		// её тайлы принуждены).
-		tiles = canvas.DiffAndSyncTiles(res.rendered)
-	case res.hashed && partial:
-		// Оверлей в холсте лёг неизвестно куда, или нарисованных тайлов
-		// много (дешевле в пуле): дифф по объединению выбранного —
-		// пропущенные тайлы сравнятся равными, а нарисованный между далёкими
-		// областями не останется несинхронизированным с действительным хэшем.
-		tiles = canvas.DiffAndSyncInRects(append([]image.Rectangle{damage}, ovtSteps...))
-	case partial:
-		// Шаги переходов вне повреждения смешаны в буфер без перерисовки —
-		// их области сравниваются тоже.
-		tiles = canvas.DiffAndSyncInRects(append(damageRects[:len(damageRects):len(damageRects)], ovtSteps...))
+	case !own:
+		// Чужая память потребителя: back полноразмерный, как в 4а.3.
+		switch {
+		case full:
+			tiles = canvas.AllTiles()
+		case res.hashed && len(e.post) == 0 && len(res.rendered) < hashDiffSerialMax:
+			// Хэш-дифф (ADR-0006): тайлы, которые не рисовались, равны front —
+			// сравниваются только нарисованные.
+			tiles = canvas.DiffAndSyncTiles(res.rendered)
+		case res.hashed && partial:
+			// Слои легли поверх растра неизвестно куда, или нарисованных
+			// тайлов много (дешевле в пуле): дифф по объединению выбранного.
+			tiles = canvas.DiffAndSyncInRects(append([]image.Rectangle{damage}, ovtSteps...))
+		case partial:
+			// Шаги переходов вне повреждения смешаны в буфер без перерисовки —
+			// их области сравниваются тоже.
+			tiles = canvas.DiffAndSyncInRects(append(damageRects[:len(damageRects):len(damageRects)], ovtSteps...))
+		default:
+			tiles = canvas.DiffAndSync()
+		}
+		if plan != nil && !e.postRect.Empty() {
+			e.tileRaster().noteOverlaid(false, []image.Rectangle{e.postRect})
+		}
 	default:
-		tiles = canvas.DiffAndSync()
+		// Свой буфер (ADR-0007): воркеры уже сравнили и скопировали свои тайлы
+		// в front; окно back сбрасывается (на прямом пути частичного кадра —
+		// только заявленные области и шаги: тайл между далёкими областями не
+		// сравнивается), изменившиеся тайлы извлекаются из front.
+		var rects []image.Rectangle
+		if plan == nil && partial {
+			rects = append(damageRects[:len(damageRects):len(damageRects)], ovtSteps...)
+		}
+		canvas.FlushBackWindow(rects)
+		if plan != nil && !e.postRect.Empty() {
+			// Что легло поверх растра дерева — не функция команд: тайлы под
+			// местом слоёв на следующем кадре растрятся заново (hashdiff.go).
+			// Все, а не только изменившиеся при сбросе: слой, нарисовавший то
+			// же, что и кадр назад, сброс не отличит от слоя, не тронувшего
+			// тайл, а под ним уже не дерево.
+			e.tileRaster().noteOverlaid(false, []image.Rectangle{e.postRect})
+		}
+		if full {
+			tiles = canvas.AllTilesFront()
+		} else {
+			tiles = canvas.ChangedTiles()
+		}
 	}
 
 	canvas.FinishBackdrops(partial, damageRects)
-	// Что легло поверх растра дерева (оверлеи, модальные, подсказка,
-	// переходы) — не функция команд: такие тайлы на следующем кадре
-	// принуждаются к растру (hashdiff.go).
-	if plan != nil {
-		e.tileRaster().noteOverlaid(plan.overlaidAll || e.overlayDrawn, plan.overlaid)
-	}
-	e.overlayDrawn = false
 
 	seq := e.frameSeq.Add(1)
 
@@ -2052,6 +2103,7 @@ func (e *Engine) renderFrame() output.Frame {
 	}
 	fr.AttachSlabs(canvas.TakeSlabs()...)
 	e.surfaceFrameDone(surface, &fr, full)
+	e.stats.bufferBytes.Store(uint64(canvas.EndFrameBuffers()))
 	e.stats.diffNs.Add(sinceNanos(diffStart))
 	e.stats.tiles.Add(uint64(len(tiles)))
 	e.stats.moves.Add(uint64(len(moves)))
@@ -2080,6 +2132,15 @@ func (e *Engine) saveFrame(canvas *Canvas, seq uint64, tiles []output.DirtyTile)
 // буфер, и сравниваются только их области.
 func (e *Engine) renderStepFrame(canvas *Canvas, root widget.Widget, modals []widget.ModalWidget,
 	surface int, steps []image.Rectangle, popupSteps bool, popupDamage image.Rectangle, drawStart time.Time) output.Frame {
+	canvas.SetSingleBuffer(e.single.Load())
+	own := canvas.UsingOwnBack()
+	if own && len(steps) > 0 {
+		// Смешение идёт в окно back над областями шагов (ADR-0007).
+		canvas.SetBackWindow(unionRects(steps))
+		for _, r := range steps {
+			canvas.Touch(r)
+		}
+	}
 	e.ovtStepOnly(canvas)
 	if (popupSteps || !popupDamage.Empty()) && e.getPopupSink() != nil {
 		// Холст не перерисовывается; попап — только если повреждение
@@ -2092,7 +2153,16 @@ func (e *Engine) renderStepFrame(canvas *Canvas, root widget.Widget, modals []wi
 	diffStart := time.Now()
 	e.stats.drawNs.Add(uint64(diffStart.Sub(drawStart)))
 	canvas.SetFrameOptions(e.recycleFrames.Load(), !e.noTileData.Load())
-	tiles := canvas.DiffAndSyncInRects(steps)
+	var tiles []output.DirtyTile
+	if own {
+		canvas.FlushBackWindow(steps)
+		tiles = canvas.ChangedTiles()
+	} else {
+		tiles = canvas.DiffAndSyncInRects(steps)
+	}
+	if e.tr != nil && len(steps) > 0 {
+		e.tr.noteOverlaid(false, steps) // смесь шага — не функция команд
+	}
 	seq := e.frameSeq.Add(1)
 	e.saveFrame(canvas, seq, tiles)
 	fr := output.Frame{
@@ -2106,6 +2176,7 @@ func (e *Engine) renderStepFrame(canvas *Canvas, root widget.Widget, modals []wi
 	}
 	fr.AttachSlabs(canvas.TakeSlabs()...)
 	e.surfaceFrameDone(surface, &fr, false)
+	e.stats.bufferBytes.Store(uint64(canvas.EndFrameBuffers()))
 	e.stats.diffNs.Add(sinceNanos(diffStart))
 	e.stats.tiles.Add(uint64(len(tiles)))
 	return fr
@@ -2129,8 +2200,7 @@ func drawOverlays(w widget.Widget, ctx widget.DrawContext, hosted bool) bool {
 // прокрученного поля, рисовалось бы там, где поле стоит в содержимом, — вне
 // видимой части, а то и вне холста.
 //
-// Возвращает true, если хоть один оверлей нарисован в ctx (хэш-дифф,
-// hashdiff.go: такие пиксели — не функция команд дерева).
+// Возвращает true, если хоть один оверлей нарисован в ctx.
 func drawOverlaysAt(w widget.Widget, ctx widget.DrawContext, hosted bool, off image.Point, depth int) bool {
 	if tooDeep(depth) {
 		return false

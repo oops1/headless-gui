@@ -8,9 +8,10 @@ package engine
 // повреждение) хэш-дифф оставляет изменившиеся и принуждённые. Воркер берёт
 // холст-окно (core/raster/window.go): буфер размером с тайл в координатах
 // кадра, фон холста в области растра, базовый клип повреждения,
-// воспроизведение дерева с отсечкой по тайлу, копирование строк обратно в
-// back и перенос признака тайла. Дальше кадр идёт как прежде: оверлеи, дифф
-// нарисованных тайлов back/front, регионы.
+// воспроизведение дерева с отсечкой по тайлу, сравнение с front и копирование
+// в него (ADR-0007: один буфер кадра; в окно back холста или чужую память
+// потребителя — копирование строк) и перенос признака тайла. Мало тайлов или
+// один процессор — те же тайлы тем же воркером на горутине кадра.
 //
 // Размытая подложка (BlurBehind) читает кадр за пределами тайла. По решению
 // владельца — кэш с ореолом на промахе: слой, чьё содержимое под ним не
@@ -18,9 +19,16 @@ package engine
 // готового растра; слой-промах рисуется в окнах с запасом по периметру
 // (ореол), откуда размытие читает подложку, а растр кэша собирается из
 // центров ореолов по ходу кадра. Окно с ореолом в области растра кладёт фон
-// и рисует подложку само (в back под пропущенным соседом ничего не пишется),
-// вне её — частичный кадр — берёт прошлый back, который в этом кадре никто
-// не трогает.
+// и рисует подложку само (под пропущенным соседом ничего не пишется), вне
+// её — частичный кадр — берёт прошлый кадр (front при одном буфере, back при
+// двух или чужой памяти), который в этом кадре там никто не трогает.
+//
+// Без пула (один процессор, тайлы выключены) слой размытия читает соседние
+// тайлы, и всё выбранное воспроизводится одной горутиной в окно back холста
+// над областью растра и областями чтения слоёв; то же — когда ни один
+// выбранный тайл не пропущен (строка текста на стыке тайлов обходит свои
+// глифы один раз). Иначе мало тайлов — по тайлам тем же воркером на горутине
+// кадра (окно со шрифтами холста движка, без личных видов).
 
 import (
 	"image"
@@ -131,6 +139,9 @@ type tileRaster struct {
 	e       *Engine
 	workers chan *tileWorker
 	made    int
+	// serial — воркер горутины кадра (последовательный путь): окно со
+	// шрифтами холста движга без личных видов.
+	serial *tileWorker
 	batch   workpool.Batch
 	cache   map[uint64]*blurEntry
 	bytes   int
@@ -153,7 +164,15 @@ type tileRaster struct {
 	canvas   *Canvas
 	root     *hgdraw.List
 	pool     bool // пул доступен: кэш размытия в деле (попадание/промах решены до выбора тайлов)
-	partial  bool
+	// toBack — тайлы копируются в back (чужая память, два буфера), иначе
+	// сравниваются с front из окна; win — окно back холста (тайлы под ним —
+	// в окно); touch — помечать скопированные в back тайлы тронутыми (свой
+	// back); prefill — откуда окно берёт ореол вне области растра.
+	toBack  bool
+	win     image.Rectangle
+	touch   bool
+	prefill *image.RGBA
+	partial bool
 	damage   image.Rectangle // физическое объединённое повреждение
 	region   image.Rectangle // область растра: кадр или повреждение ∩ кадр
 	regionL  image.Rectangle
@@ -189,9 +208,11 @@ type rasterResult struct {
 	rendered, skipped []int
 }
 
-// rasterTree кладёт фон и растрит список кадра: по тайлам в пуле или, для
-// мелких кадров и одного процессора, прямо в холст движка (как 4а.1); с
-// хэш-диффом — только изменившиеся и принуждённые тайлы (ADR-0006).
+// rasterTree растрит список кадра: по тайлам в пуле или тем же воркером
+// одной горутиной (мелкие кадры, один процессор); с хэш-диффом — только
+// изменившиеся и принуждённые тайлы (ADR-0006). Без пула слой размытия
+// читает соседние тайлы — тогда всё выбранное воспроизводится в окно back
+// холста (ADR-0007), как в 4а.1.
 func (e *Engine) rasterTree(canvas *Canvas, list *hgdraw.List, exit hgdraw.ClipState, partial bool, damage image.Rectangle, plan *framePlan) rasterResult {
 	if list == nil {
 		return rasterResult{}
@@ -217,37 +238,67 @@ func (e *Engine) rasterTree(canvas *Canvas, list *hgdraw.List, exit hgdraw.ClipS
 		tr.unskip()
 		clear(tr.valid)
 	}
+	own := canvas.UsingOwnBack()
+	single := own && canvas.SingleBuffer()
+	tr.toBack, tr.touch, tr.win = !single, own, image.Rectangle{}
+	tr.prefill = canvas.BackImage()
+	if single {
+		tr.prefill = canvas.Front()
+		if len(e.post) > 0 {
+			// Окно под слои этого кадра: тайлы под ним — в окно. Окно прошлых
+			// кадров (до освобождения) тайлы не перехватывает: они уйдут в
+			// front мимо него, и оно перестаёт быть равным front.
+			tr.win = canvas.BackWindow()
+		} else if len(tr.tiles) > 0 {
+			canvas.InvalidateBackWindow()
+		}
+	}
 	tiled := pool && len(tr.tiles) >= tiledMinTiles
-	if !tiled && len(tr.skipped) > 0 && tr.layersTouchRendered() {
+	whole := false
+	if len(tr.tiles) > 0 && !tiled && tr.layersTouchRendered() {
 		// Рисуемый тайл задевает слой размытия. В пуле слой — попадание кэша
 		// или ореол, и пропуск остаётся (тик часов на панели со стеклом);
-		// последовательный путь выполняет слой в холсте движка, и тот
-		// читает соседние тайлы: им нужно то же содержимое, что на прямом
-		// пути, — рисуется всё выбранное.
+		// без пула слой выполняется в холсте движка и читает соседние тайлы:
+		// им нужно то же содержимое, что на прямом пути, — рисуется всё
+		// выбранное.
 		if pool {
 			tiled = true
 		} else {
 			tr.unskip()
+			whole = true
 		}
+	}
+	if !tiled && len(tr.tiles) > 0 && len(tr.skipped) == 0 {
+		// Ни один выбранный тайл не пропущен: всё выбранное одним
+		// воспроизведением в окно back — дешевле, чем по тайлам (строка текста
+		// на стыке тайлов обходит свои глифы один раз, а не на каждый тайл).
+		whole = true
 	}
 	e.stats.tilesSkipped.Add(uint64(len(tr.skipped)))
 	switch {
 	case len(tr.tiles) == 0:
 		// Ничего не изменилось: ни фона, ни растра — и диффу нечего делать.
 		tr.sweep()
-	case tiled:
-		tr.render()
-		// Клип на выходе — как после Draw корня на прямом пути: оверлеи и
-		// модальные слои рисуются в холст движка под ним.
-		e.replayer.Replay(canvas, tiledExitList, hgdraw.ReplayOpts{Exit: exit})
-	case len(tr.skipped) == 0:
+	case whole:
 		tr.sweep()
+		if own {
+			// Окно back над областью растра и областями чтения слоёв: за
+			// краем области растра слой читает прошлый кадр из front.
+			win := tr.region
+			for _, l := range tr.layers {
+				win = win.Union(l.src)
+			}
+			canvas.SetBackWindow(win)
+			canvas.Touch(tr.region)
+		}
 		e.blitBackgroundFrame(canvas, partial, damage)
 		e.replayTree(canvas, list, exit, partial, damage)
 	default:
-		tr.sweep()
-		e.replayTiles(canvas, list, exit, partial, damage, tr.tiles)
+		tr.render(tiled)
 	}
+	// Клип на выходе — как после Draw корня и слоёв на прямом пути:
+	// отложенные слои рисуются в холст движка под ним.
+	e.replayer.Replay(canvas, tiledExitList, hgdraw.ReplayOpts{Exit: exit})
 	res := rasterResult{hashed: len(tr.skipped) > 0, rendered: tr.tiles, skipped: tr.skipped}
 	if hashOn {
 		tr.finishHash(plan)
@@ -329,33 +380,58 @@ func (tr *tileRaster) reset() {
 	tr.hits, tr.misses = 0, 0
 }
 
-// render — кадр по тайлам в пуле.
-func (tr *tileRaster) render() {
+// render — кадр по тайлам: в пуле (parallel) или тем же воркером подряд на
+// горутине кадра.
+func (tr *tileRaster) render(parallel bool) {
 	canvas := tr.canvas
 	tr.allocRasters()
 	tr.prescale(tr.root, tr.regionL)
 	tr.planHalos()
 
 	n := len(tr.tiles)
+	if !parallel {
+		// Горутина кадра: своё окно со шрифтами холста движка — ни замка
+		// вида, ни второго кэша глифов на пару тайлов.
+		if tr.serial == nil {
+			tr.serial = tr.newWorker(hgraster.NewWindowCanvasShared(canvas))
+		}
+		for i := 0; i < n; i++ {
+			tr.runTile(tr.serial, i)
+		}
+		tr.finishLayers()
+		tr.e.stats.blurHits.Add(uint64(tr.hits))
+		tr.e.stats.blurMisses.Add(uint64(tr.misses))
+		return
+	}
 	for tr.made < cap(tr.workers) && tr.made < n {
-		w := &tileWorker{c: hgraster.NewWindowCanvas(canvas), tr: tr}
-		w.c.SetScaledBudget((16 << 20) / cap(tr.workers))
-		w.c.SetScaledOverride(tr.scaledFor)
-		w.opts = hgdraw.ReplayOpts{Direct: tr.direct, Offset: offsetContextFor, Override: w.override, Tap: w.tap}
-		tr.workers <- w
+		tr.workers <- tr.newWorker(hgraster.NewWindowCanvas(canvas))
 		tr.made++
 	}
 	workpool.Run(tr, &tr.batch, n)
-	tr.finishLayers()
 	tr.e.stats.tiledFrames.Add(1)
+	tr.finishLayers()
 	tr.e.stats.blurHits.Add(uint64(tr.hits))
 	tr.e.stats.blurMisses.Add(uint64(tr.misses))
+}
+
+// newWorker — воркер над окном c.
+func (tr *tileRaster) newWorker(c *hgraster.Canvas) *tileWorker {
+	w := &tileWorker{c: c, tr: tr}
+	w.c.SetScaledBudget((16 << 20) / cap(tr.workers))
+	w.c.SetScaledOverride(tr.scaledFor)
+	w.opts = hgdraw.ReplayOpts{Direct: tr.direct, Offset: offsetContextFor, Override: w.override, Tap: w.tap}
+	return w
 }
 
 // RunPart — один тайл (workpool.Task).
 func (tr *tileRaster) RunPart(i int) {
 	w := <-tr.workers
 	defer func() { tr.workers <- w }()
+	tr.runTile(w, i)
+}
+
+// runTile рисует тайл i воркером w.
+func (tr *tileRaster) runTile(w *tileWorker, i int) {
 	canvas := tr.canvas
 	w.c.SyncFrame(canvas)
 	idx := tr.tiles[i]
@@ -368,10 +444,11 @@ func (tr *tileRaster) RunPart(i int) {
 	w.c.Retarget(window)
 	w.c.SetCenter(tile)
 	if h > 0 && tr.partial {
-		// Ореол вне области растра: прошлый back (в этом кадре там никто не
+		// Ореол вне области растра: прошлый кадр (front при одном буфере,
+		// back при чужой памяти или двух буферах — в этом кадре там никто не
 		// пишет) — как подложка частичного кадра на прямом пути.
 		for _, part := range outsideOf(window, tr.region) {
-			w.c.PrefillFrom(canvas.BackImage(), part)
+			w.c.PrefillFrom(tr.prefill, part)
 		}
 	}
 	// Фон — своей частью окна, а не из back: под пропущенным соседом back
@@ -388,7 +465,18 @@ func (tr *tileRaster) RunPart(i int) {
 	w.dmg[0] = tr.e.logicalRect(vis)
 	w.opts.Damage = w.dmg[:]
 	w.rep.Replay(w.c, tr.root, w.opts)
-	w.c.CopyTo(canvas.BackImage(), vis.Intersect(tile))
+	part := vis.Intersect(tile)
+	if tr.toBack || tile.Overlaps(tr.win) {
+		// Чужая память, два буфера или тайл под слоями после растра: строки
+		// в back, сравнит сброс окна или дифф.
+		w.c.CopyTo(canvas.BackImage(), part)
+		if tr.touch {
+			canvas.TouchTile(idx)
+		}
+	} else {
+		// Один буфер: сравнение с front и копирование — здесь, в воркере.
+		canvas.SyncTileFrom(w.c.BackImage(), part)
+	}
 	w.c.StoreCenterMark(canvas, idx)
 }
 

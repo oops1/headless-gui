@@ -75,6 +75,11 @@ type Stats struct {
 	// TilesSkipped — тайлы, которые хэш-дифф (hashdiff.go) не рисовал и не
 	// сравнивал: их команды не менялись с кадра, когда их рисовали.
 	TilesSkipped uint64
+	// BufferBytes — байт в собственных буферах кадра холста после последнего
+	// кадра: front и окно back (ADR-0007). Не накопительный: текущее
+	// значение. Окна воркеров, кэш размытия и буферы потребителя сюда не
+	// входят.
+	BufferBytes uint64
 }
 
 // engineStats — счётчики, из которых собирается Stats. Пишет их горутина
@@ -89,6 +94,7 @@ type engineStats struct {
 	tiledFrames             atomic.Uint64
 	blurHits, blurMisses    atomic.Uint64
 	tilesSkipped            atomic.Uint64
+	bufferBytes             atomic.Uint64
 }
 
 // Stats возвращает снимок счётчиков движка. Безопасен из любой горутины и не
@@ -120,6 +126,7 @@ func (e *Engine) Stats() Stats {
 		BlurHits:      s.blurHits.Load(),
 		BlurMisses:    s.blurMisses.Load(),
 		TilesSkipped:  s.tilesSkipped.Load(),
+		BufferBytes:   s.bufferBytes.Load(),
 	}
 }
 

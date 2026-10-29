@@ -74,8 +74,9 @@ func sameSet(a, b map[image.Point]bool) bool {
 	return true
 }
 
-// backPixel — пиксель back-буфера холста (физические координаты).
-func (r *esRig) backPixel(x, y int) color.RGBA { return r.e.canvas.Back().RGBAAt(x, y) }
+// backPixel — пиксель кадра (физические координаты): front, при одном
+// буфере кадра back холста движка — окно (ADR-0007).
+func (r *esRig) backPixel(x, y int) color.RGBA { return r.e.canvas.Front().RGBAAt(x, y) }
 
 // esNoise — непрозрачный буфер; seed меняет все пиксели.
 func esNoise(w, h, seed int) *image.RGBA { return opaqueNoise(w, h, seed) }

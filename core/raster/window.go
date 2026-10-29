@@ -25,18 +25,26 @@ import (
 // NewWindowCanvas создаёт холст-окно над холстом движка src: тот же масштаб,
 // формат байтов, обои (по наследованию), журнал сбросов картинок; виды
 // шрифтов — личные. Окно задаётся Retarget.
-func NewWindowCanvas(src *Canvas) *Canvas {
+func NewWindowCanvas(src *Canvas) *Canvas { return newWindowCanvas(src, false) }
+
+// NewWindowCanvasShared — окно для горутины кадра (последовательный путь,
+// снимки рекордера): шрифты и шейпер холста движка без личных видов —
+// замок вида ни с кем не делится, а личный вид стоил бы второго кэша глифов
+// на каждый кадр из пары тайлов.
+func NewWindowCanvasShared(src *Canvas) *Canvas { return newWindowCanvas(src, true) }
+
+func newWindowCanvas(src *Canvas, shared bool) *Canvas {
 	c := &Canvas{
-		isWindow:   true,
-		noPool:     true,
-		frame:      src.back.Bounds(),
-		fontCache:  src.fontCache.NewView(),
-		namedFonts: src.namedFonts,
-		families:   src.families,
-		shaper:     &hgtext.Shaper{},
-		views:      make(map[*hgtext.FontCache]*hgtext.FontCache),
-		viewsOf:    src,
-		viewRev:    src.fontRev.Load(),
+		isWindow:    true,
+		noPool:      true,
+		sharedFonts: shared,
+		frame:       src.Frame(),
+		fontCache:   src.fontCache.NewView(),
+		namedFonts:  src.namedFonts,
+		families:    src.families,
+		shaper:      &hgtext.Shaper{},
+		views:       make(map[*hgtext.FontCache]*hgtext.FontCache),
+		viewRev:     src.fontRev.Load(),
 		W:          src.W,
 		H:          src.H,
 		scale:      src.scale,
@@ -49,6 +57,9 @@ func NewWindowCanvas(src *Canvas) *Canvas {
 	c.fallbacks = make([]*hgtext.FallbackFont, len(src.fallbacks))
 	for i, fb := range src.fallbacks {
 		c.fallbacks[i] = fb.View()
+	}
+	if shared {
+		c.fontCache, c.fallbacks, c.shaper, c.views = src.fontCache, src.fallbacks, src.shaper, nil
 	}
 	c.InheritWallpaper(src)
 	if src.inv != nil {
@@ -67,12 +78,13 @@ func NewWindowCanvas(src *Canvas) *Canvas {
 func (c *Canvas) IsWindow() bool { return c.isWindow }
 
 // Frame — границы кадра (физические): у окна — кадр холста движка, у
-// обычного холста — его буфер.
+// обычного холста — его размер (back холста движка — окно над front,
+// ADR-0007, и его границы кадром не являются).
 func (c *Canvas) Frame() image.Rectangle {
 	if c.isWindow {
 		return c.frame
 	}
-	return c.back.Bounds()
+	return image.Rect(0, 0, c.W, c.H)
 }
 
 // Retarget переводит окно на прямоугольник window (физические координаты
@@ -102,7 +114,7 @@ func (c *Canvas) Retarget(window image.Rectangle) {
 // кадрами: формат байтов back (чужая память потребителя), границы кадра,
 // ревизию шрифтов (новые личные виды), выключатель кэша теней.
 func (c *Canvas) SyncFrame(src *Canvas) {
-	c.frame = src.back.Bounds()
+	c.frame = src.Frame()
 	c.wallParent = src.wallOwner()
 	c.bgImage = src.bgImage
 	c.inv = src.inv
@@ -113,6 +125,10 @@ func (c *Canvas) SyncFrame(src *Canvas) {
 		c.scaledCache, c.scaledPixels = nil, 0
 	}
 	c.shadowCacheOff = src.shadowCacheOff
+	if c.sharedFonts {
+		c.fontCache, c.fallbacks, c.shaper = src.fontCache, src.fallbacks, src.shaper
+		return
+	}
 	if rev := src.fontRev.Load(); rev != c.viewRev || !c.fontCache.SameParams(src.fontCache) {
 		c.viewRev = rev
 		c.fontCache = src.fontCache.NewView()
@@ -229,7 +245,8 @@ func (c *Canvas) TileRect(i int) image.Rectangle {
 	return image.Rect(tx*ts, ty*ts, min(tx*ts+ts, c.W), min(ty*ts+ts, c.H))
 }
 
-// BackImage — буфер back холста (для префилла окон и снимков под слоями).
+// BackImage — буфер back холста: окно воркера, чужая память потребителя
+// или окно back холста движка (singlebuf.go).
 func (c *Canvas) BackImage() *image.RGBA { return c.back }
 
 // ScaledFor — растр картинки src, масштабированной до pw×ph физических

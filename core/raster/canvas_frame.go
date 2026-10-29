@@ -140,6 +140,7 @@ func (c *Canvas) ApplyMovesToFront(moves []output.MoveRegion) []output.MoveRegio
 			continue
 		}
 		blitWithin(c.front, src, dst.Min)
+		c.mirrorMove(src, dst.Min)
 		taken = append(taken, src, dst)
 		out = append(out, output.MoveRegion{From: m.From, Rect: m.Rect})
 	}
@@ -147,6 +148,20 @@ func (c *Canvas) ApplyMovesToFront(moves []output.MoveRegion) []output.MoveRegio
 		return nil
 	}
 	return out
+}
+
+// mirrorMove повторяет перенос в собственном окне back (ADR-0007): окно
+// размером с кадр переносит те же области и остаётся равным front; окно
+// меньше кадра перестаёт быть чистым и заполнится из front заново.
+func (c *Canvas) mirrorMove(src image.Rectangle, dstMin image.Point) {
+	if c.isWindow || c.back != c.backOwn || c.backOwn.Rect.Empty() {
+		return
+	}
+	if c.backOwn.Rect == c.Frame() {
+		blitWithin(c.backOwn, src, dstMin)
+		return
+	}
+	c.backClean = false
 }
 
 // overlapsAny сообщает, задевает ли r хоть одну из областей.

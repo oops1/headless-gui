@@ -5,12 +5,17 @@
 // (core/draw). Когда рисовать и что отдавать в кадр, решает движок (engine);
 // пакет engine держит прежние имена алиасами (engine.Canvas).
 //
-// Canvas использует двойную буферизацию:
-//   - back — текущий рендер (виджеты рисуют сюда)
-//   - front — последний отправленный потребителю кадр
+// Буферы холста:
+//   - front — последний отправленный потребителю кадр;
+//   - back — буфер рисования: у холста движка — окно над front под то, что
+//     кадр рисует в холст сам (ADR-0007, singlebuf.go), у отдельного холста
+//     и клонов попапов — полный буфер; чужая память потребителя
+//     (SetExternalBack, AttachBack) — тоже полный back.
 //
-// После каждого рендера back сравнивается с front побайтово по тайлам 64×64.
-// Изменившиеся тайлы копируются во front и возвращаются как []output.DirtyTile.
+// Тайлы 64×64 сравниваются с front побайтово — из окон воркеров
+// (SyncTileFrom), при сбросе окна back (FlushBackWindow) или по всему
+// полному back (DiffAndSync); изменившиеся копируются во front и
+// возвращаются как []output.DirtyTile.
 package raster
 
 import (
@@ -35,8 +40,10 @@ import (
 	"github.com/oops1/headless-gui/v3/output"
 )
 
-// Canvas — off-screen RGBA-холст с двойной буферизацией.
-// Реализует интерфейс widget.DrawContext.
+// Canvas — off-screen RGBA-холст: front — последний отданный кадр, back —
+// буфер рисования (у холста движка — окно над front, ADR-0007, singlebuf.go;
+// у отдельного холста и клонов попапов — полный буфер). Реализует интерфейс
+// widget.DrawContext.
 type Canvas struct {
 	front      *image.RGBA           // последний отправленный кадр
 	// backdrops — области размытия прошлого кадра, backdropsNext — текущего
@@ -143,15 +150,18 @@ type Canvas struct {
 
 	// Холст-окно (window.go): isWindow — буфер back лежит в координатах кадра
 	// с ненулевым началом, frame — границы кадра, center и centerMark —
-	// центральный тайл и его признак, views/viewsOf/viewRev — личные виды
-	// общих шрифтов холста движка и ревизия, с которой они сделаны.
-	isWindow   bool
-	frame      image.Rectangle
-	center     image.Rectangle
-	centerMark tileMark
-	views      map[*hgtext.FontCache]*hgtext.FontCache
-	viewsOf    *Canvas
-	viewRev    uint64
+	// центральный тайл и его признак, views/viewRev — личные виды общих
+	// шрифтов холста движка и ревизия, с которой они сделаны; sharedFonts —
+	// окно горутины кадра со шрифтами холста движка без видов. Ссылку на
+	// холст движка окно не держит: воркеры живут дольше холста (смена
+	// разрешения), и прежний холст должен уйти сборщику.
+	isWindow    bool
+	sharedFonts bool
+	frame       image.Rectangle
+	center      image.Rectangle
+	centerMark  tileMark
+	views       map[*hgtext.FontCache]*hgtext.FontCache
+	viewRev     uint64
 	// noPool — холсту нельзя обращаться к пулу воркеров (сам рисует в
 	// задании пула: вложенный workpool.Run — взаимная блокировка).
 	noPool bool
@@ -163,6 +173,21 @@ type Canvas struct {
 	// (backdrop.go): уменьшенная картинка и строка растяжения.
 	blurSmall *image.RGBA
 	blurLine  []byte
+
+	// Один буфер кадра (singlebuf.go): single — back есть окно над front;
+	// backClean — окно равно front в своих границах; backLive — в окно
+	// рисовали, и оно не сброшено; backUsed/backIdle — окно задавалось в
+	// этом кадре / кадров подряд не задавалось; touched — тайлы окна под
+	// сброс; changed — тайлы, изменившиеся в кадре (воркеры и сброс);
+	// flushMark и flushed — что сброс изменил; flushWork — задание пула.
+	single                         bool
+	backClean, backLive, backUsed  bool
+	backIdle                       int
+	touched, changed, flushMark    []bool
+	flushed                        []int
+	flushWork                      flushJob
+	// snapWin — окно для снимков рекордера (RenderSnapshot).
+	snapWin *Canvas
 }
 
 // colorRGBA — синоним для сигнатур window.go.
@@ -368,31 +393,11 @@ func (c *Canvas) ClearDrawDamage() { c.drawDamage = c.drawDamage[:0] }
 func (c *Canvas) ClearBackground() { c.bgImage = nil }
 
 // BlitBackground очищает back-буфер и копирует фон (если задан).
-// Вызывается до отрисовки виджетов — перезаписывает весь back.
-// Если фонового изображения нет — заливает буфер чёрным цветом,
-// чтобы при перемещении виджетов старые пиксели не оставались.
+// Вызывается до отрисовки виджетов — перезаписывает весь back (окно back —
+// в его границах, ADR-0007). Если фонового изображения нет — заливает буфер
+// чёрным цветом, чтобы при перемещении виджетов старые пиксели не оставались.
 func (c *Canvas) BlitBackground() {
-	// Построчно через PixOffset обеих сторон, а не одним copy(back.Pix,
-	// bgImage.Pix): back.Stride может отличаться от bgImage.Stride (back —
-	// чужая память с собственным шагом строки, см. SetSurface), да и просто
-	// писать за пределы c.W×c.H в чужой буфер нельзя, даже если у него есть
-	// запасные байты дальше по срезу.
-	rowBytes := c.W * 4
-	all := image.Rect(0, 0, c.W, c.H)
-	if c.bgImage != nil {
-		for y := 0; y < c.H; y++ {
-			dOff := c.back.PixOffset(0, y)
-			sOff := c.bgImage.PixOffset(0, y)
-			copy(c.back.Pix[dOff:dOff+rowBytes], c.bgImage.Pix[sOff:sOff+rowBytes])
-		}
-		c.markBackground(all)
-		return
-	}
-	// Очищаем буфер чёрным (RGBA = 0,0,0,255). R=G=B=0 — перестановка
-	// каналов (FormatBGRX) здесь ничего не меняет, менять цвет по формату
-	// незачем.
-	c.fillBlackRows(image.Rect(0, 0, c.W, c.H))
-	c.markBackground(all)
+	c.BlitBackgroundIn(image.Rect(0, 0, c.W, c.H))
 }
 
 // markBackground помечает тайлы, накрытые фоном.
@@ -418,7 +423,9 @@ func (c *Canvas) markBackground(r image.Rectangle) {
 }
 
 // BlitBackgroundIn — как BlitBackground, но только в области r (частичная
-// перерисовка): вне r back-буфер сохраняет прошлый кадр.
+// перерисовка): вне r back-буфер сохраняет прошлый кадр. Признак фона
+// ставится по всей r в пределах кадра: окно back уже тайлов, которые
+// кадр помечает (воркер хранит признак центра сам).
 func (c *Canvas) BlitBackgroundIn(r image.Rectangle) {
 	r = r.Intersect(c.back.Bounds())
 	if r.Empty() {
@@ -428,7 +435,8 @@ func (c *Canvas) BlitBackgroundIn(r image.Rectangle) {
 		// bgImage — ВСЕГДА собственный image.NewRGBA(W,H) канваса (Stride =
 		// 4×W без запаса), а back может быть чужой памятью с другим шагом
 		// строки (см. SetSurface) — оффсет считаем для каждого раздельно,
-		// один и тот же off тут не годится.
+		// один и тот же off тут не годится. Построчно через PixOffset обеих
+		// сторон, а не одним copy: и шаг строки, и начало окна у back свои.
 		rowBytes := r.Dx() * 4
 		for y := r.Min.Y; y < r.Max.Y; y++ {
 			dOff := c.back.PixOffset(r.Min.X, y)
@@ -476,6 +484,7 @@ func (c *Canvas) fillBlackRows(r image.Rectangle) {
 func (c *Canvas) SetExternalBack(pix []byte, stride int, f PixelFormat) {
 	c.back = &image.RGBA{Pix: pix, Stride: stride, Rect: image.Rect(0, 0, c.W, c.H)}
 	c.format = f
+	c.backClean = false // front уйдёт вперёд окна (singlebuf.go)
 }
 
 // setOwnFormat задаёт формат собственного буфера. Он же становится текущим,

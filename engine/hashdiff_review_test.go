@@ -42,10 +42,6 @@ func reviewCompareFrames(t *testing.T, p cmdPair, name string) {
 		}
 		t.Errorf("%s: front расходится в %d пикселях, первый %v (hash %v, без %v)", name, n, first, a.RGBAAt(first.X, first.Y), b.RGBAAt(first.X, first.Y))
 	}
-	ba, bb := p.on.canvas.BackImage(), p.off.canvas.BackImage()
-	if !bytes.Equal(ba.Pix, bb.Pix) {
-		t.Errorf("%s: back расходится", name)
-	}
 	if len(fa.Tiles) != len(fb.Tiles) {
 		t.Errorf("%s: тайлов %d против %d", name, len(fa.Tiles), len(fb.Tiles))
 	}
@@ -373,9 +369,6 @@ func reviewCompareFull(t *testing.T, p cmdPair, name string) (output.Frame, outp
 			}
 		}
 		t.Errorf("%s: front расходится в %d пикселях, первый %v (hash %v, без %v)", name, n, first, a.RGBAAt(first.X, first.Y), b.RGBAAt(first.X, first.Y))
-	}
-	if !bytes.Equal(p.on.canvas.BackImage().Pix, p.off.canvas.BackImage().Pix) {
-		t.Errorf("%s: back расходится", name)
 	}
 	key := func(tl output.DirtyTile) string { return fmt.Sprintf("%d,%d", tl.X, tl.Y) }
 	ta, tb := map[string]bool{}, map[string]bool{}

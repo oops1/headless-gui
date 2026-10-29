@@ -864,7 +864,7 @@ func protoRecord(rec *protoRecorder, root widget.Widget) []protoCmd {
 func protoDirectFrame(eng *Engine) *image.RGBA {
 	eng.Invalidate()
 	eng.renderFrame()
-	src := eng.canvas.Back()
+	src := eng.canvas.Front()
 	out := image.NewRGBA(src.Bounds())
 	copy(out.Pix, src.Pix)
 	return out

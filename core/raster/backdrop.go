@@ -77,6 +77,9 @@ func (c *Canvas) BlurBehind(r image.Rectangle, radius int, tint color.RGBA) {
 	if src.Empty() {
 		return
 	}
+	// Окно back холста движка (ADR-0007) растёт на область чтения: за его
+	// краем лежит прошлый кадр из front, как у полного back.
+	c.GrowBackWindowFor(src)
 
 	small, sradius, origin := c.downscaleForBlur(src, pradius)
 	if small == nil {

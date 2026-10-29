@@ -65,14 +65,16 @@ func (e *Engine) invalidateShownTooltip() {
 
 // drawTooltip рисует всплывающую подсказку, если курсор достаточно долго
 // неподвижен над виджетом с непустым ToolTip. Вызывается из renderFrame
-// (под e.frameMu); canvas и root — снапшоты кадра.
+// (под e.frameMu) на прямом пути; canvas и root — снапшоты кадра. На пути
+// команд подсказка записывается рекордером (toplayers.go).
 func (e *Engine) drawTooltip(c *Canvas, root widget.Widget) {
-	e.drawTooltipPlanned(c, e.tooltipPlan(c, root))
+	if p := e.tooltipPlan(c, root); p.ok {
+		e.drawTooltipBox(c, p.text, p.rect)
+	}
 }
 
 // tooltipPlan — подсказка кадра: текст и плашка (логическая), если она
-// показывается. На пути команд считается до растра дерева (hashdiff.go:
-// тайлы плашки принуждаются к растру) и рисуется после него тем же планом.
+// показывается.
 type tooltipPlan struct {
 	text string
 	rect image.Rectangle
@@ -106,13 +108,6 @@ func (e *Engine) tooltipPlan(c *Canvas, root widget.Widget) tooltipPlan {
 		return tooltipPlan{}
 	}
 	return tooltipPlan{text: tip, rect: e.tooltipRect(c, tip, mx, my), ok: true}
-}
-
-// drawTooltipPlanned рисует подсказку по плану кадра.
-func (e *Engine) drawTooltipPlanned(c *Canvas, p tooltipPlan) {
-	if p.ok {
-		e.drawTooltipBox(c, p.text, p.rect)
-	}
 }
 
 // tooltipMayAppear — true в МОМЕНТ появления подсказки: курсор остановился и
@@ -186,7 +181,9 @@ func (e *Engine) tooltipRect(c *Canvas, text string, mx, my int) image.Rectangle
 	return image.Rect(x, y, x+bw, y+bh)
 }
 
-func (e *Engine) drawTooltipBox(c *Canvas, text string, r image.Rectangle) {
+// drawTooltipBox рисует плашку в контекст c: холст (прямой путь, окно back)
+// или рекордер команд.
+func (e *Engine) drawTooltipBox(c widget.DrawContext, text string, r image.Rectangle) {
 	const padX, padY = 8, 5
 	x, y, bw, bh := r.Min.X, r.Min.Y, r.Dx(), r.Dy()
 

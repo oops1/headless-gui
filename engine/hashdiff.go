@@ -20,7 +20,6 @@ import (
 
 	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
 	"github.com/oops1/headless-gui/v3/output"
-	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // hashDiffSerialMax — до скольких нарисованных тайлов дифф идёт по их
@@ -39,48 +38,23 @@ func (e *Engine) SetHashDiff(on bool) {
 // HashDiff сообщает, включён ли хэш-дифф тайлов.
 func (e *Engine) HashDiff() bool { return e.hashDiff.Load() }
 
-// framePlan — что кадр пути команд знает до растра дерева.
+// framePlan — что кадр пути команд знает до растра дерева. Слои поверх
+// дерева в план не входят: они записаны командами или рисуются в окно back и
+// лишают хэша тайлы под своим местом (noteOverlaid, ADR-0007).
 type framePlan struct {
 	// force — ничейное повреждение кадра (логическое): приложение заявило
 	// изменение, о котором команды не знают.
 	force []image.Rectangle
 	// forceAll — все выбранные тайлы рисуются: Invalidate(), полный кадр,
-	// переносы и всё, что ниже помечено overlaidAll.
+	// переносы (они меняют front до растра).
 	forceAll bool
-	// overlaidAll, overlaid — после растра поверх back заведомо рисуют: всё
-	// (модальные, переходы оверлеев) или области (плашка подсказки,
-	// физические координаты). Оверлеи в холсте известны только после их
-	// отрисовки (Engine.overlayDrawn); см. noteOverlaid.
-	overlaidAll bool
-	overlaid    []image.Rectangle
-	tooltip     tooltipPlan
 }
 
-// planFrame собирает план кадра. all — Invalidate() или полный кадр.
-func (e *Engine) planFrame(canvas *Canvas, root widget.Widget, modals []widget.ModalWidget, ovtOn, ovtSteps, all bool, force []image.Rectangle) *framePlan {
+// planFrame собирает план кадра. all — Invalidate() или полный кадр; moved —
+// в этом кадре применены переносы.
+func (e *Engine) planFrame(all bool, force []image.Rectangle, moved bool) *framePlan {
 	p := &e.plan
-	*p = framePlan{force: force, forceAll: all, overlaid: p.overlaid[:0]}
-	if ovtOn && (ovtSteps || len(e.ovt.list) > 0) {
-		p.overlaidAll = true // шаги и слои переходов смешиваются поверх растра
-	}
-	for _, m := range modals {
-		if m.IsModal() {
-			p.overlaidAll = true // затемнение и диалог — поверх всего
-			break
-		}
-	}
-	e.moveMu.Lock()
-	if len(e.pendingMoves) > 0 {
-		p.forceAll = true // переносы меняют front до диффа
-	}
-	e.moveMu.Unlock()
-	p.tooltip = e.tooltipPlan(canvas, root)
-	if p.tooltip.ok {
-		p.overlaid = append(p.overlaid, canvas.PhysRect(p.tooltip.rect))
-	}
-	if p.overlaidAll {
-		p.forceAll = true
-	}
+	*p = framePlan{force: force, forceAll: all || moved}
 	return p
 }
 
@@ -178,9 +152,6 @@ func (tr *tileRaster) decide(plan *framePlan) {
 	clear(tr.skipMask)
 	for _, r := range plan.force {
 		tr.setTiles(tr.forced, canvas.PhysRect(r), true)
-	}
-	for _, r := range plan.overlaid {
-		tr.setTiles(tr.forced, r, true)
 	}
 	if tr.pool {
 		// Промах слоя, который кадр накроет целиком: все его тайлы рисуются,
@@ -283,9 +254,15 @@ func (tr *tileRaster) anySkipped(r image.Rectangle) bool {
 }
 
 // noteOverlaid снимает действительность хэша у тайлов, поверх которых кадр
-// рисовал после растра дерева (все или области): их пиксели — не функция
-// команд, следующий кадр их перерисует.
+// рисовал после растра дерева (все или области — место отложенных слоёв,
+// шагов переходов): их пиксели — не функция команд, следующий кадр их
+// перерисует. Все тайлы области, а не только изменившиеся при сбросе окна
+// back: слой, нарисовавший то же, что кадр назад, сброс не отличит от слоя,
+// не тронувшего тайл, — а под ним в front уже не дерево.
 func (tr *tileRaster) noteOverlaid(all bool, rects []image.Rectangle) {
+	if tr.canvas == nil || len(tr.valid) == 0 {
+		return
+	}
 	if all {
 		clear(tr.valid)
 		return
@@ -334,27 +311,3 @@ func (e *Engine) blitBackgroundFrame(canvas *Canvas, partial bool, damage image.
 	canvas.BlitBackground()
 }
 
-// replayTiles — последовательный путь по тайлам: у каждого фон, базовый клип
-// и воспроизведение по его области. Между тайлами ничего не читается (слоёв
-// размытия в области нет — иначе рисуется всё повреждение), поэтому порядок
-// и соседство тайлов на картинку не влияют.
-func (e *Engine) replayTiles(canvas *Canvas, list *hgdraw.List, exit hgdraw.ClipState, partial bool, damage image.Rectangle, tiles []int) {
-	for _, i := range tiles {
-		r := canvas.TileRect(i)
-		if partial {
-			r = r.Intersect(damage)
-		}
-		if r.Empty() {
-			continue
-		}
-		canvas.ResetTileMarks(r)
-		canvas.BlitBackgroundIn(r)
-		canvas.SetBaseClip(r)
-		e.replayTree(canvas, list, exit, true, r)
-	}
-	if partial {
-		canvas.SetBaseClip(damage)
-	} else {
-		canvas.ClearBaseClip()
-	}
-}

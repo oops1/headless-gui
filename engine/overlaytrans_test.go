@@ -585,9 +585,16 @@ func TestOverlayTrans_StepInsideDamageUnionIsDiffed(t *testing.T) {
 	widget.StepAnimationsFor(s.eng, t0.Add(50*time.Millisecond))
 	s.eng.InvalidateRect(image.Rect(0, 0, 4, 4))
 	s.eng.InvalidateRect(image.Rect(316, 236, 320, 240))
-	s.eng.RenderFrameNow()
-	if f, b := s.eng.canvas.Front().RGBAAt(120, 100), s.eng.canvas.Back().RGBAAt(120, 100); f != b {
-		t.Fatalf("шаг смешан в буфер, но не отдан: передний %v, задний %v", f, b)
+	fr := s.eng.RenderFrameNow()
+	// Тайл с точкой меню (120,100) обязан уйти в кадр: шаг смешан в буфер.
+	found := false
+	for _, tl := range fr.Tiles {
+		if image.Pt(120, 100).In(image.Rect(tl.X, tl.Y, tl.X+tl.W, tl.Y+tl.H)) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("шаг смешан в буфер, но не отдан: тайлов %d", len(fr.Tiles))
 	}
 }
 

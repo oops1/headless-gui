@@ -52,7 +52,10 @@ func (c *Canvas) UsingOwnBack() bool { return c.back == c.backOwn }
 
 // AttachBack делает буфером рисования img формата f — поверхность
 // потребителя (Engine.SetSurfaces).
-func (c *Canvas) AttachBack(img *image.RGBA, f PixelFormat) { c.back, c.format = img, f }
+func (c *Canvas) AttachBack(img *image.RGBA, f PixelFormat) {
+	c.back, c.format = img, f
+	c.backClean = false // front уйдёт вперёд окна (singlebuf.go)
+}
 
 // Format — порядок каналов текущего буфера рисования.
 func (c *Canvas) Format() PixelFormat { return c.format }

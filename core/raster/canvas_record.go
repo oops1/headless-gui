@@ -50,7 +50,7 @@ func (c *Canvas) TextBounds(text string, x, y int, sizePt float64, fontName stri
 // после SetClip(r), без базового клипа кадра: округление на дробном
 // масштабе то же, что у холста.
 func (c *Canvas) LogicalClip(r image.Rectangle) image.Rectangle {
-	return c.unRect(c.PhysRect(r).Intersect(c.back.Bounds()))
+	return c.unRect(c.PhysRect(r).Intersect(c.Frame()))
 }
 
 // HasWallpaper сообщает, есть ли у холста (или его владельца обоев)
