@@ -2749,6 +2749,30 @@ dispatch are never blocked by rendering; structural operations (SetResolution,
 RegisterFont*, SetTheme) serialize with the frame via a dedicated internal
 mutex.
 
+#### Areas outside a widget's bounds (v4.0)
+
+A widget that draws outside its bounds (an overlay, a shadow, a glow) declares
+the changed area itself. Coordinates are in the widget's system.
+
+```go
+w.InvalidateArea(r)               // does not redraw neighbours under r
+w.MarkDirty()                     // state changed without a setter
+widget.InvalidateSubtree(w)       // the whole subtree, e.g. after a theme change of the area
+w.SetDirtyOnChildInvalidate(true) // draws from its children's state (focus frame over buttons)
+widget.InvalidateRect(r)          // unclaimed area: everything under it is redrawn
+```
+
+- `InvalidateArea` and `MarkDirty` cost less than `widget.InvalidateRect`, which
+  redraws everything under the area, neighbours included.
+- A container that draws children outside `Children()` (inactive tabs, tray icons)
+  implements `ExtraChildren() []widget.Widget`. Without it, the container's
+  `Invalidate` does not reach those children.
+- An image rewritten in place is shown only after `eng.InvalidateImageCache(img)`
+  (`nil` — the whole cache); from `Draw` use `widget.InvalidateImageCache(ctx, img)`.
+  A `BlitPixels` buffer is re-read in every frame where it is drawn; nothing else
+  is needed.
+
+
 ### HiDPI
 
 Widgets live in LOGICAL pixels (like WPF DIPs); frame buffers are physical
@@ -5762,6 +5786,47 @@ engine.SetGlyphCacheBudget(128 << 20) // bytes; 0 or less means the default, 64 
   per-engine cache: the cache has two levels now. Hits cost the same as before.
 - More than 256 different fonts in one process is rare: beyond that, fonts that drop out of
   the accounting keep working, but the memory limit no longer applies to them.
+
+
+### Command path, tiled raster and one frame buffer (v4.0, in progress)
+
+A frame is built in three steps: the tree records drawing commands, the commands
+are rasterised by 64×64 tiles in a worker pool, and only the changed tiles go to
+the consumer. Everything is on by default; the switches are for comparison and
+diagnostics.
+
+```go
+eng.SetCommandPath(false)  // the previous path: each widget's Draw straight into the canvas
+eng.SetTiledRaster(false)  // the command list straight into the canvas on one goroutine
+eng.SetHashDiff(false)     // rasterise and diff every selected tile, no skipping
+eng.SetSingleBuffer(false) // two copies of the frame instead of one
+```
+
+- The picture is the same on every path: tests compare frames byte for byte.
+- A tile whose commands did not change since it was last drawn is neither
+  rasterised nor compared. A frame with no changes draws no tile at all. The tile
+  hash covers images (see `InvalidateImageCache`) and blurred backdrops;
+  direct widgets (`ExternalSurface`) are drawn every frame.
+- A frame without a declared damage (`RenderOnce`, rendering every tick) re-records
+  the whole tree, because the application may have changed something it did not
+  report. This recording is the main cost of an unchanged frame: on a scene of 21k
+  commands it takes several milliseconds even when nothing changed.
+- A partial frame from `InvalidateRect` costs about twice the direct path: an
+  unclaimed damage re-records the whole tree under the area. If that matters,
+  switch back to the direct path with `SetCommandPath(false)`.
+- Small frames (up to 4 tiles) and a single processor (`GOMAXPROCS = 1`) are
+  rasterised without the pool.
+- A consumer that receives frames into its own buffer (`SetSurface`,
+  `SetSurfaces`) gets a full output buffer: it contains the tiles the hash diff
+  skipped as well.
+- Overlays, modal windows and the tooltip are recorded as commands. The exception
+  is transitions (`SetOverlayTransitions(true)`): while a menu under a transition
+  is open, it and everything above it is drawn after the rasterisation on every
+  frame. Without transitions there is no such cost.
+- `Stats` counters: `Recorded` and `Retained` — commands recorded and taken from
+  retained lists; `TiledFrames`, `BlurHits`, `BlurMisses` — tile frames and blur
+  cache hits; `TilesSkipped` — tiles the hash diff did not touch; `BufferBytes` —
+  bytes of the frame buffers (about W·H·4 with one buffer).
 
 
 ## Module Structure

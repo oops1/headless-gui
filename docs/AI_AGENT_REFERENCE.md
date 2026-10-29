@@ -10287,3 +10287,58 @@ This document covers the essential API for AI code generation with headless-gui.
 - `cmd/showcase/main.go` — example application
 - `tests/` directory — unit tests with usage patterns
 - GUIDE.md and GUIDE_EN.md — user documentation
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): command path, tiled raster, hash diff and one frame buffer
+
+Frames record drawing commands (`core/draw`), rasterise changed 64×64 tiles in a
+worker pool and send only the changed tiles to the consumer. All four parts are
+on by default; the picture is identical on every path, which the tests compare
+byte for byte.
+
+```go
+eng.SetCommandPath(bool)  // default true; false — each Draw straight into the canvas
+eng.CommandPath() bool
+eng.SetTiledRaster(bool)  // default true; NewOffscreen — false; false — one goroutine
+eng.TiledRaster() bool
+eng.SetHashDiff(bool)     // default true; tile hash over the commands that touch it
+eng.HashDiff() bool
+eng.SetSingleBuffer(bool) // default true; the back buffer is a window over front
+eng.SingleBuffer() bool
+eng.Stats().BufferBytes   // bytes of the frame buffers after the last frame
+```
+
+Rules that follow from the design:
+
+- A tile is neither rasterised nor compared when its commands, image generations and
+  blur content keys did not change since it was last drawn. A frame without changes
+  draws no tile.
+- Frames without a declared damage (`RenderOnce`, render every tick) re-record the
+  whole tree. This is the main cost of an unchanged frame; it is not avoided yet.
+- A partial frame from `Engine.InvalidateRect` re-records the tree under the area
+  (unclaimed damage). It costs about twice the direct path (about 50 against 25
+  microseconds on a 1280×800 text scene); `SetCommandPath(false)` restores the direct path.
+- Overlays, modal windows and the tooltip are commands. Under
+  `SetOverlayTransitions(true)` an open menu under a transition, and everything above
+  it, is drawn after the rasterisation on every frame; with transitions off there is no such cost.
+- A consumer that renders into its own buffer (`SetSurface`, `SetSurfaces`) gets a full
+  output buffer, including tiles the hash diff skipped.
+- `Engine.Stats()` adds `Recorded`, `Retained`, `TiledFrames`, `BlurHits`, `BlurMisses`,
+  `TilesSkipped`, `BufferBytes` to the earlier fields.
+
+Invalidation beyond the widget bounds:
+
+```go
+w.InvalidateArea(r)               // widget system; neighbours under r are not redrawn
+w.MarkDirty()                     // state changed without a setter; the widget itself redraws
+widget.InvalidateSubtree(w)       // the whole subtree (theme change of the area)
+w.SetDirtyOnChildInvalidate(true) // draws from its children's state (focus frame over buttons)
+widget.InvalidateRect(r)          // unclaimed area: every widget under it is redrawn
+```
+
+- `InvalidateArea` and `MarkDirty` cost less than `widget.InvalidateRect`.
+- A container that draws children outside `Children()` implements
+  `widget.ExtraChildrenLister` (`ExtraChildren() []widget.Widget`), so that
+  `Invalidate` of the container reaches them.
+- An image rewritten in place is shown only after `eng.InvalidateImageCache(img)`
+  (`nil` — the whole cache) or `widget.InvalidateImageCache(ctx, img)` from `Draw`.
+  A `BlitPixels` buffer is re-read in every frame where it is drawn.
