@@ -47,6 +47,9 @@ var (
 type moveSink struct {
 	handle uint64
 	notify func(MoveNotice)
+	// owner — приёмник есть движок-владелец (ADR-0008): объявления дерева
+	// другого владельца до него не доходят. nil — наблюдатель, получает всё.
+	owner Owner
 }
 
 // RegisterMoveSink регистрирует приёмник объявлений о переносе и возвращает
@@ -56,13 +59,20 @@ type moveSink struct {
 // оно к его дереву. Виджет об этом ничего не знает: он говорит «эти пиксели
 // переехали», а не «переехали у такого-то движка».
 func RegisterMoveSink(notify func(MoveNotice)) uint64 {
+	return RegisterMoveSinkFor(nil, notify)
+}
+
+// RegisterMoveSinkFor — RegisterMoveSink для приёмника-движка, владеющего
+// деревьями (ADR-0008): объявления виджета, чьё дерево привязано к другому
+// владельцу, до него не доходят. owner == nil — наблюдатель.
+func RegisterMoveSinkFor(owner Owner, notify func(MoveNotice)) uint64 {
 	if notify == nil {
 		return 0
 	}
 	moveMu.Lock()
 	moveSinkSeq++
 	h := moveSinkSeq
-	moveSinks = append(moveSinks, moveSink{handle: h, notify: notify})
+	moveSinks = append(moveSinks, moveSink{handle: h, notify: notify, owner: owner})
 	moveMu.Unlock()
 	return h
 }
@@ -115,10 +125,17 @@ func notifyMove(w Widget, src, dst image.Rectangle) {
 		return // никуда не переехало
 	}
 	notice := MoveNotice{From: src.Min, Rect: dst, Widget: w}
+	var to Owner
+	if w != nil {
+		to = OwnerOf(w)
+	}
 
 	moveMu.Lock()
 	sinks := make([]func(MoveNotice), 0, len(moveSinks))
 	for _, s := range moveSinks {
+		if to != nil && s.owner != nil && s.owner != to {
+			continue // объявление чужого дерева (owner.go)
+		}
 		sinks = append(sinks, s.notify)
 	}
 	moveMu.Unlock()

@@ -44,6 +44,11 @@ type MenuBar struct {
 
 	// Вычисленные горизонтальные позиции каждого пункта.
 	itemRects []image.Rectangle
+	// rectsMS, rectsRev — измеритель и ревизия метрик, которыми посчитаны
+	// itemRects: строка меню, собранная до вставки в дерево, мерила
+	// глобальным измерителем (owner_services.go).
+	rectsMS  *MeasureSet
+	rectsRev uint64
 
 	activeIdx int32 // индекс открытого пункта (-1 = ничего)
 	hoverIdx  int32 // hover пункт верхнего уровня (-1 = нет)
@@ -88,6 +93,7 @@ func NewMenuBar() *MenuBar {
 		Height:       28,
 		popup:        NewPopupMenu(),
 	}
+	mb.popup.SetHost(mb) // меню не ребёнок строки: движок находит через хозяина
 	return mb
 }
 
@@ -196,14 +202,17 @@ func (mb *MenuBar) setActiveIdx(idx int) {
 // байта, то есть 176 точек вместо примерно 90), подсветка при наведении
 // выходила шире текста, а от шрифта и масштаба ширина не зависела вовсе.
 //
-// MeasureUIText, а не ctx.MeasureText: раскладка считается вне отрисовки —
+// MeasureTextFor, а не ctx.MeasureText: раскладка считается вне отрисовки —
 // её просят и при SetBounds, и при смене состава меню, когда контекста нет.
+// Меряет измеритель движка дерева строки (owner_services.go); строка, собранная
+// до вставки в дерево, пересчитывается при первом обращении (ensureRects).
 func (mb *MenuBar) recalcRects() {
+	mb.rectsMS, mb.rectsRev = measureSetOf(mb), TextMetricsRev()
 	b := mb.bounds
 	rects := make([]image.Rectangle, len(mb.items))
 	x := b.Min.X
 	for i, item := range mb.items {
-		textW := MeasureUIText(mnemonicLabel(item.Text, mb.UseMnemonics),
+		textW := MeasureTextFor(mb, mnemonicLabel(item.Text, mb.UseMnemonics),
 			DefaultFontSize()) + mb.ItemPaddingX*2
 		rects[i] = image.Rect(x, b.Min.Y, x+textW, b.Max.Y)
 		x += textW
@@ -260,6 +269,7 @@ func (mb *MenuBar) Draw(ctx DrawContext) {
 	// Нижняя граница.
 	ctx.DrawHLine(b.Min.X, b.Max.Y-1, b.Dx(), mb.BorderColor)
 
+	mb.ensureRects()
 	mb.mu.RLock()
 	items := mb.items
 	rects := mb.itemRects
@@ -307,8 +317,20 @@ func (mb *MenuBar) Draw(ctx DrawContext) {
 
 // ─── События мыши ────────────────────────────────────────────────────────────
 
+// ensureRects пересчитывает прямоугольники пунктов, если они посчитаны другим
+// измерителем или до смены метрик текста.
+func (mb *MenuBar) ensureRects() {
+	ms, rev := measureSetOf(mb), TextMetricsRev()
+	mb.mu.Lock()
+	if mb.rectsMS != ms || mb.rectsRev != rev {
+		mb.recalcRects()
+	}
+	mb.mu.Unlock()
+}
+
 // hitTopItem возвращает индекс верхнего пункта под координатами, или -1.
 func (mb *MenuBar) hitTopItem(x, y int) int {
+	mb.ensureRects()
 	mb.mu.RLock()
 	defer mb.mu.RUnlock()
 	pt := image.Pt(x, y)
@@ -385,6 +407,7 @@ func (mb *MenuBar) OnMouseButton(e MouseEvent) bool {
 
 func (mb *MenuBar) openSubmenu(idx int) {
 	mb.popup.UseMnemonics = mb.UseMnemonics
+	mb.ensureRects()
 	mb.mu.RLock()
 	if idx < 0 || idx >= len(mb.items) {
 		mb.mu.RUnlock()

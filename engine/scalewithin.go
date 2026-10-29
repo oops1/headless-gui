@@ -43,6 +43,7 @@ func (e *Engine) SetScaleWithin(k float64) {
 	}
 	lw, lh := logicalFor(pw, ph, k)
 	e.canvas = e.canvas.CloneForPhys(pw, ph, lw, lh, k, e.bgSrc)
+	e.canvasRef.Store(e.canvas)
 	e.surfaces.drop()
 	e.canvas.SetDPIAll(e.userDPI * k)
 	e.scaleBits.Store(math.Float64bits(k))
@@ -64,6 +65,7 @@ func (e *Engine) SetPhysicalResolution(pw, ph int) {
 	k := e.canvas.Scale()
 	lw, lh := logicalFor(pw, ph, k)
 	e.canvas = e.canvas.CloneForPhys(pw, ph, lw, lh, k, e.bgSrc)
+	e.canvasRef.Store(e.canvas)
 	e.surfaces.drop()
 	e.scaleWithin = true
 	e.mu.Unlock()

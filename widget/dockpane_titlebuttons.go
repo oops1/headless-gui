@@ -243,7 +243,7 @@ func (p *DockPane) activateTitleButton(i int, at image.Point) {
 		return
 	}
 	r := p.titleButtonRects()[i]
-	m := p.menu.build(at.X, at.Y, append([]MenuItem(nil), items...))
+	m := p.menu.build(p, at.X, at.Y, append([]MenuItem(nil), items...))
 	if m == nil {
 		return
 	}

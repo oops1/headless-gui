@@ -87,7 +87,7 @@ func (w *Window) SetIcon(img image.Image) {
 // физическом размере значка, поэтому на HiDPI остаётся чёткой. currentColor в
 // SVG — цвет подписи заголовка. При ошибке разбора прежний значок остаётся.
 func (w *Window) SetIconSVG(data []byte) error {
-	doc, err := svg.Parse(data)
+	doc, err := svg.ParseWith(data, svg.ParseOptions{Text: TextRasterizerFor(w)})
 	if err != nil {
 		return err
 	}

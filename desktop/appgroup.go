@@ -173,11 +173,12 @@ func (h *appMenuHost) open() bool {
 // show открывает меню у прямоугольника anchor, на стороне, обращённой к
 // рабочему столу: над кнопкой у нижней панели (EdgeBottom), под ней у верхней
 // (EdgeTop), справа от неё у левой (EdgeLeft) и слева у правой (EdgeRight).
-func (h *appMenuHost) show(tm *theme.Manager, items []widget.MenuItem, anchor image.Rectangle, edge Edge) {
+func (h *appMenuHost) show(owner widget.Widget, tm *theme.Manager, items []widget.MenuItem, anchor image.Rectangle, edge Edge) {
 	if len(items) == 0 {
 		return
 	}
 	m := widget.NewPopupMenu()
+	m.SetHost(owner)
 	m.SetItems(items)
 	themeMenu(m, tm)
 	h.mu.Lock()

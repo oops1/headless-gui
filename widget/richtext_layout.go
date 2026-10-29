@@ -32,15 +32,16 @@ type richMeasurer interface {
 }
 
 // richUIMeasurer — настоящий измеритель: тот же путь, которым движок потом
-// рисует, поэтому раскладка и отрисовка не расходятся.
-type richUIMeasurer struct{}
+// рисует, поэтому раскладка и отрисовка не расходятся. w — виджет, чьё
+// дерево меряем (владелец дерева, owner_services.go); nil — глобальный путь.
+type richUIMeasurer struct{ w Widget }
 
-func (richUIMeasurer) TextWidth(text string, sizePt float64, font string) int {
-	return MeasureUITextFont(text, sizePt, font)
+func (m richUIMeasurer) TextWidth(text string, sizePt float64, font string) int {
+	return MeasureTextFontFor(m.w, text, sizePt, font)
 }
 
-func (richUIMeasurer) FontMetrics(sizePt float64, font string) FontMetrics {
-	return MeasureUIFontMetrics(sizePt, font)
+func (m richUIMeasurer) FontMetrics(sizePt float64, font string) FontMetrics {
+	return FontMetricsFor(m.w, sizePt, font)
 }
 
 // richLayoutOpts — параметры раскладки.

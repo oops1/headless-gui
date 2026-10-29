@@ -965,6 +965,7 @@ func (t *TextInput) showContextMenu(x, y int) {
 	hasClip := len(clipText) > 0
 
 	menu := NewPopupMenu()
+	menu.SetHost(t)
 
 	// Cut
 	menu.SetItems([]MenuItem{

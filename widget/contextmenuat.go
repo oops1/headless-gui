@@ -42,11 +42,12 @@ type rowMenuHost struct {
 //
 // Пустой список даёт nil, а не пустое меню: пустая рамка на экране — это не
 // «меню без пунктов», это ошибка, которую пользователь не может исправить.
-func (h *rowMenuHost) build(x, y int, items []MenuItem) *PopupMenu {
+func (h *rowMenuHost) build(host Widget, x, y int, items []MenuItem) *PopupMenu {
 	if len(items) == 0 {
 		return nil
 	}
 	m := NewPopupMenu()
+	m.SetHost(host) // меню виджета находит движок через него (ADR-0008)
 	m.SetItems(items)
 	h.menu = m
 	h.openedAt = image.Pt(x, y)

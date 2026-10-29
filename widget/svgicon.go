@@ -48,7 +48,9 @@ func NewSVGIconFromData(data []byte) *SVGIcon {
 
 // SetSVG загружает иконку из SVG-данных (лимиты svg.MaxFileBytes и svg.MaxDepth).
 func (w *SVGIcon) SetSVG(data []byte) error {
-	doc, err := svg.Parse(data)
+	// <text> — шрифтами движка дерева иконки (owner_services.go), если она
+	// уже в дереве с владельцем; иначе — действующим растеризатором.
+	doc, err := svg.ParseWith(data, svg.ParseOptions{Text: TextRasterizerFor(w)})
 	w.mu.Lock()
 	w.doc = doc
 	w.err = err

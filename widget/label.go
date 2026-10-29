@@ -51,6 +51,7 @@ type Label struct {
 	wrapSize  float64
 	wrapW     int
 	wrapRev   uint64
+	wrapMS    *MeasureSet // измеритель, которым посчитан перенос (владелец дерева)
 }
 
 // Встроенные имена шрифтов для жирного/курсива (регистрируются движком из
@@ -210,8 +211,9 @@ func (l *Label) drawLine(ctx DrawContext, text string, x, y int, sizePt float64,
 func (l *Label) wrappedLines(ctx DrawContext, text string, sizePt float64, font string, maxW int) []string {
 	rev := TextMetricsRev()
 	l.mu.RLock()
+	ms := measureSetOf(l) // перенос посчитан измерителем этого движка
 	hit := l.wrapCache != nil && l.wrapText == text && l.wrapSize == sizePt &&
-		l.wrapFont == font && l.wrapW == maxW && l.wrapRev == rev
+		l.wrapFont == font && l.wrapW == maxW && l.wrapRev == rev && l.wrapMS == ms
 	lines := l.wrapCache
 	l.mu.RUnlock()
 	if hit {
@@ -220,7 +222,7 @@ func (l *Label) wrappedLines(ctx DrawContext, text string, sizePt float64, font 
 	lines = wrapTextPixelFont(ctx, text, sizePt, font, maxW)
 	l.mu.Lock()
 	l.wrapCache = lines
-	l.wrapText, l.wrapSize, l.wrapFont, l.wrapW, l.wrapRev = text, sizePt, font, maxW, rev
+	l.wrapText, l.wrapSize, l.wrapFont, l.wrapW, l.wrapRev, l.wrapMS = text, sizePt, font, maxW, rev, ms
 	l.mu.Unlock()
 	return lines
 }
@@ -347,7 +349,7 @@ func (l *Label) DesiredSize() (int, int) {
 	if fontSize <= 0 {
 		fontSize = DefaultFontSize()
 	}
-	w := MeasureUITextFont(text, fontSize, l.effectiveFont()) + l.PaddingX*2
+	w := MeasureTextFontFor(l, text, fontSize, l.effectiveFont()) + l.PaddingX*2
 	h := int(fontSize*1.5+0.5) + l.PaddingY*2
 	// Размер, заданный разметкой, важнее измеренного: Width="520" у ячейки
 	// строки состояния — это просьба занять место, а не описка. По такой оси

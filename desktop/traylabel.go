@@ -82,7 +82,7 @@ func (l *TrayLabel) PreferredSize(avail image.Point) image.Point {
 		return image.Point{}
 	}
 
-	w := widget.MeasureUIText(text, fontSizeOf(s)) + 2*int(s.PadX)
+	w := widget.MeasureTextFor(l, text, fontSizeOf(s)) + 2*int(s.PadX)
 	if min := l.minWidth(); w < min {
 		w = min
 	}

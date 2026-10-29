@@ -203,6 +203,7 @@ type RichText struct {
 // richLayoutKey — то, для чего посчитана раскладка. Совпадение ключа значит,
 // что кэш годится; любая из частей изменилась — считаем заново.
 type richLayoutKey struct {
+	ms         *MeasureSet // измеритель владельца дерева (owner_services.go)
 	w, h       int // размер виджета
 	rev        uint64
 	noParas    bool   // «абзацев нет» (см. RichText.noParas)
@@ -226,6 +227,7 @@ func NewRichText() *RichText {
 		LineSpacing:   2,
 		LinkUnderline: true,
 	}
+	t.measurer = richUIMeasurer{w: t}
 	t.applyColors(&win10)
 	return t
 }
@@ -413,7 +415,8 @@ func (t *RichText) AppendRun(r RichRun) {
 func (t *RichText) layoutLocked() *richLayout {
 	b := t.Base.Bounds()
 	key := richLayoutKey{
-		w: b.Dx(), h: b.Dy(), rev: t.rdoc.rev, noParas: t.noParas, metricsRev: TextMetricsRev(),
+		ms: measureSetOf(t),
+		w:  b.Dx(), h: b.Dy(), rev: t.rdoc.rev, noParas: t.noParas, metricsRev: TextMetricsRev(),
 		font: t.FontName, size: t.FontSize, gap: t.LineSpacing,
 		padX: t.PaddingX, padY: t.PaddingY,
 	}

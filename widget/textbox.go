@@ -27,8 +27,9 @@ import (
 //   - Контекстное меню (Cut/Copy/Paste/Select All)
 //   - Темизация (ApplyTheme), headless-ввод через engine.SendKeyEvent
 //
-// Компоновка текста (разбиение на строки) считается через MeasureUIText —
-// работает и вне Draw (клавиатура/мышь), и в headless-режиме.
+// Компоновка текста (разбиение на строки) считается через MeasureTextFor —
+// измерителем движка дерева поля (ADR-0008); работает и вне Draw
+// (клавиатура/мышь), и в headless-режиме.
 type TextBox struct {
 	Base
 
@@ -152,6 +153,10 @@ type tbLine struct {
 // ширину и ревизию метрик, и смена шрифта (или включение переноса из меню
 // «Формат») оставляла старые строки и старые позиции каретки до первой правки.
 type tbLayoutKey struct {
+	// ms — измеритель владельца дерева, которым посчитана раскладка
+	// (owner_services.go): поле, перенесённое в другой движок, раскладывается
+	// заново.
+	ms *MeasureSet
 	fs   float64
 	font string
 	tab  int // табуляция в пробелах; 0 — табстопов нет
@@ -460,9 +465,9 @@ func (t *TextBox) effectiveTabSize() int {
 // раскладки (без Draw): тем же измерителем, что и всё остальное.
 func (t *TextBox) measureText(text string, fs float64) int {
 	if t.layoutKey.font == "" {
-		return MeasureUIText(text, fs)
+		return MeasureTextFor(t, text, fs)
 	}
-	return MeasureUITextFont(text, fs, t.layoutKey.font)
+	return MeasureTextFontFor(t, text, fs, t.layoutKey.font)
 }
 
 // ensureLayout перекомпоновывает строки при изменении текста, ширины, метрик
@@ -470,7 +475,7 @@ func (t *TextBox) measureText(text string, fs float64) int {
 func (t *TextBox) ensureLayout() {
 	w := t.textAreaW()
 	rev := TextMetricsRev()
-	key := tbLayoutKey{fs: t.fontSize(), font: t.FontName, tab: t.effectiveTabSize(), wrap: t.Wrap}
+	key := tbLayoutKey{ms: measureSetOf(t), fs: t.fontSize(), font: t.FontName, tab: t.effectiveTabSize(), wrap: t.Wrap}
 	if !t.dirty && t.layoutW == w && t.layoutRev == rev && t.layoutKey == key && t.lines != nil {
 		return
 	}
@@ -544,9 +549,9 @@ func (t *TextBox) measureRange(a, b int, fs float64) int {
 		// Прежний путь без изменений: кэшированный байтовый замер без
 		// аллокаций. Им идут все редакторы без шрифта и табуляций.
 		if fast {
-			return measureUIBytes(t.layoutBuf[t.runeOff[a]:t.runeOff[b]], fs)
+			return measureBytesFor(t, t.layoutBuf[t.runeOff[a]:t.runeOff[b]], fs)
 		}
-		return MeasureUIText(string(t.runes[a:b]), fs)
+		return MeasureTextFor(t, string(t.runes[a:b]), fs)
 	}
 	var text string
 	if fast {
@@ -1509,6 +1514,7 @@ func (t *TextBox) showContextMenu(x, y int) {
 	}
 
 	menu := NewPopupMenu()
+	menu.SetHost(t)
 	menu.SetItems([]MenuItem{
 		{Text: "Cut", Disabled: !hasSel || ro, OnClick: edit(func() {
 			t.mu.Lock()

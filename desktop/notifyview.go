@@ -212,6 +212,7 @@ func ncReadMetrics(tm *theme.Manager) ncMetrics {
 
 // ncText — шрифт строки: кегль и имя начертания для движка.
 type ncText struct {
+	owner widget.Widget // виджет дерева: замер его движком
 	size float64
 	face string
 }
@@ -221,7 +222,7 @@ func (t ncText) width(s string) int {
 	if s == "" {
 		return 0
 	}
-	return widget.MeasureUITextFont(s, t.size, t.face)
+	return widget.MeasureTextFontFor(t.owner, s, t.size, t.face)
 }
 
 // lineH — высота строки с межстрочным интервалом.
@@ -410,7 +411,10 @@ type ncSource struct {
 // него следует. Данные (уведомления, быстрые действия) принадлежат модели
 // потребителя и читаются при каждой раскладке.
 type richView struct {
-	tm   *theme.Manager
+	// owner — виджет, в котором вид живёт (центр уведомлений, тост): по нему
+	// раскладка меряет текст движком его дерева (ADR-0008).
+	owner widget.Widget
+	tm    *theme.Manager
 	mode ncMode
 	src  ncSource
 
@@ -550,22 +554,22 @@ type ncFonts struct {
 	heading ncText
 }
 
-func ncTextOf(f theme.FontSpec) ncText {
+func ncTextOf(f theme.FontSpec, owner widget.Widget) ncText {
 	size := f.Size
 	if size <= 0 {
 		size = widget.DefaultFontSizePt
 	}
-	return ncText{size: size, face: FontFaceName(f)}
+	return ncText{size: size, face: FontFaceName(f), owner: owner}
 }
 
 func (v *richView) fonts() ncFonts {
 	base := v.part(ncPartCard, theme.StateNormal).Font
 	return ncFonts{
-		body:    ncTextOf(base),
-		title:   ncTextOf(v.namedFont(ncFontTitle, base, true, 1.1)),
-		caption: ncTextOf(v.namedFont(ncFontCaption, base, false, 0.9)),
-		link:    ncTextOf(base),
-		heading: ncTextOf(v.namedFont(ncFontHeading, base, true, 1.5)),
+		body:    ncTextOf(base, v.owner),
+		title:   ncTextOf(v.namedFont(ncFontTitle, base, true, 1.1), v.owner),
+		caption: ncTextOf(v.namedFont(ncFontCaption, base, false, 0.9), v.owner),
+		link:    ncTextOf(base, v.owner),
+		heading: ncTextOf(v.namedFont(ncFontHeading, base, true, 1.5), v.owner),
 	}
 }
 

@@ -886,6 +886,7 @@ func (m *StartMenu) ensurePopup() *widget.PopupMenu {
 		return p
 	}
 	p = widget.NewPopupMenu()
+	p.SetHost(m)
 	v.mu.Lock()
 	if v.popup == nil {
 		v.popup = p

@@ -110,7 +110,7 @@ func (mb *MenuButton) openMenu(at image.Point, byMouse bool) bool {
 	if mb.OnOpening != nil {
 		mb.OnOpening()
 	}
-	m := mb.menu.build(at.X, at.Y, append([]MenuItem(nil), mb.Items...))
+	m := mb.menu.build(mb, at.X, at.Y, append([]MenuItem(nil), mb.Items...))
 	if m == nil {
 		return false
 	}

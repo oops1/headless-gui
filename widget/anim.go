@@ -154,6 +154,12 @@ func currentAnimLoop() any {
 // движок.
 func (am *animator) add(a *Animation) {
 	a.loop = currentAnimLoop()
+	// Анимация виджета дерева с владельцем шагает циклом владельца, откуда бы
+	// её ни завели (owner_services.go): тик зовёт код виджета, и идти ему на
+	// горутине движка этого дерева, с его профилем движения.
+	if k := ownerLoopKey(a.owner); k != nil {
+		a.loop = k
+	}
 	am.mu.Lock()
 	am.active = append(am.active, a)
 	am.mu.Unlock()
@@ -583,6 +589,27 @@ func AnimationsActive() bool {
 	active := len(anim.active) > 0
 	anim.mu.Unlock()
 	return active
+}
+
+// StopAnimationsFor снимает без OnDone анимации, привязанные к циклу key
+// (BindAnimationLoop, владелец дерева): движок зовёт её в Stop — его цикл их
+// больше не шагнёт.
+func StopAnimationsFor(key any) {
+	if key == nil {
+		return
+	}
+	anim.mu.Lock()
+	kept := anim.active[:0]
+	for _, a := range anim.active {
+		if a.loop == key {
+			a.stopped = true
+			continue
+		}
+		kept = append(kept, a)
+	}
+	clear(anim.active[len(kept):])
+	anim.active = kept
+	anim.mu.Unlock()
 }
 
 // StopAllAnimations снимает все анимации без OnDone (для тестов/шатдауна).

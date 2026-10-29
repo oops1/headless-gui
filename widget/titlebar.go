@@ -261,9 +261,9 @@ func (d *Dialog) titleTextW() int {
 		return 0
 	}
 	if currentStyle().Classic3D {
-		return MeasureUITextFont(d.Title, DefaultFontSize(), BuiltinFontBold)
+		return MeasureTextFontFor(d, d.Title, DefaultFontSize(), BuiltinFontBold)
 	}
-	return MeasureUITextFont(d.Title, 11, BuiltinFontBold)
+	return MeasureTextFontFor(d, d.Title, 11, BuiltinFontBold)
 }
 
 // ─── Диалог: кнопка сворачивания ────────────────────────────────────────────
@@ -469,9 +469,9 @@ func (w *Window) titleTextW() int {
 		return 0
 	}
 	if w.style().Classic3D {
-		return MeasureUITextFont(w.Title, DefaultFontSize(), BuiltinFontBold)
+		return MeasureTextFontFor(w, w.Title, DefaultFontSize(), BuiltinFontBold)
 	}
-	return MeasureUIText(w.Title, 10)
+	return MeasureTextFor(w, w.Title, 10)
 }
 
 // SetNavButton показывает или убирает кнопку сворачивания в левой части

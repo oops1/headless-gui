@@ -173,6 +173,13 @@ type Engine struct {
 	// measurerHandle — дескриптор регистрации измерителя текста
 	// (widget.RegisterTextMeasurer в New, снимается в Stop).
 	measurerHandle uint64
+	// measureSet — измерители этого движка для его деревьев (ADR-0008, 5.2):
+	// виджет с владельцем меряет текст шрифтами и масштабом своего движка.
+	measureSet *widget.MeasureSet
+	// canvasRef — текущий холст для измерителей (горутины приложения): e.canvas
+	// меняют SetScale/SetResolution под e.mu, а измеритель зовут и из кода,
+	// который этот замок держит (раскладка корня).
+	canvasRef atomic.Pointer[Canvas]
 
 	// svgTextHandle — дескриптор регистрации растеризатора <text> для
 	// widget/svg (svg.RegisterTextRasterizer в New, снимается в Stop).
@@ -354,9 +361,10 @@ func New(width, height, fps int) *Engine {
 //
 // Всё остальное — как у New: те же шрифты по умолчанию, RenderOnce, Start,
 // Stop. Внутри Draw виджеты меряют ctx.MeasureText своего холста, так что
-// отрисовка точна. На замеры ВНЕ Draw (MeasureUIText) у виджетов такого
-// движка отвечает измеритель процесса, то есть движок окна: шрифт, известный
-// только заданию, там подменится шрифтом по умолчанию.
+// отрисовка точна. Раскладка ВНЕ Draw у виджетов дерева такого движка (после
+// SetRoot или ShowModal) меряет его же холстом — через владельца дерева
+// (ADR-0008, MeasureTextFor); глобальный MeasureUIText и замеры дерева без
+// владельца отвечает измеритель процесса, то есть движок окна.
 func NewOffscreen(width, height, fps int) *Engine {
 	return newEngine(width, height, fps, true)
 }
@@ -387,6 +395,7 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 		ttDelay:   600 * time.Millisecond,
 	}
 	e.scaleBits.Store(math.Float64bits(1))
+	e.canvasRef.Store(e.canvas)
 	e.imgInv = &hgraster.ImageInvalidator{}
 	e.canvas.SetImageInvalidator(e.imgInv)
 	// Рендер по запросу — режим по умолчанию (v3.5): виджеты самоинвалидируются
@@ -433,7 +442,8 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	e.notifierHandle = widget.RegisterUINotifierFor(treeOwner{e}, e.onWidgetInvalidate, e.onWidgetInvalidateRect, e.onWidgetAnimation, e.onWidgetInvalidateRectOwned)
 	// Политика сбоев (failure.go): изоляция, под go test — прежнее поведение.
 	e.failure.policy.Store(uint32(defaultFailurePolicy()))
-	e.moveHandle = widget.RegisterMoveSink(e.noteMove)
+	// Приёмник-владелец: объявления деревьев других движков сюда не приходят.
+	e.moveHandle = widget.RegisterMoveSinkFor(treeOwner{e}, e.noteMove)
 	// Точный замер текста для компоновки до отрисовки (размеры диалогов).
 	//
 	// Измеритель один на процесс — иначе некому отвечать: MeasureUIText зовут
@@ -447,29 +457,32 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// Регистрация со снятием: остановленный движок возвращает измеритель
 	// предыдущему живому вместо того, чтобы оставить свой мёртвый холст.
 	//
-	// Движок вне экрана (NewOffscreen) измерителем не становится.
-	if offscreen {
-		return e
-	}
-	e.measurerHandle = widget.RegisterMeasurers(widget.Measurers{
+	measurers := widget.Measurers{
 		// Замыканием, а не значением метода: SetScale и SetResolution
 		// заменяют e.canvas копией, и привязанный к первому холсту метод
 		// отвечал бы по масштабу, которого давно нет (физическая ширина
 		// вместо логической — на HiDPI всё, что считает перенос до кадра,
 		// переносило раньше времени).
 		Text: func(text string, sizePt float64) int {
-			return e.canvas.MeasureText(text, sizePt)
+			return e.canvasRef.Load().MeasureText(text, sizePt)
 		},
 		TextFont: func(text string, sizePt float64, family string) int {
-			return e.canvas.MeasureTextFont(text, sizePt, family)
+			return e.canvasRef.Load().MeasureTextFont(text, sizePt, family)
 		},
 		RunePositions: func(text string, sizePt float64, family string) []int {
-			return e.canvas.MeasureRunePositionsFont(text, sizePt, family)
+			return e.canvasRef.Load().MeasureRunePositionsFont(text, sizePt, family)
 		},
 		FontMetrics: func(sizePt float64, family string) (ascent, descent, lineGap int) {
-			return e.canvas.FontMetrics(family, sizePt)
+			return e.canvasRef.Load().FontMetrics(family, sizePt)
 		},
-	})
+	}
+	// Свои деревья движок меряет сам (owner.go), в том числе вне экрана.
+	e.measureSet = widget.NewMeasureSet(measurers)
+	// Движок вне экрана (NewOffscreen) глобальным измерителем не становится.
+	if offscreen {
+		return e
+	}
+	e.measurerHandle = widget.RegisterMeasurers(measurers)
 	// <text> внутри SVG рисуется шрифтами этого движка (контуры глифов);
 	// регистрация со снятием, как и у измерителя.
 	e.svgTextHandle = svg.RegisterTextRasterizer(svgTextBridge{e})
@@ -499,18 +512,19 @@ func (e *Engine) SetRoot(w widget.Widget) {
 	// старый root, либо полностью подготовленный новый (лейаут + capture).
 	e.mu.RLock()
 	cw, ch := e.canvas.LogicalSize()
+	prev := e.root
 	e.mu.RUnlock()
+	// Дерево принадлежит этому движку (ADR-0008, owner.go) — до первой
+	// раскладки: она меряет текст шрифтами владельца, а его уведомления идут
+	// сюда адресно.
+	e.bindRoot(prev, w)
 	if w.Bounds().Empty() {
 		w.SetBounds(image.Rect(0, 0, cw, ch))
 	}
 	injectCaptureManager(w, e)
 	e.mu.Lock()
-	prev := e.root
 	e.root = w
 	e.mu.Unlock()
-	// Дерево принадлежит этому движку (ADR-0008, owner.go): его уведомления
-	// идут сюда адресно.
-	e.bindRoot(prev, w)
 	e.Invalidate()
 }
 
@@ -520,14 +534,14 @@ func (e *Engine) SetRoot(w widget.Widget) {
 func (e *Engine) SetRootFullCanvas(w widget.Widget) {
 	e.mu.RLock()
 	cw, ch := e.canvas.LogicalSize()
+	prev := e.root
 	e.mu.RUnlock()
+	e.bindRoot(prev, w) // до раскладки, как в SetRoot
 	w.SetBounds(image.Rect(0, 0, cw, ch))
 	injectCaptureManager(w, e)
 	e.mu.Lock()
-	prev := e.root
 	e.root = w
 	e.mu.Unlock()
-	e.bindRoot(prev, w)
 	e.Invalidate()
 }
 
@@ -612,6 +626,7 @@ func (e *Engine) SetScale(k float64) {
 	}
 	lw, lh := e.canvas.LogicalSize()
 	e.canvas = e.canvas.CloneForSize(lw, lh, k, e.bgSrc)
+	e.canvasRef.Store(e.canvas)
 	e.surfaces.drop() // буферы прежнего размера новому холсту не подходят
 	e.canvas.SetDPIAll(e.userDPI * k)
 	e.scaleBits.Store(math.Float64bits(k))
@@ -634,6 +649,7 @@ func (e *Engine) SetResolution(width, height int) {
 	defer e.frameMu.Unlock()
 	e.mu.Lock()
 	e.canvas = e.canvas.CloneForSize(width, height, e.canvas.Scale(), e.bgSrc)
+	e.canvasRef.Store(e.canvas)
 	e.surfaces.drop()     // буферы прежнего размера новому холсту не подходят
 	e.scaleWithin = false // логический размер задан явно: обычный режим
 	e.mu.Unlock()
@@ -796,6 +812,7 @@ func (e *Engine) RegisterFont(fontName string, ttfData []byte) {
 	e.frameMu.Lock() // кэш шрифтов читается отрисовкой — меняем между кадрами
 	defer e.frameMu.Unlock()
 	e.canvas.RegisterFont(fontName, ttfData)
+	widget.BumpTextMetricsRev() // замеры именем этого шрифта устарели
 }
 
 // RegisterFontFile регистрирует именованный шрифт из TTF/OTF-файла.
@@ -853,6 +870,7 @@ func (e *Engine) RegisterFontDir(dir string) {
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
 	e.loadFontDirectory(dir)
+	widget.BumpTextMetricsRev()
 }
 
 // SetDefaultFont делает зарегистрированный шрифт шрифтом по умолчанию.
@@ -862,6 +880,7 @@ func (e *Engine) SetDefaultFont(name string) bool {
 	defer e.frameMu.Unlock()
 	ok := e.canvas.SetDefaultFont(name)
 	if ok {
+		widget.BumpTextMetricsRev() // ширины шрифтом по умолчанию изменились
 		e.Invalidate()
 	}
 	return ok
@@ -994,7 +1013,11 @@ func (e *Engine) AvailableFonts() []string {
 func (e *Engine) RegisterFallbackFont(ttfData []byte) bool {
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
-	return e.canvas.AddFallbackFont(ttfData)
+	ok := e.canvas.AddFallbackFont(ttfData)
+	if ok {
+		widget.BumpTextMetricsRev() // руны, которых не было, теперь имеют ширину
+	}
+	return ok
 }
 
 // RegisterFallbackFontFile добавляет fallback-шрифт из TTF/OTF-файла.
@@ -1202,6 +1225,9 @@ func (e *Engine) Stop() {
 	}
 	widget.UnregisterUINotifier(e.notifierHandle)
 	e.unbindAll() // корень и модальные снова уведомляют широковещанием (ADR-0008)
+	// Анимации, привязанные к циклу этого движка, больше никто не шагнёт:
+	// снимаются без OnDone, а не висят в реестре вечно.
+	widget.StopAnimationsFor(e)
 	// Учёт рисующихся виджетов общий на процесс: остановленный движок,
 	// включивший проверку контракта, не должен держать его включённым у всех.
 	e.SetDrawContractCheck(false)
@@ -1452,6 +1478,10 @@ func (e *Engine) ShowModal(m widget.ModalWidget) {
 		}
 	}
 
+	// Модальное окно — отдельный корень этого движка (ADR-0008): привязка до
+	// раскладки, чтобы она мерила текст шрифтами этого движка.
+	widget.BindOwner(m, treeOwner{e})
+
 	// Центрируем диалог (в логических координатах)
 	e.mu.RLock()
 	cw, ch := e.canvas.LogicalSize()
@@ -1487,8 +1517,6 @@ func (e *Engine) ShowModal(m widget.ModalWidget) {
 	e.modMu.Lock()
 	e.modals = append(e.modals, m)
 	e.modMu.Unlock()
-	// Модальное окно — отдельный корень этого движка (ADR-0008).
-	widget.BindOwner(m, treeOwner{e})
 	e.Invalidate()
 }
 

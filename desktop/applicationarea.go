@@ -780,7 +780,7 @@ func (a *ApplicationArea) ShowCommands(i int) {
 	case a.tm != nil && a.tm.GetFlag(KeyTaskbarTop, false):
 		edge = EdgeTop
 	}
-	a.menu.show(a.tm, menuItems(cmds), anchor, edge)
+	a.menu.show(a, a.tm, menuItems(cmds), anchor, edge)
 }
 
 // ToolTipAt возвращает подсказку кнопки под точкой: название приложения (у

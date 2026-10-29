@@ -37,11 +37,21 @@ func BindOwner(w Widget, o Owner) {
 		return
 	}
 	b := bp.baseRef()
+	var prev Owner
+	if ref := b.owner.Load(); ref != nil {
+		prev = ref.o
+	}
 	if o == nil {
 		b.owner.Store(nil)
-		return
+	} else {
+		b.owner.Store(&ownerRef{o: o})
 	}
-	b.owner.Store(&ownerRef{o: o})
+	if prev != o {
+		// Раскладки, посчитанные измерителем прежнего владельца (перенос
+		// лейбла, строки поля ввода), ключены ревизией метрик: дерево сменило
+		// движок — пересчитать (owner_services.go).
+		BumpTextMetricsRev()
+	}
 }
 
 // OwnerOf — владелец дерева виджета w: привязка верхнего виджета его цепочки

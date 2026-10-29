@@ -196,7 +196,7 @@ func (c *ClockItem) twoLine(availW, availY int, timeSize float64) bool {
 	// показывают одно время, а не дату, вылезающую за панель.
 	if c.vertical {
 		dateStr := c.now().Format(c.dateFormat())
-		if widget.MeasureUIText(dateStr, dateSize)+2*int(dateStyle.PadX) > availW {
+		if widget.MeasureTextFor(c, dateStr, dateSize)+2*int(dateStyle.PadX) > availW {
 			return false
 		}
 	}
@@ -225,14 +225,14 @@ func (c *ClockItem) PreferredSize(avail image.Point) image.Point {
 
 	now := c.now()
 	timeStr := now.Format(c.timeFormat())
-	w := widget.MeasureUIText(timeStr, timeSize)
+	w := widget.MeasureTextFor(c, timeStr, timeSize)
 	h := lineHeight(timeSize)
 
 	if c.twoLine(avail.X, avail.Y, timeSize) {
 		dateStyle := c.style("date", theme.StateNormal)
 		dateSize := fontSizeOf(dateStyle)
 		dateStr := now.Format(c.dateFormat())
-		if dw := widget.MeasureUIText(dateStr, dateSize); dw > w {
+		if dw := widget.MeasureTextFor(c, dateStr, dateSize); dw > w {
 			w = dw
 		}
 		h = lineHeight(timeSize) + int(dateStyle.PadY) + lineHeight(dateSize)

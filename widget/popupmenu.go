@@ -89,6 +89,10 @@ type PopupMenu struct {
 	// anchor — точка, запрошенная в Show, до вписывания в область: меню,
 	// вписанное выше неё, раскрылось вверх (OverlayAnchor).
 	anchor image.Point
+	// host — виджет, от имени которого меню показывают (SetHost): меню чаще
+	// всего не ребёнок дерева, и владельца (движок, его измеритель) находит
+	// через хозяина.
+	host atomic.Pointer[hostRef]
 	// Прокрутка длинного меню (под geoMu): пикселей содержимого над видимой
 	// частью, высота содержимого, включена ли прокрутка.
 	scroll, contentH int
@@ -353,6 +357,44 @@ func (m *PopupMenu) IsOpen() bool {
 // Show открывает popup-меню в указанных абсолютных координатах.
 // Позиция корректируется так, чтобы меню целиком помещалось в канвасе
 // (сдвиг влево/вверх у правого/нижнего края — меню не обрезается границей окна).
+// hostRef — держатель интерфейса под атомарный указатель.
+type hostRef struct{ w Widget }
+
+// SetHost задаёт виджет, от имени которого меню показывают (строка меню,
+// поле ввода, кнопка): меню, которое не ребёнок дерева, находит по нему
+// движок — им меряет подписи и ему сообщает об изменениях (ADR-0008). nil —
+// снять. Меню-ребёнок дерева и подменю находят движок сами.
+func (m *PopupMenu) SetHost(w Widget) {
+	if w == nil {
+		m.host.Store(nil)
+		return
+	}
+	m.host.Store(&hostRef{w: w})
+}
+
+// ownerWidget — виджет, по которому меню находит владельца дерева: само меню,
+// если оно в дереве с владельцем; иначе хозяин; у подменю — корневое меню.
+func (m *PopupMenu) ownerWidget() Widget {
+	for c, i := m, 0; c != nil && i < maxScreenRectDepth; c, i = c.parent, i+1 {
+		if OwnerOf(c) != nil {
+			return c
+		}
+		if h := c.host.Load(); h != nil {
+			return h.w
+		}
+	}
+	return m
+}
+
+// notifyChanged — изменения меню (оверлей вне границ) — движку его хозяина.
+func (m *PopupMenu) notifyChanged() {
+	if w := m.ownerWidget(); w != Widget(m) {
+		notifyUIChangedTo(OwnerOf(w))
+		return
+	}
+	m.Base.notifyChanged()
+}
+
 func (m *PopupMenu) Show(x, y int) {
 	anchor := image.Pt(x, y)
 	// Закрываем предыдущее корневое контекстное меню (одно меню за раз).
@@ -915,13 +957,13 @@ func (m *PopupMenu) calcSize() (w, h int) {
 			}
 			// Ширина по НАСТОЯЩЕМУ замеру подписи: len в Go считает байты, и
 			// кириллический пункт выходил вдвое шире нужного.
-			textW := MeasureUIText(mnemonicLabel(item.Text, m.UseMnemonics),
+			textW := MeasureTextFor(m.ownerWidget(), mnemonicLabel(item.Text, m.UseMnemonics),
 				DefaultFontSize()) + m.padL() + m.padR() + 24 + gutter
 			if item.Shortcut != "" {
 				// Сочетание пишется справа, и место под него нужно
 				// отвести всему меню: иначе подпись и сочетание налезут
 				// друг на друга в самом длинном пункте.
-				textW += MeasureUIText(item.Shortcut, DefaultFontSize()) + menuShortcutGap
+				textW += MeasureTextFor(m.ownerWidget(), item.Shortcut, DefaultFontSize()) + menuShortcutGap
 			}
 			if textW > w {
 				w = textW
@@ -1204,7 +1246,7 @@ func (m *PopupMenu) DrawOverlay(ctx DrawContext) {
 		// Сочетание клавиш — справа, приглушённым цветом: это подсказка, а
 		// не вторая подпись, и спорить с названием пункта она не должна.
 		if item.Shortcut != "" && len(item.SubItems) == 0 {
-			sw := MeasureUIText(item.Shortcut, DefaultFontSize())
+			sw := ctx.MeasureText(item.Shortcut, DefaultFontSize()) // контекстом, которым рисуем
 			sx := px + pw - padR - sw
 			ctx.DrawText(item.Shortcut, sx, textY, m.shortcutColorFor(textCol, hovered, item.Disabled))
 		}

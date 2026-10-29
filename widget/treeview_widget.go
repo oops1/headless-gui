@@ -102,7 +102,7 @@ func (w *TreeViewWidget) ContextMenuAt(x, y int) *PopupMenu {
 	if !image.Pt(x, y).In(w.Bounds()) {
 		return nil
 	}
-	return w.nodeMenu.build(x, y, w.NodeContextMenu(w.Tree.ItemAtY(y)))
+	return w.nodeMenu.build(w, x, y, w.NodeContextMenu(w.Tree.ItemAtY(y)))
 }
 
 // NewTreeViewWidget создаёт виджет TreeView.

@@ -84,8 +84,9 @@ func drawMnemonicText(ctx DrawContext, text string, x, y int, col color.RGBA, on
 	if key == 0 || pos < 0 {
 		return
 	}
-	lead := MeasureUIText(label[:pos], DefaultFontSize())
-	w := MeasureUIText(string([]rune(label[pos:])[0]), DefaultFontSize())
+	// Меряет контекст, которым рисуем: у каждого движка свои шрифты и масштаб.
+	lead := ctx.MeasureText(label[:pos], DefaultFontSize())
+	w := ctx.MeasureText(string([]rune(label[pos:])[0]), DefaultFontSize())
 	if w <= 0 {
 		return
 	}

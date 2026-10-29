@@ -96,7 +96,7 @@ func checkBoxContentWidth(cb *CheckBox) int {
 	if cb.Text == "" {
 		return boxSize
 	}
-	return boxSize + textPad + MeasureUIText(cb.Text, fontSizeOrDefault(cb.FontSize)) + focusPad
+	return boxSize + textPad + MeasureTextFor(cb, cb.Text, fontSizeOrDefault(cb.FontSize)) + focusPad
 }
 
 // Draw рисует CheckBox: квадратик 16×16 слева + текст справа.

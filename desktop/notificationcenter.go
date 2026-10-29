@@ -137,6 +137,7 @@ func NewNotificationCenter(tm *theme.Manager, ns Notifications) *NotificationCen
 		ns:     ns,
 	}
 	nc.view = newRichView(tm, ncModeCenter, nc.viewSource())
+	nc.view.owner = nc
 	nc.Content = nc.draw
 	nc.Size = nc.size
 	nc.Place = nc.place

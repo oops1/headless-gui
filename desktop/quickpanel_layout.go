@@ -167,6 +167,9 @@ func qsHeight(m qsMetrics, n int, hasVol, hasBright bool) int {
 
 // qsViewState — то, что раскладке нужно знать о панели, помимо метрик.
 type qsViewState struct {
+	// measure — замер подписи движком дерева панели (ADR-0008); nil —
+	// глобальный измеритель.
+	measure func(text string, pt float64) int
 	n         int
 	scroll    int
 	hasVol    bool
@@ -193,6 +196,14 @@ type qsViewState struct {
 }
 
 // qsLayoutFor считает раскладку панели panel.
+// measureText — ширина подписи: движком дерева панели, если он известен.
+func (v qsViewState) measureText(text string, pt float64) int {
+	if v.measure != nil {
+		return v.measure(text, pt)
+	}
+	return widget.MeasureUIText(text, pt)
+}
+
 func qsLayoutFor(m qsMetrics, panel image.Rectangle, v qsViewState) *qsLayout {
 	l := &qsLayout{m: m, panel: panel, n: v.n, pos: v.pos}
 	x0, x1 := panel.Min.X+m.pad, panel.Max.X-m.pad
@@ -284,13 +295,13 @@ func qsLayoutFor(m qsMetrics, panel image.Rectangle, v qsViewState) *qsLayout {
 	editW := m.footerBtn
 	switch {
 	case v.editLabel != "":
-		editW = widget.MeasureUIText(v.editLabel, widget.DefaultFontSize()) + 24
+		editW = v.measureText(v.editLabel, widget.DefaultFontSize()) + 24
 		if editW < m.footerBtn {
 			editW = m.footerBtn
 		}
 	case v.editLeft && v.editName != "":
 		// Карандаш с подписью: поле, значок, зазор, текст, поле.
-		editW = qsEditPadL + qsChevronSide + qsEditGap + widget.MeasureUIText(v.editName, widget.DefaultFontSize()) + qsEditPadR
+		editW = qsEditPadL + qsChevronSide + qsEditGap + v.measureText(v.editName, widget.DefaultFontSize()) + qsEditPadR
 		l.editLabel = true
 	}
 	if v.editLeft {

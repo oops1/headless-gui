@@ -17,6 +17,7 @@ package engine
 import (
 	"fmt"
 	hgtext "github.com/oops1/headless-gui/v3/core/text"
+	"github.com/oops1/headless-gui/v3/widget"
 	"io"
 	"io/fs"
 	"path"
@@ -63,6 +64,7 @@ func (e *Engine) RegisterFontFS(fsys fs.FS, dir string) error {
 
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
+	defer widget.BumpTextMetricsRev() // замеры зарегистрированными шрифтами устарели
 
 	n := 0
 	var firstErr error

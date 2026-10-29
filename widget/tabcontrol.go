@@ -331,17 +331,17 @@ func (tc *TabControl) layoutContent() {
 // хит-тест зовут ОДНУ и ту же функцию, так что раскладка не зависит от
 // того, рисовался ли в этом кадре TabControl вообще.
 //
-// Для замера текста используем MeasureUIText, а не ctx.MeasureText: это
-// один и тот же измеритель (движок регистрирует Canvas.MeasureText через
-// SetTextMeasurer), но MeasureUIText не требует DrawContext, которого у
-// хит-теста нет. Вызывать под tc.mu.
+// Для замера текста используем MeasureTextFor, а не ctx.MeasureText: это
+// измеритель движка дерева вкладок (владелец, ADR-0008) — тот же холст, что
+// рисует, — но он не требует DrawContext, которого у хит-теста нет. Вызывать
+// под tc.mu.
 func (tc *TabControl) layoutTabs() []int {
 	widths := make([]int, len(tc.tabs))
 	for i, tab := range tc.tabs {
 		if tab.Hidden {
 			continue // ширина 0 — не занимает места в полосе заголовков
 		}
-		widths[i] = MeasureUIText(tab.Header, DefaultFontSize()) + tc.TabPadH*2
+		widths[i] = MeasureTextFor(tc, tab.Header, DefaultFontSize()) + tc.TabPadH*2
 	}
 	return widths
 }
@@ -592,7 +592,7 @@ func (tc *TabControl) OnMouseButton(e MouseEvent) bool {
 
 	// Щелчок по шеврону — меню из не поместившихся вкладок.
 	if clicked < 0 && !chevron.Empty() && image.Pt(e.X, e.Y).In(chevron) {
-		if m := tc.menu.build(e.X, e.Y, tc.overflowTabItems(hidden)); m != nil {
+		if m := tc.menu.build(tc, e.X, e.Y, tc.overflowTabItems(hidden)); m != nil {
 			m.Show(chevron.Min.X, chevron.Max.Y)
 		}
 		return true

@@ -200,7 +200,7 @@ func buttonContentWidth(btn *Button, h int) int {
 		gap = 4
 	}
 	// Своим кеглем кнопки: подпись, заданная FontSize, шире общей.
-	return icon + gap + MeasureUIText(btn.Text, fontSizeOrDefault(btn.FontSize)) + 14
+	return icon + gap + MeasureTextFor(btn, btn.Text, fontSizeOrDefault(btn.FontSize)) + 14
 }
 
 // xamlSizeOf возвращает размер, заданный в разметке (0, если не задан).
@@ -388,7 +388,7 @@ func (tb *ToolBar) OnMouseButton(e MouseEvent) bool {
 	if !image.Pt(e.X, e.Y).In(tb.chevron) {
 		return false
 	}
-	if m := tb.menu.build(e.X, e.Y, tb.overflowItems()); m != nil {
+	if m := tb.menu.build(tb, e.X, e.Y, tb.overflowItems()); m != nil {
 		m.Show(tb.chevron.Min.X, tb.chevron.Max.Y)
 	}
 	return true

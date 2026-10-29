@@ -643,7 +643,7 @@ func (t *RichText) ContextMenuAt(x, y int) *PopupMenu {
 
 	t.menuMu.Lock()
 	defer t.menuMu.Unlock()
-	return t.menu.build(x, y, []MenuItem{
+	return t.menu.build(t, x, y, []MenuItem{
 		{Text: "Cut", Disabled: !hasSel, OnClick: func() { t.Cut() }},
 		{Text: "Copy", Disabled: !hasSel, OnClick: func() { t.Copy() }},
 		{Text: "Paste", Disabled: !hasClip, OnClick: func() { t.Paste() }},

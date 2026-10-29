@@ -9,7 +9,10 @@ package engine
 // наблюдатели реестра и внешний слот получают всё. CloseModal и Stop
 // привязку снимают.
 
-import "github.com/oops1/headless-gui/v3/widget"
+import (
+	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v3/widget/svg"
+)
 
 // treeOwner — ключ владельца: сравнимое значение, по которому приёмник
 // реестра узнаёт себя. Отдельный тип, а не *Engine: маркер интерфейса не
@@ -20,6 +23,31 @@ var _ widget.Owner = treeOwner{}
 
 // TreeOwner — маркер widget.Owner.
 func (treeOwner) TreeOwner() {}
+
+// Службы владельца (5.2, widget/owner_services.go): замер текста шрифтами и
+// масштабом этого движка, цикл анимаций и растеризатор <text> для SVG.
+var (
+	_ widget.OwnerMeasurer       = treeOwner{}
+	_ widget.OwnerAnimationLoop  = treeOwner{}
+	_ widget.OwnerTextRasterizer = treeOwner{}
+)
+
+// OwnerMeasurers — измерители движка.
+func (o treeOwner) OwnerMeasurers() *widget.MeasureSet { return o.e.measureSet }
+
+// OwnerLoopKey — ключ цикла анимаций движка (BindAnimationLoop(e)); nil, пока
+// цикл не запущен или уже остановлен: такую анимацию никто бы не шагал, а без
+// ключа её заберёт работающий цикл, как прежде (движок, которому кадры
+// заказывают RenderOnce, анимации не шагает).
+func (o treeOwner) OwnerLoopKey() any {
+	if !o.e.started.Load() || o.e.stopped.Load() {
+		return nil
+	}
+	return o.e
+}
+
+// OwnerTextRasterizer — шрифты движка для <text> в SVG.
+func (o treeOwner) OwnerTextRasterizer() svg.TextRasterizer { return svgTextBridge{o.e} }
 
 // bindRoot привязывает новый корень и отвязывает прежний: дерево, отданное
 // другому движку, не должно носить старую привязку.

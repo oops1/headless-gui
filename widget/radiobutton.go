@@ -130,7 +130,7 @@ func radioButtonContentWidth(rb *RadioButton) int {
 	if rb.Text == "" {
 		return diam
 	}
-	return diam + textPad + MeasureUIText(rb.Text, DefaultFontSize()) + focusPad
+	return diam + textPad + MeasureTextFor(rb, rb.Text, DefaultFontSize()) + focusPad
 }
 
 // Draw рисует RadioButton: кружок 16×16 слева + текст справа.

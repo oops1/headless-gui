@@ -292,7 +292,7 @@ func (w *DataGridWidget) ContextMenuAt(x, y int) *PopupMenu {
 	if row >= 0 {
 		item = w.Grid.ItemAtRow(row)
 	}
-	return w.rowMenu.build(x, y, w.RowContextMenu(item, row))
+	return w.rowMenu.build(w, x, y, w.RowContextMenu(item, row))
 }
 
 // ─── Keyboard handling ─────────────────────────────────────────────────────
