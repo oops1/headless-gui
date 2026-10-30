@@ -3874,7 +3874,7 @@ win.Run()
 ```
 
 The units are those of the rest of the window API: `x`, `y` are screen coordinates
-of the top-left corner (as in `Monitor.Bounds` and `Native().GetPosition()`), `w`,
+of the top-left corner (as in `Monitor.Bounds` and `Window.Position()`), `w`,
 `h` are **logical** pixels (like `SetMinSize` and the engine canvas): the window
 multiplies them by the scale. The scale is taken from the monitor the rectangle
 falls on (Win32), so a saved "800x600" stays the same to the eye on a second
@@ -3884,7 +3884,7 @@ position still applies. Where the window ends up is the application's decision:
 monitor.
 
 The values are applied once. A call after `Run` changes nothing: a running window is
-moved the old way (`Native().SetPosition`), and `Window.SetSize` resizes it (see "Window size from the program" below). It works together
+moved by `Window.SetPosition` (see "Window style, owner and position after show"), and `Window.SetSize` resizes it (see "Window size from the program" below). It works together
 with `SetFullscreen` before `Run`: the window is created with these bounds first,
 and leaving full screen returns exactly them (and "maximized", if it was set).
 `IsMaximized` is `true` after a maximized start.
@@ -4098,11 +4098,66 @@ Before `Run()` the method always returns `nil`: there is no backend yet, so
 there is nothing to judge support by. The icon is remembered and applied when
 the window is created — the same way `SetTrayIcon` behaves.
 
-### Tray and notifications (Windows)
+### Window style, owner and position after show (v4.0)
+
+`window.Style` sets the look and behaviour of the OS window; the owner, the
+Z order and the position change on a shown window. Every operation answers
+honestly whether it was done: on X11 — whether the request was sent (the
+window manager decides).
+
+```go
+win.SetStyle(window.Style{Borderless: true, Tool: true}) // no OS frame, no taskbar button
+win.SetOwner(mainWin)  // always above mainWin, minimised with it; nil removes the owner
+win.Raise()            // to the top of the Z order without activation
+win.Lower()            // to the bottom
+win.SetPosition(x, y)  // top-left corner, physical screen coordinates
+x, y, ok := win.Position()
+```
+
+- `Borderless` — no resize zones, OS shadow or rounding; `Tool` — a tool window,
+  without a taskbar or Alt+Tab entry; `Owned` — the window has an owner (set by
+  `SetOwner`). `Style()` reports what is in effect.
+- Before `Run` the style and the owner are remembered and built into window
+  creation (`true` means "remembered"); the position is set by
+  `SetInitialBounds`. `SetPosition` and `Position` work on a shown normal window
+  only: a maximized, full-screen or minimised one answers `false`.
+- Closing the owner releases the window: it stays open, without an owner.
+- Windows: an "always on top" owner makes the window always on top too; Windows
+  does not let a background process raise a window above another process's active
+  window — `Raise` answers `false`. X11: everything is a request to the window
+  manager. Wayland: `Borderless` only (the protocol has no owner, Z order or
+  position for a window of another connection). macOS: `false`.
+
+### A facade without capabilities: `window/minimal` (v4.0)
+
+`window/minimal` is the same facade as `window` without the window capabilities:
+accessibility, tray and notifications, file drag and drop, shell services (opening
+links, system theme and accent, languages). There is one `Window` type and the API
+names are the same; switching a program means changing the import path:
+
+```go
+import window "github.com/oops1/headless-gui/v3/window/minimal"
+```
+
+Without a capability its methods answer as on a windowing system that cannot do it:
+`SetTrayIcon` after `Run` and `ShowBalloon` — `ErrTrayUnsupported`,
+`BeginDragFiles` — `false`, `OpenURL` after the link check — `ErrOpenUnsupported`,
+the theme is "unknown". `HideToTray` and `RestoreFromTray` are window operations
+and work. A capability can be wired one by one with a blank import of its package
+(`platform/a11y`, `platform/tray`, `platform/dnd`, `platform/shell`). If any package
+of the program imports `window`, the capabilities are wired for every window of the
+process — libraries should import `window/minimal`. The backend capability matrix
+is in `window/README.md`.
+
+### Tray and notifications (Windows, Linux)
 
 `window.Window` can drive the notification area. Methods may be called before
-`Run()` (state is applied when the window is created) or from UI handlers. On
-non-Windows platforms they are polite no-ops (return an error/nothing).
+`Run()` (state is applied when the window is created) or from UI handlers.
+Windows — Shell_NotifyIcon; Linux (X11 and Wayland) — StatusNotifierItem with a
+menu drawn by the panel (GNOME needs the AppIndicator extension) and
+`org.freedesktop.Notifications` notifications, without a tray icon. On macOS and in
+`window/minimal` they are polite no-ops (return an error/nothing). The icon is
+removed when the window closes.
 
 ```go
 win := window.New(eng, "My App")

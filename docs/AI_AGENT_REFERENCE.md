@@ -8357,7 +8357,8 @@ frame is fitted at once as on a resize).
 
 Applied once, in `bringUp` before `Create` (`initialPlaceBackend`, an optional
 backend interface like `fullscreenBackend`); after `Run` the setters change
-nothing, and `Native().SetPosition/SetSize` work as before. Together with
+nothing; a running window is moved by `Window.SetPosition` (v4.0, `Position`
+reports it) and resized by `Window.SetSize`. Together with
 `SetFullscreen` before `Run`: the window is created with the bounds, goes
 full screen after `Create`, and leaving it returns exactly the initial bounds
 and the "maximized" state. After a maximized start `IsMaximized` is `true`,
@@ -10486,3 +10487,38 @@ Where widget code lives now (ADR-0012):
 - Behaviour visible from outside: `%T` gives `*base.Button`, `*text.TextInput`,
   `*chrome.Window`; facade variables are copies; application types embedding a widget pass
   the capability-interface branches.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): window platform packages
+
+Where window code lives now (ADR-0013):
+
+- `window` and `window/minimal` are generated facades (`internal/facadegen`) over
+  `window/core` and `platform/native`; the `Window` type is the same in both, the API
+  snapshot (`window/testdata/api.txt`) is shared. `window` adds blank imports of every
+  capability (`window/capabilities.go`); `window/minimal` has none.
+- Backends are packages: `platform/win32`, `platform/x11`, `platform/wayland`,
+  `platform/cocoa`; `window/core` keeps only shims (`backend_*.go`, `monitor_*.go`).
+  Below them: `platform/native` (backend contracts, shared types, the capability
+  registry), `platform/keyboard`, `platform/pointer`, `platform/dbus`.
+- Capabilities register in `platform/native` from `init`: `platform/a11y`
+  (`RegisterAccessibility`; UIA through `win32.AddMessageHook(WM_GETOBJECT)`, AT-SPI),
+  `platform/shell` (`RegisterShell`: open URL/file, reveal, languages, theme, accent;
+  input checks stay in the core), `platform/tray` (`RegisterTray`: `native.Tray` per
+  OS window, created in `bringUp`, closed in `tearDown`; Win32 icon events and
+  `WM_DESTROY` through `AddMessageHook`; Linux SNI and notifications need no backend),
+  `platform/dnd` (`RegisterDragDrop` — a flag: the drop target and source stay in the
+  backends). Without a capability the core answers "unsupported" exactly like a
+  windowing system without it. Win32 extension points: `AddMessageHook`, `HWND`,
+  `WindowOf`, `NewIcon`.
+- `window.Style{Borderless, Owned, Tool}`, `SetStyle`/`Style`, `SetOwner`, `Raise`,
+  `Lower`, `SetPosition`/`Position` (`window/core/style.go`): honest answers (X11 —
+  "request sent"); before `Run` the style and the owner are remembered; Wayland —
+  `Borderless` only; macOS — `false`.
+- Checks: `internal/layers` (the core and `window/minimal` pull no capability and no
+  `platform/dbus`; the baseline is empty on every OS), `window/core/depmap_test.go`
+  (OS-specific core files are shims only), `window/core/backend_contract_*_test.go`
+  (capability interfaces per backend: Win32 44, X11 39, Wayland 36, Cocoa 3), and the
+  shared scenarios `platform/native/contracttest` (`TestWin32Contract` on live
+  windows, `TestX11Contract`/`TestWaylandContract` on real servers when
+  `DISPLAY`/`WAYLAND_DISPLAY` is set, `TestCocoaContract` builds). The capability
+  matrix of the backends is in `window/README.md`.
