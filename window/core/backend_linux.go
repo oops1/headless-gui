@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/platform/wayland"
 	"github.com/oops1/headless-gui/v3/platform/x11"
 )
 
@@ -16,12 +17,15 @@ import (
 // Общается с X-сервером напрямую через Unix socket.
 type X11Window = x11.X11Window
 
+// WaylandWindow — реализация NativeWindow поверх Wayland (xdg-shell + wl_shm).
+type WaylandWindow = wayland.WaylandWindow
+
 // NewNativeWindow выбирает бэкенд: Wayland при доступном композиторе
 // (WAYLAND_DISPLAY + живой сокет), иначе X11 (в т.ч. XWayland).
 // HEADLESS_GUI_X11=1 — принудительный X11.
 func NewNativeWindow() native.NativeWindow {
 	if os.Getenv("HEADLESS_GUI_X11") != "1" {
-		if ww := newWaylandWindow(); ww != nil {
+		if ww := wayland.NewWindow(); ww != nil {
 			return ww
 		}
 	}

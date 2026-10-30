@@ -1,0 +1,563 @@
+//go:build linux && !android
+
+package wayland
+
+// wayland_clipboard_linux.go — буфер обмена через wl_data_device.
+//
+// Раньше буфер на Linux работал только через xclip/xsel: подпроцесс, X-сервер
+// и внешняя утилита, которой в пакете может не быть вовсе. В сессии WinLine
+// это не работает совсем — там Wayland без X-сервера, а пакет ставится без
+// зависимостей, так что ни xclip, ни wl-copy взять неоткуда. При этом буфер
+// сессии связан с RDP-клиентом, и wl_data_device — единственный путь обмена
+// текстом с машиной пользователя.
+//
+// Копирование: создаём wl_data_source, объявляем ему типы и отдаём
+// компоновщику как selection. Дальше он сам просит у нас данные (событие
+// send с file descriptor), и так — каждому, кто вставляет.
+//
+// Оформленный текст (SetHTML) объявляется тем же источником дополнительным
+// типом text/html: получатель выбирает сам, и Блокнот возьмёт простой текст, а
+// Word или браузерный редактор — HTML. Отдельного «режима» нет: событие send
+// называет тип, который запросили, и мы отвечаем именно им.
+//
+// Список файлов (SetFiles) — тот же источник с типами text/uri-list и
+// x-special/gnome-copied-files рядом с текстом путей. При вставке файлов
+// чтение ждёт долго: на удалённом рабочем столе файлы, скопированные у
+// клиента, скачиваются в момент вставки, и канал отдаёт данные, когда
+// скачивание закончено.
+//
+// Виртуальные файлы (SetVirtualFiles) — те же типы списка файлов, но пути берутся
+// у приложения в момент запроса (platform/native/clipboard_virtual.go): отложенность «по
+// вставке» без своей папки и очистки.
+//
+// Вставка: компоновщик присылает selection с готовым wl_data_offer; просим у
+// него данные подходящего типа и читаем из канала. Чужой клиент может
+// отвечать медленно или не ответить вовсе, поэтому чтение идёт с коротким
+// тайм-аутом: буфер обмена не повод подвешивать интерфейс.
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/oops1/headless-gui/v3/internal/clipimage"
+	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/widget/base"
+)
+
+const (
+	// wl_data_device_manager
+	wlDataDevMgrCreateDataSource = 0
+
+	// wl_data_device
+	wlDataDeviceSetSelection = 1
+
+	// wl_data_source requests / events
+	wlDataSourceOffer       = 0
+	wlDataSourceDestroy     = 1
+	wlDataSourceEvTarget    = 0
+	wlDataSourceEvSend      = 1
+	wlDataSourceEvCancelled = 2
+
+	// Типы, которыми объявляется и запрашивается простой текст. Первый —
+	// нынешний стандарт, остальные понимают старые клиенты и тулкиты.
+	mimeTextUTF8  = "text/plain;charset=utf-8"
+	mimeTextPlain = "text/plain"
+	mimeUTF8Str   = "UTF8_STRING"
+	mimeTextStr   = "STRING"
+
+	// clipboardReadTimeout — сколько ждём данные от владельца буфера.
+	// Владелец — чужой процесс, он вправе задуматься или умереть; UI ждать
+	// дольше этого не должен.
+	clipboardReadTimeout = 300 * time.Millisecond
+
+	// clipboardFilesTimeout — сколько ждём список файлов. Не короткий
+	// тайм-аут текста: компоновщик удалённого рабочего стола отдаёт список,
+	// когда файлы скачаны, а это секунды и минуты. Предел всё же есть —
+	// владелец, который не закрыл канал вовсе, не должен держать вызов вечно.
+	clipboardFilesTimeout = 10 * time.Minute
+)
+
+// wlClipboard — буфер обмена одного Wayland-соединения.
+//
+// Хранит и текст, который мы отдали в буфер (его у нас могут запросить в
+// любой момент, пока мы владелец), и последний offer, присланный
+// компоновщиком.
+type wlClipboard struct {
+	w *WaylandWindow
+
+	mu    sync.Mutex
+	owned string // текст, которым мы владеем; пусто — владеет кто-то другой
+	// ownedHTML — оформленная версия нашего содержимого; пусто — только текст.
+	ownedHTML string
+	// ownedFiles — наш список файлов; nil — мы отдали не файлы.
+	ownedFiles []string
+	ownedCut   bool
+	source     uint32 // наш wl_data_source, 0 — нет
+	offer      uint32 // последний selection-offer компоновщика
+	// offerText — типы, которые объявил этот offer: текст мы берём только
+	// если он среди них.
+	offerText bool
+	// offerHTML — тип HTML из объявленных этим offer'ом; пусто — HTML нет.
+	// Храним сам тип, а не флаг: запрашивать надо в точности тот, что
+	// предложен (text/html или вариант с кодировкой).
+	offerHTML string
+	// offerURIList / offerGnome — offer предлагает список файлов этими типами.
+	offerURIList, offerGnome bool
+	// ownedImg — изображение, которым мы владеем; nil — отдаём не картинку.
+	ownedImg *native.OwnedImage
+	// ownedVirt — обещанные виртуальные файлы; nil — не отдаём.
+	ownedVirt *native.ClipVirtual
+	// offerImage — читаемый тип изображения из объявленных offer'ом
+	// (image/png, а при его отсутствии image/bmp); пусто — картинки нет.
+	offerImage string
+}
+
+// newWlClipboard создаёт буфер обмена для окна.
+func newWlClipboard(w *WaylandWindow) *wlClipboard { return &wlClipboard{w: w} }
+
+// SetText отдаёт текст в системный буфер обмена.
+//
+// Реализует base.ClipboardProvider: окно регистрирует этот буфер глобально,
+// когда Wayland-соединение поднялось.
+func (c *wlClipboard) SetText(s string) { c.setSelection(s, "", nil, false, nil, nil) }
+
+// SetHTML отдаёт в буфер оформленный текст вместе с простым: рядом с текстовыми
+// типами объявляется text/html.
+//
+// Реализует base.ClipboardHTMLProvider.
+func (c *wlClipboard) SetHTML(html, plain string) { c.setSelection(plain, html, nil, false, nil, nil) }
+
+// SetFiles отдаёт в буфер список файлов: text/uri-list и
+// x-special/gnome-copied-files рядом с путями простым текстом.
+//
+// Реализует base.ClipboardFilesProvider.
+func (c *wlClipboard) SetFiles(paths []string, cut bool) {
+	c.setSelection(native.FilesPlainText(paths), "", append([]string(nil), paths...), cut, nil, nil)
+}
+
+var _ base.ClipboardVirtualFilesProvider = (*wlClipboard)(nil)
+
+// SetVirtualFiles отдаёт в буфер обещанные файлы: типы списка файлов объявлены,
+// а пути приложение даёт (opts.Materialize), когда их запросят.
+//
+// Реализует base.ClipboardVirtualFilesProvider. Без Materialize файлов не
+// предложить — отказ, и буфер не меняется.
+func (c *wlClipboard) SetVirtualFiles(files []base.VirtualFile, open func(int) (io.ReadCloser, error), opts base.VirtualFilesOptions) error {
+	if c == nil || c.w == nil || c.w.dataDeviceID == 0 || c.w.dataDevMgrID == 0 {
+		return base.ErrClipboardVirtualUnsupported
+	}
+	v, err := native.NewClipVirtual(files, open, opts)
+	if err != nil {
+		return err
+	}
+	if c.w.inputSerial.Load() == 0 {
+		// Компоновщик принимает set_selection только с serial'ом недавнего ввода.
+		return fmt.Errorf("window: нет serial'а ввода для set_selection: %w", base.ErrClipboardVirtualUnsupported)
+	}
+	c.setSelection(v.Names(), "", nil, false, nil, v)
+	return nil
+}
+
+// GetVirtualFiles возвращает обещанные нами файлы, пока мы владеем буфером.
+func (c *wlClipboard) GetVirtualFiles() ([]base.VirtualFile, bool) {
+	if c == nil {
+		return nil, false
+	}
+	c.mu.Lock()
+	v, src := c.ownedVirt, c.source
+	c.mu.Unlock()
+	if v == nil || src == 0 {
+		return nil, false
+	}
+	return append([]base.VirtualFile(nil), v.Files...), true
+}
+
+// OpenVirtualFile открывает содержимое нашего обещанного файла (open приложения).
+func (c *wlClipboard) OpenVirtualFile(index int) (io.ReadCloser, error) {
+	if c == nil {
+		return nil, base.ErrVirtualFileNotFound
+	}
+	c.mu.Lock()
+	v := c.ownedVirt
+	c.mu.Unlock()
+	return v.OpenFile(index)
+}
+
+// Cleanup снимает обещание виртуальных файлов, если оно ещё в буфере: источник
+// уничтожается (компоновщик забывает selection), приложению сообщается через
+// WithRelease. Чужой selection и наши текст и файлы не трогает.
+func (c *wlClipboard) Cleanup() {
+	if c == nil || c.w == nil {
+		return
+	}
+	c.mu.Lock()
+	v, src := c.ownedVirt, c.source
+	if v != nil {
+		c.source, c.owned, c.ownedHTML = 0, "", ""
+		c.ownedFiles, c.ownedCut, c.ownedImg, c.ownedVirt = nil, false, nil, nil
+	}
+	c.mu.Unlock()
+	if v == nil {
+		return
+	}
+	if src != 0 {
+		c.w.send(newWlMsg(src, wlDataSourceDestroy), -1)
+	}
+	v.Drop()
+}
+
+// setSelection объявляет источник: простой текст всегда, text/html — если есть
+// оформленная версия, типы списка файлов — если отдаём файлы, image/png — если
+// отдаём картинку (тогда текста нет вовсе: вставка в редактор пустой строки
+// вместо отказа сбивала бы с толку).
+func (c *wlClipboard) setSelection(s, html string, files []string, cut bool, img *native.OwnedImage, virt *native.ClipVirtual) {
+	if c == nil || c.w == nil {
+		return
+	}
+	w := c.w
+	if w.dataDeviceID == 0 || w.dataDevMgrID == 0 {
+		return // компоновщик не дал wl_data_device — обмениваться нечем
+	}
+	serial := w.inputSerial.Load()
+	if serial == 0 {
+		// Компоновщик принимает set_selection только с serial'ом недавнего
+		// ввода: без него он молча откажет, и буфер остался бы чужим.
+		return
+	}
+
+	c.mu.Lock()
+	old := c.source
+	id := w.newID()
+	c.source, c.owned, c.ownedHTML = id, s, html
+	c.ownedFiles, c.ownedCut, c.ownedImg = files, cut, img
+	oldVirt := c.ownedVirt
+	c.ownedVirt = virt
+	c.mu.Unlock()
+	oldVirt.Drop()
+
+	if old != 0 {
+		w.send(newWlMsg(old, wlDataSourceDestroy), -1)
+	}
+	w.send(newWlMsg(w.dataDevMgrID, wlDataDevMgrCreateDataSource).putUint(id), -1)
+	mimes := []string{mimeTextUTF8, mimeTextPlain, mimeUTF8Str, mimeTextStr}
+	if html != "" {
+		mimes = append(mimes, native.MimeTextHTML)
+	}
+	if len(files) > 0 || virt != nil {
+		// Файлы — первыми: получатель, который перебирает типы по порядку,
+		// должен увидеть их раньше текста.
+		mimes = append([]string{native.MimeTextURIList, native.MimeGnomeCopiedFiles}, mimes...)
+	}
+	if img != nil {
+		mimes = []string{clipimage.MimePNG}
+	}
+	for _, mime := range mimes {
+		w.send(newWlMsg(id, wlDataSourceOffer).putString(mime), -1)
+	}
+	w.send(newWlMsg(w.dataDeviceID, wlDataDeviceSetSelection).putUint(id).putUint(serial), -1)
+}
+
+// GetText читает текст из системного буфера обмена.
+func (c *wlClipboard) GetText() string {
+	if c == nil || c.w == nil {
+		return ""
+	}
+	c.mu.Lock()
+	owned, offer, hasText := c.owned, c.offer, c.offerText
+	src, ownImg := c.source, c.ownedImg != nil
+	c.mu.Unlock()
+
+	if src != 0 && ownImg {
+		return "" // в буфере наша картинка, текста нет
+	}
+
+	// Владеем сами — отвечаем из своей копии, не гоняя данные через
+	// компоновщика и собственный канал.
+	if src != 0 && owned != "" {
+		return owned
+	}
+	if offer == 0 || !hasText {
+		return ""
+	}
+	return string(c.receive(offer, mimeTextUTF8))
+}
+
+// GetHTML читает оформленный текст из системного буфера обмена.
+//
+// Реализует base.ClipboardHTMLProvider. Берёт text/html, только если
+// владелец его объявил: иначе ok == false, и вызывающий возьмёт простой текст
+// через GetText.
+func (c *wlClipboard) GetHTML() (string, bool) {
+	if c == nil || c.w == nil {
+		return "", false
+	}
+	c.mu.Lock()
+	html, offer, mime := c.ownedHTML, c.offer, c.offerHTML
+	src, ownImg := c.source, c.ownedImg != nil
+	c.mu.Unlock()
+
+	if src != 0 && ownImg {
+		return "", false
+	}
+
+	// Владеем сами — отвечаем из своей копии.
+	if src != 0 && html != "" {
+		return html, true
+	}
+	if offer == 0 || mime == "" {
+		return "", false
+	}
+	data := c.receive(offer, mime)
+	if len(data) == 0 {
+		return "", false
+	}
+	html = native.ClipboardHTMLToString(data)
+	return html, html != ""
+}
+
+// GetFiles читает список файлов из системного буфера обмена.
+//
+// Реализует base.ClipboardFilesProvider. x-special/gnome-copied-files
+// спрашивается первым, когда предложен: только он говорит, вырезали ли файлы,
+// а список в нём тот же. Иначе — text/uri-list. Ждёт долго (см.
+// clipboardFilesTimeout): звать не на горутине движка.
+func (c *wlClipboard) GetFiles() ([]string, bool, bool) {
+	if c == nil || c.w == nil {
+		return nil, false, false
+	}
+	c.mu.Lock()
+	files, cut := c.ownedFiles, c.ownedCut
+	offer, uri, gnome := c.offer, c.offerURIList, c.offerGnome
+	src, ownImg := c.source, c.ownedImg != nil
+	virt := c.ownedVirt
+	c.mu.Unlock()
+
+	if src != 0 && ownImg {
+		return nil, false, false
+	}
+	if src != 0 && len(files) > 0 {
+		return append([]string(nil), files...), cut, true
+	}
+	if src != 0 && virt != nil {
+		// Вставка внутри программы: те же пути, что получил бы чужой вставляющий.
+		paths, err := virt.Paths()
+		return paths, false, err == nil && len(paths) > 0
+	}
+	if offer == 0 {
+		return nil, false, false
+	}
+	if gnome {
+		data := c.receiveTimeout(offer, native.MimeGnomeCopiedFiles, clipboardFilesTimeout)
+		if p, cut, ok := native.ParseGnomeCopiedFiles(string(data)); ok {
+			return p, cut, true
+		}
+	}
+	if uri {
+		data := c.receiveTimeout(offer, native.MimeTextURIList, clipboardFilesTimeout)
+		if p, ok := native.ParseClipboardURIList(string(data)); ok {
+			return p, false, true
+		}
+	}
+	return nil, false, false
+}
+
+// receive просит у владельца данные указанного типа и читает их с коротким
+// тайм-аутом.
+func (c *wlClipboard) receive(offer uint32, mime string) []byte {
+	return c.receiveTimeout(offer, mime, clipboardReadTimeout)
+}
+
+// receiveTimeout — receive с заданным сроком ожидания.
+func (c *wlClipboard) receiveTimeout(offer uint32, mime string, timeout time.Duration) []byte {
+	r, wr, err := os.Pipe()
+	if err != nil {
+		return nil
+	}
+	// receive(mime, fd): владелец пишет в наш write-конец, мы читаем read-конец.
+	c.w.send(newWlMsg(offer, wlDataOfferReceive).putString(mime), int(wr.Fd()))
+	wr.Close() // свой конец закрываем сразу: иначе EOF не придёт никогда
+
+	done := make(chan []byte, 1)
+	go func() {
+		defer r.Close()
+		data, _ := io.ReadAll(io.LimitReader(r, native.MaxClipboardBytes))
+		done <- data
+	}()
+	select {
+	case data := <-done:
+		return data
+	case <-time.After(timeout):
+		// Владелец не ответил. Канал дочитает горутина, и файл закроется
+		// там же; подвешивать на это интерфейс незачем.
+		r.SetReadDeadline(time.Now())
+		return nil
+	}
+}
+
+// receiveIdle просит у владельца данные указанного типа и читает их, пока они
+// идут: срок idle отсчитывается заново после каждого прочитанного куска, а не
+// на весь ответ целиком. Изображение — единицы мегабайт, и владелец отдаёт их
+// кусками; общий короткий срок обрубил бы честного, но не мгновенного
+// владельца, а срок на кусок всё так же не даёт зависшему подвесить вызов
+// дольше 300 мс. limit ограничивает размер: превысивший — отказ, а не
+// обрезанные данные (обрезанный PNG всё равно не разберётся).
+func (c *wlClipboard) receiveIdle(offer uint32, mime string, idle time.Duration, limit int) []byte {
+	r, wr, err := os.Pipe()
+	if err != nil {
+		return nil
+	}
+	defer r.Close()
+	c.w.send(newWlMsg(offer, wlDataOfferReceive).putString(mime), int(wr.Fd()))
+	wr.Close() // свой конец закрываем сразу: иначе EOF не придёт никогда
+
+	var data []byte
+	chunk := make([]byte, 64<<10)
+	for {
+		r.SetReadDeadline(time.Now().Add(idle))
+		n, err := r.Read(chunk)
+		data = append(data, chunk[:n]...)
+		if len(data) > limit {
+			return nil
+		}
+		if err != nil {
+			if err == io.EOF {
+				return data
+			}
+			return nil // срок вышел или канал оборвался: неполной картинке верить нельзя
+		}
+	}
+}
+
+// handleSelection запоминает offer, присланный компоновщиком как содержимое
+// буфера обмена. id == 0 означает «буфер пуст».
+func (c *wlClipboard) handleSelection(id uint32) {
+	var dropVirt *native.ClipVirtual
+	c.mu.Lock()
+	old := c.offer
+	c.offer, c.offerText, c.offerHTML = id, false, ""
+	c.offerURIList, c.offerGnome, c.offerImage = false, false, ""
+	if id != 0 {
+		// Типы этого offer пришли раньше, событиями offer: берём их из
+		// общего списка предложений окна.
+		c.offerText = c.w.offerHasText(id)
+		c.offerHTML = c.w.offerHTMLMime(id)
+		c.offerURIList = c.w.offerGet(id)
+		c.offerGnome = c.w.offerHasGnomeFiles(id)
+		c.offerImage = c.w.offerImageMime(id)
+		// Чужой selection означает, что владелец теперь не мы.
+		if c.source != 0 {
+			c.owned, c.ownedHTML = "", ""
+			c.ownedFiles, c.ownedCut, c.ownedImg = nil, false, nil
+			dropVirt, c.ownedVirt = c.ownedVirt, nil
+		}
+	}
+	c.mu.Unlock()
+	dropVirt.Drop()
+
+	if old != 0 && old != id {
+		c.w.send(newWlMsg(old, wlDataOfferDestroy), -1)
+		c.w.offerDelete(old)
+	}
+}
+
+// handleSourceSend отдаёт владеющее содержимое запросившему: компоновщик
+// передал нам file descriptor, в который нужно записать данные, и назвал тип,
+// который запросили. На text/html отвечаем разметкой, на остальное — текстом:
+// если бы отвечали всегда текстом, Word получил бы простую строку под видом
+// HTML и вставил её без оформления.
+func (c *wlClipboard) handleSourceSend(source uint32, mime string, fd int) {
+	c.mu.Lock()
+	ours, text := c.source == source, c.owned
+	img := c.ownedImg
+	var virt *native.ClipVirtual
+	switch {
+	case c.ownedVirt != nil && (mime == native.MimeTextURIList || mime == native.MimeGnomeCopiedFiles):
+		virt = c.ownedVirt
+	case native.IsHTMLMime(mime) && c.ownedHTML != "":
+		text = c.ownedHTML
+	case mime == native.MimeTextURIList && len(c.ownedFiles) > 0:
+		text = native.BuildURIList(c.ownedFiles)
+	case mime == native.MimeGnomeCopiedFiles && len(c.ownedFiles) > 0:
+		text = native.BuildGnomeCopiedFiles(c.ownedFiles, c.ownedCut)
+	}
+	c.mu.Unlock()
+	if fd < 0 {
+		return
+	}
+	f := os.NewFile(uintptr(fd), "wl-clipboard-send")
+	if !ours {
+		f.Close()
+		return
+	}
+	if img != nil {
+		// Картинка: PNG кодируется здесь, в первый раз за всё владение, и
+		// именно в горутине — на крупном снимке это десятки миллисекунд, а
+		// цикл событий занят кадрами и вводом. На любой другой тип (текст,
+		// HTML) картинка отвечает пустотой: данных такого вида у нас нет.
+		go func() {
+			defer f.Close()
+			if !clipimage.IsPNGMime(mime) {
+				return
+			}
+			if data, err := img.PNG(); err == nil {
+				f.Write(data)
+			}
+		}()
+		return
+	}
+	if virt != nil {
+		// Пути даёт приложение, и это может длиться долго (скачивание): в
+		// горутине, не в цикле событий. Отказ или ошибка — пустой ответ.
+		go func() {
+			defer f.Close()
+			paths, err := virt.Paths()
+			if err != nil || len(paths) == 0 {
+				return
+			}
+			if mime == native.MimeGnomeCopiedFiles {
+				io.WriteString(f, native.BuildGnomeCopiedFiles(paths, false))
+			} else {
+				io.WriteString(f, native.BuildURIList(paths))
+			}
+		}()
+		return
+	}
+	// Пишем в своей горутине: получатель читает не торопясь, а канал имеет
+	// размер буфера — запись блокируется, и цикл событий встал бы вместе с
+	// ней.
+	go func() {
+		defer f.Close()
+		io.Copy(f, strings.NewReader(text))
+	}()
+}
+
+// handleSourceCancelled — наш источник заменён чужим: буфером владеет другой.
+func (c *wlClipboard) handleSourceCancelled(source uint32) {
+	c.mu.Lock()
+	ours := c.source == source
+	var virt *native.ClipVirtual
+	if ours {
+		c.source, c.owned, c.ownedHTML = 0, "", ""
+		c.ownedFiles, c.ownedCut, c.ownedImg = nil, false, nil
+		virt, c.ownedVirt = c.ownedVirt, nil
+	}
+	c.mu.Unlock()
+	if ours {
+		c.w.send(newWlMsg(source, wlDataSourceDestroy), -1)
+		virt.Drop()
+	}
+}
+
+// isSource сообщает, наш ли это wl_data_source (для разбора событий).
+func (c *wlClipboard) isSource(id uint32) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return id != 0 && c.source == id
+}

@@ -10,7 +10,7 @@ import (
 func TestXkb_ParseRealWSLgKeymap(t *testing.T) {
 	data, err := os.ReadFile("testdata/wslg_keymap.txt")
 	if err != nil {
-		t.Skipf("нет testdata/wslg_keymap.txt: %v", err)
+		t.Fatalf("нет testdata/wslg_keymap.txt (данные лежат в репозитории рядом с тестом): %v", err)
 	}
 	km := ParseXkbKeymap(strings.TrimRight(string(data), "\x00"))
 	if km == nil {

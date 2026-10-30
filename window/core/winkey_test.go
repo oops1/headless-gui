@@ -46,7 +46,7 @@ func TestX11KeycodeToVK_WinKeys(t *testing.T) {
 func TestXkbKeymap_RealWSLgSuper(t *testing.T) {
 	data, err := os.ReadFile("testdata/wslg_keymap.txt")
 	if err != nil {
-		t.Skipf("нет testdata/wslg_keymap.txt: %v", err)
+		t.Fatalf("нет testdata/wslg_keymap.txt (данные лежат в репозитории рядом с тестом): %v", err)
 	}
 	km := keyboard.ParseXkbKeymap(strings.TrimRight(string(data), "\x00"))
 	if km == nil {

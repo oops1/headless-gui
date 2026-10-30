@@ -35,7 +35,7 @@ package core
 // по клавише-переключателю) и X11 (XkbLatchLockState). На Wayland в основном
 // протоколе клиент состояние клавиатуры менять не вправе; v3.44.1 делает это
 // виртуальной клавиатурой zwp_virtual_keyboard_v1, если композитор её предлагает
-// (wayland_lockkeys_set_linux.go), иначе там false.
+// (platform/wayland/wayland_lockkeys_set_linux.go), иначе там false.
 
 import (
 	"time"

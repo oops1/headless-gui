@@ -9,7 +9,7 @@ import (
 
 // Window.SetSize (setsize.go): общий слой над бэкендом. Платформенные
 // особенности — в platform/x11/x11_setsize_linux_test.go,
-// wayland_setsize_apply_linux_test.go и setsize_windows_test.go.
+// platform/wayland/wayland_setsize_apply_linux_test.go и setsize_windows_test.go.
 
 // szFake — подставной бэкенд: записывает SetSize и отвечает фактическим
 // размером. echo — как Win32 (WM_SIZE сразу после MoveWindow): бэкенд тут же

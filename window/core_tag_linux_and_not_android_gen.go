@@ -18,12 +18,10 @@ import (
 // Общается с X-сервером напрямую через Unix socket.
 type X11Window = core.X11Window
 
+// WaylandWindow — реализация NativeWindow поверх Wayland (xdg-shell + wl_shm).
+type WaylandWindow = core.WaylandWindow
+
 // NewNativeWindow выбирает бэкенд: Wayland при доступном композиторе
 // (WAYLAND_DISPLAY + живой сокет), иначе X11 (в т.ч. XWayland).
 // HEADLESS_GUI_X11=1 — принудительный X11.
 func NewNativeWindow() native.NativeWindow { return core.NewNativeWindow() }
-
-// ── native_wayland.go ──
-
-// WaylandWindow — реализация NativeWindow поверх Wayland (xdg-shell + wl_shm).
-type WaylandWindow = core.WaylandWindow

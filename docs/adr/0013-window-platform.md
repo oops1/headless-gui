@@ -386,6 +386,35 @@ Linux есть).
 - Тесты Linux прогоняются в WSL (WSLg — живые X11-тесты тоже): тестовые
   бинари собираются с `GOOS=linux` и запускаются в каталогах пакетов.
 
+**9.4.** Бэкенд Wayland — пакет `platform/wayland`:
+
+- Окно и всё на его внутренностях; общие Linux-тесты ядра, которые после
+  9.3 остались только про Wayland (`clipboard_*_linux_test.go`,
+  `rawkey_linux_test.go` и другие), переехали целиком.
+- Ядру нужны только конструктор и мониторы: `wayland.NewWindow` (выбор
+  бэкенда в `backend_linux.go`) и `wayland.EnumMonitors` (мониторы без
+  окна); опрос мониторов окна остаётся неэкспортированным. В ядре —
+  псевдоним `WaylandWindow = wayland.WaylandWindow`.
+- `SolidBands`, `OpaqueBands` бэкенд берёт из `core/raster`, а не из
+  `engine`: `platform/wayland` не тянет ни `engine`, ни `widget`.
+- Тесты lock-клавиш Wayland проверяют бэкенд, а не окно ядра:
+  `Window.SetLockKeys` и `Window.LockKeys` — маска и вызов бэкенда, логику
+  «активация вместе с состоянием» ядро проверяет фейком
+  (`TestLockKeys_ActivateLocks*`, в том числе срок ожидания); тесты Wayland —
+  что окно сообщает активность (`SetOnActivate`) и первое состояние фокуса
+  (`LockKeysSettled`, `SetOnLockKeysSettled`) при любом порядке
+  configure(activated), enter и modifiers.
+- W9 исправлен ещё в v3.43.3 по отчёту на v3.43.2 (`floatingSize`: плавающее
+  окно с запретом ресайза держит размер фиксации `pinSize`, что бы ни назвал
+  configure; развёрнутому, полноэкранному и прилепленному размер назначает
+  компоновщик). Добавлен тест на
+  поддельном композиторе уровня протокола
+  (`TestWayland_ConfigureSize_FixedWindowAnswersWithOwnSize`): на устаревший
+  configure окно отвечает `ack_configure` тем же serial, пределов не
+  переотправляет, нового буфера не заводит, прикрепляет и коммитит уже
+  заведённый кадр своего размера;
+  при снятой проверке тест падает.
+
 ## Последствия
 
 - Открытый API `window` сохраняется целиком; новый открытый API —
