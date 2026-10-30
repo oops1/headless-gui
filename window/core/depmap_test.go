@@ -1,23 +1,22 @@
 package core
 
-// depmap_test.go — карта зависимостей пакета по будущим пакетам бэкендов
-// (ADR-0013, этап 9). Группы — по именам файлов: бэкенды Win32, X11,
-// Wayland, Cocoa (с файлами, которые по смыслу их, хотя названы иначе — до
-// 9.3 и 9.4 такими были activate_*_linux.go, initial_*_linux.go, icon_linux.go);
-// возможности под ОС (доступность, трей, DnD, оболочка — feature: их
-// отделяет 9.8); остальное — ядро (обвязка окна).
+// depmap_test.go — карта зависимостей пакета по бэкендам окна (ADR-0013,
+// этап 9) и сторож того, что бэкендов в ядре больше нет.
 //
-// Win32 с 9.2 — свой пакет platform/win32 (здесь только прослойка ядра
-// backend_windows.go: возможности ОС теми же именами, что на других
-// платформах, — это ядро, как и выбор бэкенда backend_linux.go), X11 с 9.3 —
-// platform/x11, Wayland с 9.4 — platform/wayland.
+// С 9.5 все бэкенды — свои пакеты (platform/win32, x11, wayland, cocoa). Файлы
+// ядра под конкретную ОС — либо прослойки (backend_*.go: выбор бэкенда,
+// возможности ОС теми же именами на всех платформах, псевдонимы открытых имён
+// фасада; monitor_*.go: мониторы без окна), либо возможности (feature:
+// доступность и оболочка, их отделяет 9.8). Любой другой файл под ОС и любой
+// файл с именем бэкенда (x11*, wayland*, native_<ОС>) попадает в группу
+// backend, и она обязана быть пустой: бэкенд с 9.2b к ядру не обращается, так
+// что вернувшийся файл бэкенда рёбер бы не дал — ловит его именно пустота
+// группы.
 //
-// Правило (с 9.2b): бэкенд не зависит ни от ядра, ни от другого бэкенда —
-// общее у них в platform/native, platform/keyboard, platform/pointer,
-// platform/dbus. Ядро и возможности зависят от кого угодно. Сегодняшние
-// нарушения — в базе, своей под каждую ОС (файлы берутся по тегам сборки):
-// проверка падает на новом ребре и сообщает, когда базовое исчезло. Каждый
-// шаг этапа 9 убирает свои строки.
+// Правило рёбер (с 9.2b): бэкенд не зависит ни от ядра, ни от другого
+// бэкенда — общее у них в platform/native, keyboard, pointer, dbus, tray.
+// База нарушений своя под каждую ОС (файлы берутся по тегам сборки); с 9.3
+// она пуста везде.
 //
 // ОС берётся из go/build (переменная GOOS), а не из runtime.GOOS: собранный
 // под Windows тест проверяет и карту Linux —
@@ -39,22 +38,22 @@ func TestDepMap_BackendOrder(t *testing.T) {
 		"linux":   {},
 		"darwin":  {},
 	}
-	depmap.Run(t, depmap.Config{
+	rep := depmap.Run(t, depmap.Config{
 		Dir:  ".",
 		Path: "window/core",
 		Groups: []depmap.Group{
-			{Name: "other", Match: re(`^backend_`)},
+			{Name: "other", Match: re(`^(backend|monitor)_`)},
 			{Name: "feature", Match: re(`^(a11y|tray|dnd|openurl|systheme|syslang|notify)\w*_(windows|linux|darwin)\.go$`)},
-			{Name: "win32", Match: re(`_windows\.go$`)},
-			{Name: "x11", Match: re(`^(x11|native_linux)|_x11_linux\.go$|^icon_linux\.go$`)},
-			{Name: "wayland", Match: re(`^(wayland|native_wayland)|_wayland_linux\.go$`)},
-			{Name: "cocoa", Match: re(`_darwin\.go$`)},
+			{Name: "backend", Match: re(`_(windows|linux|darwin)\.go$|^(x11|wayland|win32|cocoa)|^native_(windows|linux|wayland|darwin)`)},
 		},
 		Default: "other",
 		Allowed: func(from, to string) bool {
-			return from == "other" || from == "feature"
+			return from != "backend"
 		},
 		Baseline: baseline[build.Default.GOOS],
 		Top:      12,
 	})
+	if fs := rep.Files["backend"]; len(fs) > 0 {
+		t.Errorf("файлы бэкенда в ядре (место им — platform/*): %v", fs)
+	}
 }

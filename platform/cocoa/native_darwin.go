@@ -1,6 +1,6 @@
 //go:build darwin
 
-package core
+package cocoa
 
 /*
 macOS backend через purego — вызов Cocoa/AppKit API без CGO.
@@ -278,10 +278,6 @@ func goString(ptr uintptr) string {
 		ptr++
 	}
 	return string(buf)
-}
-
-func NewNativeWindow() native.NativeWindow {
-	return &CocoaWindow{}
 }
 
 func (w *CocoaWindow) Create(title string, width, height int) error {

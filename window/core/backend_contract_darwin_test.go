@@ -2,6 +2,8 @@
 
 package core
 
+import "github.com/oops1/headless-gui/v3/platform/cocoa"
+
 // backend_contract_darwin_test.go — бэкенд Cocoa удовлетворяет
 // интерфейсам-возможностям ядра.
 //
@@ -12,7 +14,7 @@ package core
 // возможность, здесь не соберётся. Новая возможность бэкенда — новая строка.
 
 var (
-	_ dirtyRectBlitter  = (*CocoaWindow)(nil)
-	_ fullscreenBackend = (*CocoaWindow)(nil)
-	_ rawKeySource      = (*CocoaWindow)(nil)
+	_ dirtyRectBlitter  = (*cocoa.CocoaWindow)(nil)
+	_ fullscreenBackend = (*cocoa.CocoaWindow)(nil)
+	_ rawKeySource      = (*cocoa.CocoaWindow)(nil)
 )
