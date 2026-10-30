@@ -115,6 +115,26 @@ func TestWayland_Fullscreen_RefusedByCompositor(t *testing.T) {
 	}
 }
 
+// Configure, сменивший только активность окна, — не отказ: компоновщик
+// (WSLg) присылает его раньше ответа на set_fullscreen. Уведомление одно — по
+// configure с fullscreen.
+func TestWayland_Fullscreen_ActivationConfigureIsNotRefusal(t *testing.T) {
+	c := newWlTestWindow(t)
+	var rec fsRecorder
+	c.w.SetOnFullscreenChanged(rec.fn)
+	c.w.handleEvent(c.w.toplevelID, xdgToplevelEvConfigure, wlConfigure(0, 0)) // показ, не активно
+
+	c.w.SetFullscreen(true)
+	c.w.handleEvent(c.w.toplevelID, xdgToplevelEvConfigure, wlConfigure(0, 0, xdgStateActivated))
+	if len(rec.got) != 0 || c.w.IsFullscreen() {
+		t.Fatalf("смена фокуса принята за ответ: уведомления %v, полный экран %v", rec.got, c.w.IsFullscreen())
+	}
+	c.w.handleEvent(c.w.toplevelID, xdgToplevelEvConfigure, wlConfigure(1920, 1080, xdgStateFullscreen, xdgStateActivated))
+	if !c.w.IsFullscreen() || len(rec.got) != 1 || !rec.got[0] {
+		t.Errorf("ответ: полный экран %v, уведомления %v, ждал [true]", c.w.IsFullscreen(), rec.got)
+	}
+}
+
 // Выход: unset_fullscreen на провод, уведомление по ответу компоновщика.
 func TestWayland_Fullscreen_Leave(t *testing.T) {
 	c := newWlTestWindow(t)

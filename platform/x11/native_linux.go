@@ -1804,7 +1804,13 @@ func (w *X11Window) eventPumpLoop() {
 	// этот насос.
 	w.curImg.looping.Store(true)
 	defer w.curImg.looping.Store(false)
+	// И вопросы о клавишах-переключателях (LockKeys у окна OpenWindow): без
+	// этого насоса им отвечать некому — ждущих при выходе отпускаем.
+	w.lk.looping.Store(true)
+	defer w.lkFailAll()
+	defer w.lk.looping.Store(false)
 	w.x11SyncCursorImage()
+	w.x11SyncLockKeys()
 	for !w.closed.Load() {
 		if !w.readEvent(buf) {
 			return
@@ -1819,6 +1825,7 @@ func (w *X11Window) eventPumpLoop() {
 		w.x11SyncWMState()
 		w.x11SyncKeyGrab()
 		w.x11SyncCursorImage()
+		w.x11SyncLockKeys()
 	}
 }
 

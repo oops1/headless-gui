@@ -398,9 +398,9 @@ type WaylandWindow struct {
 	minWant    bool
 
 	// initial — «развёрнуто» от приложения (window/core/initial.go); читает Create.
-	// normW/normH — обычный размер окна, начавшего жизнь развёрнутым:
-	// компоновщик не знает его вовсе и при «восстановить» присылает 0×0
-	// («решай сам»); окно возвращается к нему, а не остаётся большим.
+	// normW/normH — обычный размер окна, начавшего жизнь развёрнутым или
+	// развёрнутого потом: компоновщик (Weston) при «восстановить» присылает
+	// 0×0 («решай сам»); окно возвращается к нему, а не остаётся большим.
 	initial      native.InitialPlacement
 	normW, normH int
 
@@ -944,7 +944,15 @@ func (w *WaylandWindow) handleEvent(obj uint32, opcode uint16, b []byte) {
 		wlLog("toplevel.configure: %dx%d active=%v maximized=%v fullscreen=%v",
 			nw, nh, active, maximized, fullscreen)
 		tiled := wlParseTiled(b[8:])
-		w.noteToplevelStates(maximized, fullscreen)
+		// Окно разворачивается из обычного состояния: его размер запоминаем.
+		// На «восстановить» часть компоновщиков (Weston) присылает 0×0 — «решай
+		// сам», — и окно иначе осталось бы размером с экран (restoreNormalSize).
+		if maximized && !fullscreen && !w.maximized.Load() && !w.fullscreen.Load() && w.normW == 0 {
+			w.normW, w.normH = w.width, w.height
+		}
+		activeChanged := w.fs.cfgSeen && active != w.fs.cfgActive
+		w.fs.cfgSeen, w.fs.cfgActive = true, active
+		w.noteToplevelStates(maximized, fullscreen, activeChanged)
 		w.tiled.Store(tiled)
 		if w.onActivate != nil {
 			w.onActivate(active)

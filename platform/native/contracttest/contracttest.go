@@ -28,13 +28,26 @@ type Env struct {
 	Pump func(cond func() bool, timeout time.Duration) bool
 	// Destroy уничтожает окно после сценария.
 	Destroy func(nw native.NativeWindow)
+	// Started — окно создано (nil — ничего не нужно): бэкенду со своим
+	// насосом событий на соединение окна (X11, Wayland) — запустить его.
+	Started func(nw native.NativeWindow)
 
 	// MinSizeEnforced — бэкенд держит минимальный размер и при программной
 	// смене размера (SetSize меньше минимума даёт минимум).
 	MinSizeEnforced bool
+	// Requests — Activate, Maximize и SetFullscreen — просьбы оконному
+	// менеджеру или компоновщику (X11, Wayland): ответ асинхронный, и тот
+	// вправе отказать. Окно, состояние которого вовсе не изменилось, —
+	// пропуск, а не ошибка; изменившееся не так — ошибка. Win32 — false:
+	// там true от Activate значит «окно активно».
+	Requests bool
 	// ToggleLockKeys — сценарию можно на миг переключить Scroll Lock (и
 	// вернуть): клавиатура настоящая.
 	ToggleLockKeys bool
+	// LockKeysSetOptional — переключать переключатели бэкенд умеет не везде
+	// (Wayland — только у компоновщика с zwp_virtual_keyboard_manager_v1):
+	// отказ SetLockKeys тогда — «здесь не умею», и сценарий пропускается.
+	LockKeysSetOptional bool
 	// Style — какие поля стиля бэкенд умеет (§4): остальные ApplyStyle
 	// обязан честно отвечать false.
 	Style native.Style
@@ -63,8 +76,22 @@ func created(t *testing.T, env Env, w, h int) native.NativeWindow {
 	if err := nw.Create("contract", w, h); err != nil {
 		t.Skipf("окно не создаётся (нет рабочего стола?): %v", err)
 	}
-	t.Cleanup(func() { env.Destroy(nw) })
+	started(t, env, nw)
 	return nw
+}
+
+// started — окно создано: насос событий и уничтожение после сценария.
+func started(t *testing.T, env Env, nw native.NativeWindow) {
+	if env.Started != nil {
+		env.Started(nw)
+	}
+	t.Cleanup(func() { env.Destroy(nw) })
+}
+
+// bigger — окно сейчас больше w×h по обеим сторонам.
+func bigger(nw native.NativeWindow, w, h int) bool {
+	gw, gh := nw.GetSize()
+	return gw > w && gh > h
 }
 
 // sizeIs — размер окна сейчас w×h.
@@ -91,7 +118,7 @@ func setSizeBeforeCreate(t *testing.T, env Env) {
 	if err := nw.Create("contract", 300, 200); err != nil {
 		t.Skipf("окно не создаётся (нет рабочего стола?): %v", err)
 	}
-	t.Cleanup(func() { env.Destroy(nw) })
+	started(t, env, nw)
 	if !env.Pump(sizeIs(nw, 300, 200), wait) {
 		w, h := nw.GetSize()
 		t.Errorf("Create(300, 200) после SetSize: размер %d×%d", w, h)
@@ -137,14 +164,18 @@ func maximizeRestore(t *testing.T, env Env) {
 	nw := created(t, env, 400, 300)
 	env.Pump(sizeIs(nw, 400, 300), wait)
 	nw.Maximize()
-	if !env.Pump(nw.IsMaximized, wait) {
-		t.Fatal("IsMaximized false после Maximize")
-	}
-	if w, h := nw.GetSize(); w <= 400 || h <= 300 {
-		t.Errorf("развёрнутое окно %d×%d не больше нормального 400×300", w, h)
+	if !env.Pump(func() bool { return nw.IsMaximized() && bigger(nw, 400, 300) }, wait) {
+		if env.Requests && !nw.IsMaximized() && sizeIs(nw, 400, 300)() {
+			t.Skip("оконный менеджер не развернул окно")
+		}
+		w, h := nw.GetSize()
+		t.Fatalf("после Maximize: развёрнуто %v, размер %d×%d — ждал больше нормального 400×300", nw.IsMaximized(), w, h)
 	}
 	nw.Restore()
 	if !env.Pump(func() bool { return !nw.IsMaximized() && sizeIs(nw, 400, 300)() }, wait) {
+		if env.Requests && nw.IsMaximized() {
+			t.Skip("оконный менеджер не восстановил окно")
+		}
 		w, h := nw.GetSize()
 		t.Errorf("после Restore: развёрнуто %v, размер %d×%d, ждал 400×300", nw.IsMaximized(), w, h)
 	}
@@ -168,11 +199,12 @@ func fullscreen(t *testing.T, env Env) {
 	if !fs.SetFullscreen(true) {
 		t.Fatal("SetFullscreen(true) отказал")
 	}
-	if !env.Pump(fs.IsFullscreen, wait) {
-		t.Fatal("IsFullscreen false после входа")
-	}
-	if w, h := nw.GetSize(); w <= 400 || h <= 300 {
-		t.Errorf("полноэкранное окно %d×%d не больше нормального 400×300", w, h)
+	if !env.Pump(func() bool { return fs.IsFullscreen() && bigger(nw, 400, 300) }, wait) {
+		if env.Requests && !fs.IsFullscreen() && sizeIs(nw, 400, 300)() {
+			t.Skip("оконный менеджер не перевёл окно в полный экран")
+		}
+		w, h := nw.GetSize()
+		t.Fatalf("после входа: полный экран %v, размер %d×%d — ждал больше нормального 400×300", fs.IsFullscreen(), w, h)
 	}
 	if nw.IsMaximized() {
 		t.Error("IsMaximized true у полноэкранного окна, не бывшего развёрнутым")
@@ -182,6 +214,9 @@ func fullscreen(t *testing.T, env Env) {
 		t.Fatal("SetFullscreen(false) отказал")
 	}
 	if !env.Pump(func() bool { return !fs.IsFullscreen() && sizeIs(nw, 440, 320)() }, wait) {
+		if env.Requests && fs.IsFullscreen() {
+			t.Skip("оконный менеджер не вернул окно из полного экрана")
+		}
 		w, h := nw.GetSize()
 		t.Errorf("после выхода: полный экран %v, размер %d×%d, ждал заказанный в полном экране 440×320", fs.IsFullscreen(), w, h)
 	}
@@ -209,11 +244,14 @@ func activation(t *testing.T, env Env) {
 	if err := nw.Create("contract", 320, 200); err != nil {
 		t.Skipf("окно не создаётся (нет рабочего стола?): %v", err)
 	}
-	t.Cleanup(func() { env.Destroy(nw) })
+	started(t, env, nw)
 	if !a.Activate() {
 		t.Skip("ОС не дала окну передний план (фоновый процесс)")
 	}
 	if !env.Pump(func() bool { return seen && active }, wait) {
+		if env.Requests {
+			t.Skipf("запрос активации отправлен, но фокус окну не передан (SetOnActivate: вызван %v, активно %v)", seen, active)
+		}
 		t.Errorf("Activate принят, а SetOnActivate: вызван %v, активно %v", seen, active)
 	}
 }
@@ -225,6 +263,10 @@ type lockKeyer interface {
 	SetLockKeys(want keyboard.LockKeys) bool
 }
 
+// lockKeysSettler — состояние переключателей приходит с фокусом окна (X11,
+// Wayland; window/core.lockKeysSettler).
+type lockKeysSettler interface{ LockKeysSettled() bool }
+
 // Переключатели: созданное окно знает их состояние; заказ того же состояния —
 // успех без перемен; Scroll Lock переключается и возвращается.
 func lockKeys(t *testing.T, env Env) {
@@ -233,11 +275,17 @@ func lockKeys(t *testing.T, env Env) {
 	if !ok {
 		t.Skip("бэкенд переключателей не знает")
 	}
+	if s, ok := nw.(lockKeysSettler); ok && !env.Pump(s.LockKeysSettled, wait) {
+		t.Skip("состояние переключателей приходит с фокусом, а фокус окну не передан")
+	}
 	var cur keyboard.LockKeys
 	if !env.Pump(func() bool { var ok bool; cur, ok = lk.LockKeys(); return ok }, wait) {
 		t.Fatal("созданное окно не знает состояния переключателей")
 	}
 	if !lk.SetLockKeys(cur) {
+		if env.LockKeysSetOptional {
+			t.Skipf("состояние известно (%v), а переключать его бэкенд здесь не умеет", cur)
+		}
 		t.Errorf("SetLockKeys(%v) — того же состояния — отказал", cur)
 	}
 	if got, _ := lk.LockKeys(); got != cur {

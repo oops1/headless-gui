@@ -319,18 +319,19 @@ func TestWayland_ConfigureStates(t *testing.T) {
 	}
 
 	// Компоновщик вернул окно в обычное состояние и не навязывает размер
-	// (0×0 — «решай сам»): прежний размер сохраняется.
+	// (0×0 — «решай сам», так отвечает Weston): окно возвращается к размеру,
+	// который был до разворота, а не остаётся размером с экран.
 	body = make([]byte, 12)
 	binary.LittleEndian.PutUint32(body[8:12], 0)
 	c.w.handleEvent(c.w.toplevelID, xdgToplevelEvConfigure, body)
 	if c.w.IsMaximized() {
 		t.Error("окно осталось развёрнутым после configure без состояний")
 	}
-	if len(sizes) != 1 {
-		t.Errorf("onResize позвали на 0×0: %v", sizes)
+	if len(sizes) != 2 || sizes[1] != [2]int{800, 600} {
+		t.Errorf("onResize: %v, ждал возврат к 800×600 до разворота", sizes)
 	}
-	if c.w.width != 1024 || c.w.height != 768 {
-		t.Errorf("размер стал %dx%d, ждал прежние 1024×768", c.w.width, c.w.height)
+	if c.w.width != 800 || c.w.height != 600 {
+		t.Errorf("размер стал %dx%d, ждал прежние 800×600", c.w.width, c.w.height)
 	}
 }
 

@@ -34,6 +34,10 @@ type wlFullscreen struct {
 	// запретом ресайза фиксируется на этом размере при выходе: к тому
 	// времени w.width уже размер экрана.
 	saveW, saveH atomic.Int32
+	// cfgSeen и cfgActive — активность окна в последнем configure (только
+	// цикл событий): configure, сменивший её, — ответ на смену фокуса, а не
+	// на просьбу о полном экране.
+	cfgSeen, cfgActive bool
 }
 
 // SetFullscreen просит компоновщик развернуть окно на весь экран (output не
@@ -165,20 +169,28 @@ func (w *WaylandWindow) restoreFixedSize() {
 //     называть состояние maximized).
 //   - Смена полного экрана → уведомление приложения.
 //   - Configure без fullscreen при запросе в пути → отказ: уведомление false.
-func (w *WaylandWindow) noteToplevelStates(maximized, fullscreen bool) {
+//
+// activeChanged — configure сменил активность окна. Компоновщик присылает
+// такой раньше ответа на set_fullscreen (WSLg: сначала «окно активно», потом
+// fullscreen), и отказом он не считается: просьба ждёт своего configure.
+func (w *WaylandWindow) noteToplevelStates(maximized, fullscreen, activeChanged bool) {
 	if !fullscreen {
 		w.maximized.Store(maximized)
 	}
 	was := w.fullscreen.Swap(fullscreen)
-	pending := w.fs.pending.Swap(false)
 
 	switch {
 	case fullscreen != was:
+		w.fs.pending.Store(false)
 		if !fullscreen {
 			w.restoreFixedSize() // компоновщик вернул окно сам (Esc, клавиша)
 		}
 		w.notifyFullscreen(fullscreen)
-	case !fullscreen && pending:
+	case fullscreen:
+		w.fs.pending.Store(false) // ответ: окно на весь экран (и было)
+	case activeChanged:
+		// Смена фокуса — свой configure; ответ на просьбу ещё впереди.
+	case w.fs.pending.Swap(false):
 		// Отказ: configure ответил размером и состояниями окна как есть.
 		wlLog("set_fullscreen отклонён компоновщиком")
 		w.restoreFixedSize()
