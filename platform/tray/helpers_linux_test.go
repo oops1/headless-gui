@@ -2,7 +2,7 @@
 
 package tray
 
-// helpers_linux_test.go — копия помощника window/core (testbus_linux_test.go):
+// helpers_linux_test.go — копия помощника platform/shell (testbus_linux_test.go):
 // тестовые помощники между пакетами не делятся.
 
 import (

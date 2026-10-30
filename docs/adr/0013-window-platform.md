@@ -98,7 +98,8 @@ platform/cocoa       окно macOS (purego)
 platform/a11y        UIA (Windows), AT-SPI (Linux)        — через точки расширения
 platform/tray        Shell_NotifyIcon и iconic-превью, SNI — через точки расширения
 platform/dnd         OLE, XDND, wl_data_device             — через точки расширения
-platform/shell       openurl, notify, systheme, syslang, портал
+platform/shell       openurl, notify, systheme, syslang,  — через точки расширения
+                     портал
 window/core          Window, surface, очередь ввода и модификаторы, попапы,
                      модальные окна, док, обвязка мониторов, активации, полного
                      экрана, lock-клавиш, захвата, касаний, IME; выбор бэкенда
@@ -112,7 +113,7 @@ window/minimal       тот же фасад без возможностей
 ```
 platform/native ← platform/keyboard, platform/pointer, platform/dbus
 platform/native, keyboard, pointer ← platform/{win32,x11,wayland,cocoa}
-бэкенды, native ← platform/{a11y,tray,dnd}; dbus ← a11y, tray, shell (Linux)
+бэкенды, native ← platform/{a11y,tray,dnd,shell}; dbus ← a11y, tray (Linux), shell
 native, keyboard, pointer, бэкенды ← window/core
 window/core, все возможности ← window
 window/core ← window/minimal
@@ -601,6 +602,61 @@ Linux есть).
   `UiaDisconnectAllProviders` на весь процесс при закрытии любого окна; гонки
   чтения заголовка и масштаба с потоков клиента) перенесены как есть — это
   отдельные задачи.
+- **9.8b, оболочка → `platform/shell`.** Открытие ссылок и файлов
+  (ShellExecute, портал OpenURI и FileManager1 с запасным xdg-open, open),
+  языки ОС (`GetUserPreferredUILanguages` на Windows, переменные среды по
+  gettext), системная тема и акцент (реестр и `WM_SETTINGCHANGE` на Windows,
+  портал настроек и `GTK_THEME` на Linux) перенесены из ядра и из
+  `platform/win32` (`systheme*` бэкенда — целиком) в `platform/shell`.
+  Контракт — `native.Shell` (структура функций, поле nil — ОС этого не
+  умеет) и `RegisterShell`/`ShellServices`. Открытый API прежний и у обоих
+  фасадов один: `OpenURL`, `OpenFile`, `RevealFile`, `ErrOpen*`,
+  `SystemLanguages`, `DetectSystem*`, `SystemAppearance` и подписки окна
+  остаются в ядре тонкими диспетчерами. Проверка входа осталась в ядре и
+  действует перед любой реализацией (политика схем и запрет UNC — граница
+  безопасности, запрет файлов-программ — защита от ошибки приложения): в
+  `window/minimal` плохая ссылка по-прежнему даёт `ErrOpenScheme`,
+  проверенная — `ErrOpenUnsupported`; язык не задан, тема неизвестна,
+  наблюдения нет. Win32: обработчик `WM_SETTINGCHANGE` ставит `init` пакета
+  через `win32.AddMessageHook` и всегда отвечает `handled=false` (мониторы
+  бэкенда по `SPI_SETWORKAREA` и `DefWindowProc` работают как прежде);
+  подписки — в пакете, по окну (`*win32.Win32Window`), а не по `hwnd`: их
+  просят и до `Create`. Новая точка расширения бэкенда — `win32.WindowOf(hwnd)`
+  (та же маршрутизация, что у оконной процедуры: дескриптор, а до него —
+  создаваемое окно). Из бэкенда ушли поля `onSettingChange` и
+  `onAccentChange`, метод `handleSettingChange`, экспортированные
+  `ReadSystemTheme`, `ReadSystemAccent`, `WatchSystemTheme`,
+  `WatchSystemAccent` (пакет ещё не выпускался) и точки
+  `testhook.Win32SettingWatched`/`Win32SettingChange`. Исправлено попутно:
+  подписка Windows была одной ячейкой окна, и при двух одновременных
+  подписках (ядро поднимает её из `bringUp` и из `SetOn*` приложения, лишнюю
+  снимает) `stop` лишней стирал нужную — тема и акцент переставали приходить
+  до конца жизни окна; теперь у каждой подписки свой номер, как у хаба
+  портала на Linux. Сквозной тест `TestWindowAppearanceWiredToWin32` заменён
+  тремя: ядро с поддельной оболочкой (окно ОС доходит до обеих подписок,
+  смена — до колбэка, снятие колбэка снимает подписку); тест регистрации в
+  `platform/shell` (набор служб по ОС, и в каждом поле своя реализация —
+  сверка указателей функций), через зарегистрированные службы идут и тесты
+  открытия Windows; живое окно (`SendMessage WM_SETTINGCHANGE` доходит до
+  подписок через обработчик, значения — из реестра, а `SPI_SETWORKAREA` того
+  же сообщения — до мониторов бэкенда: обработчик его не забирает).
+  Регистрация: Windows и Linux — всё; macOS — открытие и языки (тема пока не
+  реализована, см. `platform/shell/register_darwin.go`); прочие ОС и android —
+  только языки. Ядро больше не импортирует `platform/dbus` на Windows и macOS
+  (на Linux его пока приносит трей бэкендов — до 9.8c); база теста слоёв
+  сократилась. Фасад `window` линкует `platform/dbus` на всех ОС через
+  `platform/shell`: разбор ответов портала собирается без тегов и
+  проверяется на любой машине, а к шине обращается только Linux. Горутин при
+  старте оболочка не заводит ни в одном фасаде (сессионная шина — лениво, при
+  первом вызове). Сторож depmap ядра: группа `feature` снята — файлов
+  возможностей под ОС в ядре больше нет, вернувшийся файл с суффиксом ОС
+  попадает в группу `backend` и роняет тест; файл, выбранный только тегом
+  `//go:build`, ловит новый `TestDepMap_NoTaggedOSFiles` (в ядре такие —
+  только прослойки, поимённо). Подписка на тему не переживает окно:
+  `tearDown` и неудачное создание окна ОС её снимают и до следующего
+  `bringUp` новую не допускают, а поднятая в гонке с закрытием снимается
+  сразу — иначе на Windows (карта окон пакета) и на Linux (хаб портала на
+  процесс) обработчик держал бы окно с движком до конца процесса.
 
 ## Последствия
 

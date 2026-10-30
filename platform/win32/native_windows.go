@@ -435,19 +435,13 @@ type Win32Window struct {
 	onBalloonClick func()
 	iconicEnabled  bool // включено iconic-представление окна (DWM превью)
 
-	// onSettingChange — разбор WM_SETTINGCHANGE: зовётся с текстом из lParam
-	// (см. systheme_windows.go). Атомарно: подписку ставит и снимает
-	// горутина приложения, а читает поток цикла сообщений окна.
-	onSettingChange atomic.Pointer[func(area string)]
-	// onAccentChange — то же для акцентного цвета (WatchSystemAccent).
-	onAccentChange atomic.Pointer[func(area string)]
-
 	// kbGrabbed — окно заказало захват клавиатуры (keygrab_windows.go).
 	// Атомарно: читает KeyboardGrabActive с любой горутины.
 	kbGrabbed atomic.Bool
 
 	// onMonitors — подписка на смену мониторов (monitor_change_windows.go).
-	// Атомарно по той же причине, что и onSettingChange.
+	// Атомарно: подписку ставит и снимает горутина приложения, а читает поток
+	// цикла сообщений окна.
 	onMonitors atomic.Pointer[func()]
 
 	// Callbacks
@@ -1599,10 +1593,11 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		break           // → DefWindowProc
 
 	case wmSettingchange:
-		// Сообщение приходит по любому поводу; нужное нам различает строка
-		// в lParam (см. systheme_windows.go). Дальше уходит в DefWindowProc —
-		// как и положено широковещательному сообщению.
-		w.handleSettingChange(lparam)
+		// Сообщение приходит по любому поводу. Смену темы по строке в lParam
+		// разбирает служба оболочки (platform/shell, через AddMessageHook —
+		// раньше этого switch); бэкенду — только рабочая область. Дальше
+		// уходит в DefWindowProc — как и положено широковещательному
+		// сообщению.
 		if monitorsChangedBySetting(wparam) {
 			w.noteMonitorsChanged() // SPI_SETWORKAREA: сдвинули панель задач
 		}

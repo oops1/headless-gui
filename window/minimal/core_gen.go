@@ -65,7 +65,8 @@ var ErrOpenScheme = core.ErrOpenScheme
 // запускается как программа (.exe, .bat, .lnk, .desktop …). Отказ — намеренный.
 var ErrOpenLaunchable = core.ErrOpenLaunchable
 
-// ErrOpenUnsupported — на этой платформе открытие не реализовано.
+// ErrOpenUnsupported — открытие не реализовано на этой платформе или службы
+// оболочки не подключены (window/minimal без platform/shell).
 var ErrOpenUnsupported = core.ErrOpenUnsupported
 
 // OpenURL открывает ссылку приложением, назначенным в системе: браузер для
@@ -84,6 +85,9 @@ var ErrOpenUnsupported = core.ErrOpenUnsupported
 // вызывающего на время обращения к системе (до нескольких секунд при
 // холодном старте портала), поэтому из обработчика кадра его лучше звать в
 // горутине.
+//
+// Без служб оболочки (window/minimal) проверенная ссылка получает
+// ErrOpenUnsupported; проверка схем действует и там.
 func OpenURL(rawURL string) error { return core.OpenURL(rawURL) }
 
 // OpenFile открывает файл приложением, назначенным для его типа.
@@ -93,12 +97,18 @@ func OpenURL(rawURL string) error { return core.OpenURL(rawURL) }
 // системой значит запустить, а путь к такому файлу может прийти из
 // недоверенного документа. Это защита от ошибки приложения, а не граница
 // безопасности: список расширений конечен.
+//
+// Без служб оболочки (window/minimal) проверенный путь получает
+// ErrOpenUnsupported; проверка файлов действует и там.
 func OpenFile(path string) error { return core.OpenFile(path) }
 
 // RevealFile показывает файл в файловом менеджере, выделив его (Проводник,
 // Finder, Nautilus/Dolphin/Thunar …). Если выделение менеджер не умеет —
 // откроется хотя бы папка с файлом. Сам файл не запускается, поэтому запрет
 // на файлы-программы здесь не действует.
+//
+// Без служб оболочки (window/minimal) проверенный путь получает
+// ErrOpenUnsupported.
 func RevealFile(path string) error { return core.RevealFile(path) }
 
 // ── syslang.go ──
@@ -116,7 +126,8 @@ func RevealFile(path string) error { return core.RevealFile(path) }
 // локали C/POSIX игнорируется, как в gettext). Кодировка («.UTF-8») и
 // модификаторы («@euro») отбрасываются, «@latin» и «@cyrillic» становятся
 // письменностью. macOS: те же переменные среды (системные настройки через
-// NSLocale не читаются, см. syslang_darwin.go).
+// NSLocale не читаются). Без служб оболочки (window/minimal) — пустой
+// список.
 //
 // Безопасно звать из любой горутины и до создания окна.
 func SystemLanguages() []string { return core.SystemLanguages() }
@@ -128,7 +139,8 @@ func SystemLanguages() []string { return core.SystemLanguages() }
 // Windows: параметр приложений AppsUseLightTheme в реестре пользователя (не
 // SystemUsesLightTheme: тот про панель задач и меню «Пуск», а окна программ
 // живут по первому). Linux: переменная GTK_THEME, затем портал рабочего
-// стола org.freedesktop.portal.Settings по D-Bus. macOS: SystemThemeUnknown.
+// стола org.freedesktop.portal.Settings по D-Bus. macOS и window/minimal (без
+// служб оболочки): SystemThemeUnknown.
 //
 // Безопасно звать из любой горутины и до создания окна — именно так выбирают
 // палитру для первого кадра. На Linux первый вызов может занять до нескольких
@@ -143,7 +155,8 @@ type SystemAppearance = core.SystemAppearance
 //
 // Windows: DWM\AccentColor в реестре пользователя (при его отсутствии —
 // DWM\ColorizationColor). Linux: ключ accent-color пространства
-// org.freedesktop.appearance портала рабочего стола. macOS: ok=false.
+// org.freedesktop.appearance портала рабочего стола. macOS и window/minimal:
+// ok=false.
 //
 // Безопасно звать из любой горутины и до создания окна; на Linux первый вызов
 // может занять до нескольких секунд, если шина есть, а портал не отвечает.

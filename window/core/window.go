@@ -646,7 +646,7 @@ func (win *Window) Run() error {
 func (win *Window) tearDown() {
 	win.releaseKeyboardGrab()
 	win.stopMonitorWatch()
-	win.stopSystemThemeWatch()
+	win.closeSystemThemeWatch()
 	win.stopAccessibility()
 	// Сносим все оторванные окна панелей: останавливаем их движки (реестр
 	// нотификаторов/горутины без утечки); owned-окна ОС уходят вместе с
@@ -672,6 +672,7 @@ var newNativeWindow = NewNativeWindow
 // Отдельно от Run, потому что окон у процесса может быть несколько: второму
 // нужно то же самое, кроме блокирующего цикла событий (см. OpenWindow).
 func (win *Window) bringUp() error {
+	win.openSystemThemeWatch()
 	win.native = newNativeWindow()
 	if m, ok := win.native.(secondaryMarker); ok && win.secondary {
 		m.MarkSecondary()
@@ -776,6 +777,9 @@ func (win *Window) bringUp() error {
 	win.initial = initialState{} // применяется один раз
 
 	if err := win.native.Create(win.title, pw, ph); err != nil {
+		// Окна не будет: подписку на тему, которую SetOn* с другой горутины
+		// успел поднять после выбора бэкенда, снимать потом некому.
+		win.closeSystemThemeWatch()
 		return err
 	}
 	// Окно ОС есть: владельца с этих пор можно снимать у бэкенда, а снятый

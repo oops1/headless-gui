@@ -17,7 +17,7 @@ var features = []string{"platform/a11y", "platform/dnd", "platform/shell", "plat
 
 // wired — возможности, уже подключённые к window пустым импортом
 // (window/capabilities.go). Пополняется по шагам 9.8.
-var wired = []string{"platform/a11y"}
+var wired = []string{"platform/a11y", "platform/shell"}
 
 // backends — бэкенды окна.
 var backends = []string{"platform/win32", "platform/x11", "platform/wayland", "platform/cocoa"}
@@ -26,20 +26,14 @@ var backends = []string{"platform/win32", "platform/x11", "platform/wayland", "p
 // База убывает по шагам 9.8; ребро, которого больше нет, — ошибка теста
 // (база устарела, её надо сократить).
 var baseline = map[string]map[string][]string{
-	"windows": {
-		"window/core":    {"platform/dbus"},
-		"window/minimal": {"platform/dbus"},
-	},
+	"windows": {},
 	"linux": {
 		"window/core":      {"platform/dbus", "platform/tray"},
 		"window/minimal":   {"platform/dbus", "platform/tray"},
 		"platform/x11":     {"platform/tray"},
 		"platform/wayland": {"platform/tray"},
 	},
-	"darwin": {
-		"window/core":    {"platform/dbus"},
-		"window/minimal": {"platform/dbus"},
-	},
+	"darwin": {},
 }
 
 // graph — рабочие импорты пакетов модуля (относительные пути) под одной ОС.

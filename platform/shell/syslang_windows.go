@@ -1,6 +1,6 @@
 //go:build windows
 
-package core
+package shell
 
 // syslang_windows.go — языки интерфейса Windows: GetUserPreferredUILanguages.
 //

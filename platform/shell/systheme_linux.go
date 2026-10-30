@@ -1,6 +1,6 @@
 //go:build linux && !android
 
-package core
+package shell
 
 // systheme_linux.go — тема ОС на Linux: GTK_THEME и портал рабочего стола по
 // D-Bus.

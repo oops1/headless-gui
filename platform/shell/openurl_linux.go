@@ -6,7 +6,8 @@
 // песочницы, а внешних утилит не нужно. Показ файла — FileManager1.ShowItems.
 // xdg-open — запасной путь, когда портала на шине нет, подробности в
 // openurl_portal.go.
-package core
+
+package shell
 
 import (
 	"fmt"

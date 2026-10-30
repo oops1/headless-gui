@@ -1,6 +1,6 @@
 //go:build windows
 
-package core
+package shell
 
 import (
 	"reflect"
@@ -42,7 +42,7 @@ func TestSplitMultiString(t *testing.T) {
 // языком интерфейса пользователя (GetUserDefaultUILanguage), по основному
 // подтегу.
 func TestSystemLanguages_Windows(t *testing.T) {
-	langs := SystemLanguages()
+	langs := systemLanguages()
 	if len(langs) == 0 {
 		t.Skip("система не сообщила ни одного языка")
 	}

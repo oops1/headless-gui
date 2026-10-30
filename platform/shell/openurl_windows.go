@@ -6,7 +6,8 @@
 // с выделением — explorer.exe /select, подпроцессом: Проводник есть в любой
 // Windows, а SHOpenFolderAndSelectItems потребовал бы COM-объектов (PIDL,
 // IShellFolder) ради того же результата.
-package core
+
+package shell
 
 import (
 	"fmt"

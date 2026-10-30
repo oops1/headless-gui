@@ -54,3 +54,16 @@ func runMessageHooks(hwnd uintptr, msg uint32, wparam, lparam uintptr) (uintptr,
 
 // HWND — дескриптор окна ОС; 0 — окно ещё не создано или уже закрыто.
 func (w *Win32Window) HWND() uintptr { return uintptr(w.hwnd) }
+
+// WindowOf — окно бэкенда с дескриптором hwnd (и создаваемое окно, пока
+// CreateWindowExW ещё не вернул дескриптор): обработчик AddMessageHook
+// находит по нему своё состояние, заведённое на окно (подписки ключом по
+// *Win32Window — они работают и до Create). nil — окно не наше.
+func WindowOf(hwnd uintptr) *Win32Window {
+	win32Mu.Lock()
+	defer win32Mu.Unlock()
+	if w := win32Windows[hwnd]; w != nil {
+		return w
+	}
+	return win32Creating
+}

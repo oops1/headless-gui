@@ -1,8 +1,10 @@
 // openurl.go — открыть ссылку или файл тем приложением, что назначено в
-// системе, и показать файл в файловом менеджере. Платформенно-независимая
-// часть: проверка входа и общие помощники. Сами системные вызовы — в
-// openurl_windows.go (ShellExecute), openurl_linux.go (портал xdg-desktop-portal
-// по D-Bus), openurl_darwin.go (open) и openurl_other.go (заглушка).
+// системе, и показать файл в файловом менеджере. Здесь — проверка входа, она
+// действует перед любой реализацией: политика схем и запрет UNC — граница
+// безопасности, запрет файлов-программ — защита от ошибки приложения (см.
+// OpenFile). Сами системные вызовы — возможность platform/shell
+// (ShellExecute, портал xdg-desktop-portal по D-Bus, open). Без неё
+// (window/minimal) проверенный вход получает ErrOpenUnsupported.
 //
 // Зачем это движку. Раньше каждое приложение на движке делало своё: на Linux
 // звало xdg-open подпроцессом. Для сессии WinLine это не годится: пакет
@@ -16,9 +18,10 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // ErrOpenScheme — у ссылки схема, которую открывать нельзя. Различимо через
@@ -30,25 +33,31 @@ var ErrOpenScheme = errors.New("window: схема ссылки не разре�
 // запускается как программа (.exe, .bat, .lnk, .desktop …). Отказ — намеренный.
 var ErrOpenLaunchable = errors.New("window: файл такого типа запускает программу, открывать его отказано")
 
-// ErrOpenUnsupported — на этой платформе открытие не реализовано.
+// ErrOpenUnsupported — открытие не реализовано на этой платформе или службы
+// оболочки не подключены (window/minimal без platform/shell).
 var ErrOpenUnsupported = errors.New("window: открытие ссылок и файлов на этой платформе не поддержано")
 
-// Подменяемые точки системных вызовов: тесты проверяют, ЧТО было бы вызвано,
-// а не открывают настоящий браузер.
+// Точки вызова служб оболочки (возможность platform/shell, ADR-0013 §3) —
+// переменные: тесты проверяют, ЧТО было бы вызвано, а не открывают настоящий
+// браузер. Без возможности (window/minimal) — ErrOpenUnsupported.
 var (
-	openURLImpl    = platformOpenURL
-	openFileImpl   = platformOpenFile
-	revealFileImpl = platformRevealFile
-
-	// openStartCmd запускает подпроцесс и НЕ ждёт его, но собирает код
-	// завершения в отдельной горутине: без Wait завершившийся потомок
-	// остаётся зомби до конца работы приложения.
-	openStartCmd = func(cmd *exec.Cmd) error {
-		if err := cmd.Start(); err != nil {
-			return err
+	openURLImpl = func(u string) error {
+		if s, ok := native.ShellServices(); ok && s.OpenURL != nil {
+			return s.OpenURL(u)
 		}
-		go func() { _ = cmd.Wait() }()
-		return nil
+		return ErrOpenUnsupported
+	}
+	openFileImpl = func(p string) error {
+		if s, ok := native.ShellServices(); ok && s.OpenFile != nil {
+			return s.OpenFile(p)
+		}
+		return ErrOpenUnsupported
+	}
+	revealFileImpl = func(p string) error {
+		if s, ok := native.ShellServices(); ok && s.RevealFile != nil {
+			return s.RevealFile(p)
+		}
+		return ErrOpenUnsupported
 	}
 )
 
@@ -68,6 +77,9 @@ var (
 // вызывающего на время обращения к системе (до нескольких секунд при
 // холодном старте портала), поэтому из обработчика кадра его лучше звать в
 // горутине.
+//
+// Без служб оболочки (window/minimal) проверенная ссылка получает
+// ErrOpenUnsupported; проверка схем действует и там.
 func OpenURL(rawURL string) error {
 	u, err := checkOpenURL(rawURL)
 	if err != nil {
@@ -83,6 +95,9 @@ func OpenURL(rawURL string) error {
 // системой значит запустить, а путь к такому файлу может прийти из
 // недоверенного документа. Это защита от ошибки приложения, а не граница
 // безопасности: список расширений конечен.
+//
+// Без служб оболочки (window/minimal) проверенный путь получает
+// ErrOpenUnsupported; проверка файлов действует и там.
 func OpenFile(path string) error {
 	p, err := checkOpenFile(path)
 	if err != nil {
@@ -95,6 +110,9 @@ func OpenFile(path string) error {
 // Finder, Nautilus/Dolphin/Thunar …). Если выделение менеджер не умеет —
 // откроется хотя бы папка с файлом. Сам файл не запускается, поэтому запрет
 // на файлы-программы здесь не действует.
+//
+// Без служб оболочки (window/minimal) проверенный путь получает
+// ErrOpenUnsupported.
 func RevealFile(path string) error {
 	p, err := checkRevealPath(path)
 	if err != nil {
@@ -212,58 +230,4 @@ var launchableExts = map[string]bool{
 func isLaunchableName(name string) bool {
 	name = strings.TrimRight(name, ". \t")
 	return launchableExts[strings.ToLower(filepath.Ext(name))]
-}
-
-// ─── Помощники для платформенных реализаций ──────────────────────────────────
-
-// pathToFileURL строит file://-ссылку из абсолютного пути. Нужна там, где
-// система принимает только ссылки (портал OpenURI, FileManager1.ShowItems).
-// Пробелы, '#', '?' и не-ASCII кодируются процентами: иначе путь
-// «/home/u/отчёт #1.pdf» превратился бы в ссылку с фрагментом.
-// Windows-путь с диском ("C:\a\b") получает вид file:///C:/a/b.
-func pathToFileURL(abs string) string {
-	p := strings.ReplaceAll(abs, `\`, "/")
-	if len(p) >= 2 && p[1] == ':' {
-		p = "/" + p
-	}
-	return (&url.URL{Scheme: "file", Path: p}).String()
-}
-
-// shellExecuteErrText переводит код возврата ShellExecute (значения до 32 —
-// это ошибки, а не дескриптор) в понятный текст. Системная часть сама по себе
-// вместо кода даёт малоинформативное «параметр задан неверно».
-func shellExecuteErrText(code uintptr) string {
-	switch code {
-	case 0:
-		return "не хватает памяти или ресурсов"
-	case 2, 3:
-		return "файл или путь не найден"
-	case 5:
-		return "отказано в доступе"
-	case 8:
-		return "не хватает памяти"
-	case 26:
-		return "нарушение совместного доступа"
-	case 27, 31:
-		return "для этого типа нет назначенного приложения"
-	case 28, 29, 30:
-		return "приложение не ответило (DDE)"
-	case 32:
-		return "не найдена библиотека приложения"
-	}
-	return fmt.Sprintf("код %d", code)
-}
-
-// explorerSelectCmdLine собирает командную строку Проводника для показа файла
-// с выделением. Строка нужна «сырая»: Go-шное экранирование аргументов
-// превращает /select,C:\a b\c.txt в "/select,C:\a b\c.txt" целиком в кавычках,
-// а Проводник такой формы не понимает и открывает «Документы». Ему нужна
-// именно форма /select,"путь".
-func explorerSelectCmdLine(explorer, path string) (string, error) {
-	// В именах файлов Windows кавычек нет; значит, кавычка в пути — не путь, а
-	// попытка выйти из кавычек и дописать Проводнику свои параметры.
-	if strings.ContainsRune(path, '"') {
-		return "", errors.New("window: в пути недопустимая кавычка")
-	}
-	return `"` + explorer + `" /select,"` + path + `"`, nil
 }

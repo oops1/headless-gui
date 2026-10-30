@@ -8,11 +8,8 @@ package win32
 
 import (
 	"image"
-	"runtime"
-	"unsafe"
 
 	"github.com/oops1/headless-gui/v3/internal/testhook"
-	"golang.org/x/sys/windows"
 )
 
 func init() {
@@ -46,17 +43,5 @@ func init() {
 				inner(width, height)
 			}
 		}
-	}
-	testhook.Win32SettingWatched = func(nw any) (bool, bool) {
-		w := nw.(*Win32Window)
-		return w.onSettingChange.Load() != nil, w.onAccentChange.Load() != nil
-	}
-	testhook.Win32SettingChange = func(nw any, area string) {
-		s, err := windows.UTF16PtrFromString(area)
-		if err != nil {
-			return
-		}
-		nw.(*Win32Window).handleSettingChange(uintptr(unsafe.Pointer(s)))
-		runtime.KeepAlive(s)
 	}
 }

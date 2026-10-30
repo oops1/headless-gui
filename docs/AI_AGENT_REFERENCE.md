@@ -9192,14 +9192,15 @@ are separate things.
   from a `.app`.
 
 Pure functions `normalizeLanguageTag` and `systemLanguagesFromEnv` are covered
-by `window/syslang_test.go` on every platform.
+by `platform/shell/syslang_test.go` on every platform.
 
 ### System appearance: theme and accent colour (E12)
 
 `SetOnSystemThemeChanged` and `DetectSystemTheme` already existed (Windows:
 `WM_SETTINGCHANGE` "ImmersiveColorSet" re-reading `AppsUseLightTheme`; Linux, X11
 and Wayland alike: the `SettingChanged` signal of the Settings portal; macOS:
-`SystemThemeUnknown`, no watching — see `window/systheme_darwin.go`). v3.39 adds
+`SystemThemeUnknown`, no watching — not implemented yet, `platform/shell` registers no
+theme there, see `platform/shell/register_darwin.go`; the same holds in `window/minimal`). v3.39 adds
 the accent colour:
 
 ```go

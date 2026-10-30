@@ -2,11 +2,11 @@ package testhook
 
 import "image"
 
-// Точки для интеграционных тестов window/core и platform/a11y с живым окном
-// Win32 (ядро и возможности поверх бэкенда platform/win32): тесты ядра не видят неэкспортированного
-// состояния бэкенда, а публиковать его ради тестов незачем. Задаёт
-// platform/win32 при инициализации (только Windows); до его загрузки и на
-// других ОС nil. nw — *win32.Win32Window.
+// Точки для интеграционных тестов window/core, platform/a11y и platform/shell
+// с живым окном Win32 (ядро и возможности поверх бэкенда platform/win32):
+// тесты ядра не видят неэкспортированного состояния бэкенда, а публиковать
+// его ради тестов незачем. Задаёт platform/win32 при инициализации (только
+// Windows); до его загрузки и на других ОС nil. nw — *win32.Win32Window.
 
 // Win32NewWindow создаёт окно бэкенда, закрытие которого не завершает цикл
 // сообщений потока (тестам нужно несколько окон подряд). Уничтожить —
@@ -34,9 +34,3 @@ var Win32SetCursorMessage func(nw any, hit uintptr) (handle uintptr, handled boo
 
 // Win32AfterResize ставит after перед обработчиком смены размера окна nw.
 var Win32AfterResize func(nw any, after func(w, h int))
-
-// Win32SettingWatched — подписано ли окно nw на смену темы и акцента.
-var Win32SettingWatched func(nw any) (theme, accent bool)
-
-// Win32SettingChange — окно nw получает WM_SETTINGCHANGE с областью area.
-var Win32SettingChange func(nw any, area string)

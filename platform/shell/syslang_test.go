@@ -1,4 +1,4 @@
-package core
+package shell
 
 import (
 	"reflect"
@@ -102,7 +102,7 @@ func TestDedupLanguages(t *testing.T) {
 // Любой ответ SystemLanguages — нормализованные теги без повторов.
 func TestSystemLanguages_WellFormed(t *testing.T) {
 	seen := map[string]bool{}
-	for _, l := range SystemLanguages() {
+	for _, l := range systemLanguages() {
 		if normalizeLanguageTag(l) != l {
 			t.Errorf("%q не в нормализованной записи", l)
 		}

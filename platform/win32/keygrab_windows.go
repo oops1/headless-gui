@@ -244,8 +244,8 @@ func (h *kbGrabHub) handle(nCode, wparam, lparam uintptr) bool {
 	if int32(nCode) < 0 || lparam == 0 { // HC_ACTION == 0
 		return false
 	}
-	// Указатель берём через адрес переменной, как в handleSettingChange:
-	// память принадлежит системе, и vet не любит прямое uintptr → Pointer.
+	// Указатель берём через адрес переменной: память принадлежит системе, и
+	// vet не любит прямое uintptr → Pointer.
 	p := *(*unsafe.Pointer)(unsafe.Pointer(&lparam))
 	kb := (*kbdLLHookStruct)(p)
 	if kb.Flags&llkhfInjected != 0 {

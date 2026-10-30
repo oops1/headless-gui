@@ -1,6 +1,6 @@
 //go:build !windows
 
-package core
+package shell
 
 // syslang_env.go — языки интерфейса на Linux и macOS: переменные среды.
 //
@@ -12,7 +12,7 @@ package core
 //
 // macOS: язык ОС лежит в NSLocale.preferredLanguages (бэкенд Cocoa написан на
 // purego, и проверить ещё один ручной вызов objc_msgSend на Mac, которого у
-// проекта нет, негде — см. systheme_darwin.go). Пока читаем те же переменные
+// проекта нет, негде — как и темы, см. register_darwin.go). Пока читаем те же переменные
 // среды: из терминала они обычно выставлены, из .app — нет, и тогда ответ
 // пуст, а язык выбирает приложение.
 

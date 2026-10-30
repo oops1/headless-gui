@@ -9,26 +9,56 @@ package core
 // «читаем реестр / портал» — с одними и теми же ошибками в каждой. Здесь
 // единственная.
 //
-// Файл без платформенного суффикса намеренно, как platform/native/xftdpi.go: чтение реестра,
-// D-Bus и сообщения окна живут в systheme_<ОС>.go, а разбор того, что они
-// прочитали, проверяется на любой машине и идёт в общем прогоне тестов.
+// Чтение реестра, портал D-Bus и сообщение окна WM_SETTINGCHANGE — службы
+// оболочки, возможность platform/shell (ADR-0013 §3); здесь — подписка окна,
+// отсев повторов и доставка на горутину движка. Без возможности
+// (window/minimal) тема неизвестна, акцента нет, наблюдения нет.
 
 import (
 	"image/color"
-	"math"
-	"strings"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/platform/dbus"
 	"github.com/oops1/headless-gui/v3/platform/native"
 )
+
+// detectSystemTheme, detectSystemAccent, watchSystemTheme и watchSystemAccent
+// — службы оболочки (native.ShellServices); без них — Unknown, ok=false, nil.
+
+func detectSystemTheme() native.SystemTheme {
+	if s, ok := native.ShellServices(); ok && s.Theme != nil {
+		return s.Theme()
+	}
+	return native.SystemThemeUnknown
+}
+
+func detectSystemAccent() (color.RGBA, bool) {
+	if s, ok := native.ShellServices(); ok && s.Accent != nil {
+		return s.Accent()
+	}
+	return color.RGBA{}, false
+}
+
+func watchSystemTheme(nw native.NativeWindow, emit func(native.SystemTheme)) (stop func()) {
+	if s, ok := native.ShellServices(); ok && s.WatchTheme != nil {
+		return s.WatchTheme(nw, emit)
+	}
+	return nil
+}
+
+func watchSystemAccent(nw native.NativeWindow, emit func(color.RGBA, bool)) (stop func()) {
+	if s, ok := native.ShellServices(); ok && s.WatchAccent != nil {
+		return s.WatchAccent(nw, emit)
+	}
+	return nil
+}
 
 // DetectSystemTheme возвращает тему, выбранную в ОС прямо сейчас.
 //
 // Windows: параметр приложений AppsUseLightTheme в реестре пользователя (не
 // SystemUsesLightTheme: тот про панель задач и меню «Пуск», а окна программ
 // живут по первому). Linux: переменная GTK_THEME, затем портал рабочего
-// стола org.freedesktop.portal.Settings по D-Bus. macOS: SystemThemeUnknown.
+// стола org.freedesktop.portal.Settings по D-Bus. macOS и window/minimal (без
+// служб оболочки): SystemThemeUnknown.
 //
 // Безопасно звать из любой горутины и до создания окна — именно так выбирают
 // палитру для первого кадра. На Linux первый вызов может занять до нескольких
@@ -46,7 +76,7 @@ type SystemAppearance struct {
 	Accent color.RGBA
 	// HasAccent — акцентный цвет удалось узнать. На Linux его нет у сред без
 	// портала или с порталом старше 1.18, а также когда пользователь акцент не
-	// выбирал; на macOS — всегда нет.
+	// выбирал; на macOS и в window/minimal — всегда нет.
 	HasAccent bool
 }
 
@@ -55,7 +85,8 @@ type SystemAppearance struct {
 //
 // Windows: DWM\AccentColor в реестре пользователя (при его отсутствии —
 // DWM\ColorizationColor). Linux: ключ accent-color пространства
-// org.freedesktop.appearance портала рабочего стола. macOS: ok=false.
+// org.freedesktop.appearance портала рабочего стола. macOS и window/minimal:
+// ok=false.
 //
 // Безопасно звать из любой горутины и до создания окна; на Linux первый вызов
 // может занять до нескольких секунд, если шина есть, а портал не отвечает.
@@ -84,9 +115,10 @@ func DetectSystemAppearance() SystemAppearance {
 // работы; nil снимает подписку.
 //
 // Поддержано на Windows (WM_SETTINGCHANGE окна) и Linux (сигнал
-// SettingChanged портала). На macOS наблюдения нет — как и чтения темы, см.
-// systheme_darwin.go. Дополнительные окна, открытые через OpenWindow,
-// подписку получают свою: колбэк задаётся каждому окну отдельно.
+// SettingChanged портала) службами оболочки (platform/shell). На macOS и в
+// window/minimal наблюдения нет — как и чтения темы. Дополнительные окна,
+// открытые через OpenWindow, подписку получают свою: колбэк задаётся каждому
+// окну отдельно.
 func (win *Window) SetOnSystemThemeChanged(fn func(native.SystemTheme)) {
 	win.sysTheme.mu.Lock()
 	win.sysTheme.fn = fn
@@ -118,7 +150,8 @@ func (win *Window) SetOnSystemThemeChanged(fn func(native.SystemTheme)) {
 //	         одной группой), значения перечитываются из реестра;
 //	Linux    сигнал SettingChanged портала для color-scheme и accent-color
 //	         (X11 и Wayland одинаково);
-//	macOS    наблюдения нет.
+//	macOS    наблюдения нет;
+//	window/minimal (без служб оболочки) — тоже.
 func (win *Window) SetOnSystemAppearanceChanged(fn func(SystemAppearance)) {
 	win.sysTheme.mu.Lock()
 	win.sysTheme.app = fn
@@ -134,7 +167,13 @@ type systemThemeState struct {
 	mu   sync.Mutex
 	fn   func(native.SystemTheme)
 	stop func() // снятие платформенной подписки; nil — её нет
-	edge themeEdge
+	// closed — окна ОС для подписки нет: оно закрыто (tearDown) или не
+	// создалось. Подписку тогда не поднимаем, а поднятую в гонке с закрытием
+	// снимаем сразу: снять её потом было бы некому, и платформенный
+	// обработчик держал бы окно с движком до конца процесса. Снимает флаг
+	// bringUp.
+	closed bool
+	edge   themeEdge
 
 	// app — колбэк оформления (тема + акцент); cur — последнее известное
 	// оформление, last — то, о чём приложение уже уведомлено.
@@ -152,11 +191,11 @@ type systemThemeState struct {
 func (win *Window) syncSystemThemeWatch() {
 	st := &win.sysTheme
 	st.mu.Lock()
-	hasFn, watching := st.fn != nil || st.app != nil, st.stop != nil
+	hasFn, watching, closed := st.fn != nil || st.app != nil, st.stop != nil, st.closed
 	st.mu.Unlock()
 
 	switch {
-	case hasFn && !watching:
+	case hasFn && !watching && !closed:
 		// Исходное значение читаем ДО подписки и вне замка: на Linux это
 		// вызов по шине. Без него первое же повторное сообщение с прежней
 		// темой сошло бы за смену.
@@ -164,9 +203,9 @@ func (win *Window) syncSystemThemeWatch() {
 		stopTheme := watchSystemTheme(win.native, win.systemThemeEvent)
 		stopAccent := watchSystemAccent(win.native, win.systemAccentEvent)
 		st.mu.Lock()
-		if st.stop != nil || (st.fn == nil && st.app == nil) {
-			// Пока читали, подписку успели поднять или снять — вторая
-			// не нужна.
+		if st.stop != nil || st.closed || (st.fn == nil && st.app == nil) {
+			// Пока читали, подписку успели поднять или снять, а окно —
+			// закрыть: эта не нужна.
 			st.mu.Unlock()
 			if stopTheme != nil {
 				stopTheme()
@@ -193,9 +232,7 @@ func (win *Window) syncSystemThemeWatch() {
 	}
 }
 
-// stopSystemThemeWatch снимает подписку. Зовётся при закрытии окна:
-// платформенный обработчик (на Linux — общий на процесс) иначе пережил бы окно
-// и слал колбэки в движок, которого уже нет.
+// stopSystemThemeWatch снимает подписку, когда колбэки сняты.
 func (win *Window) stopSystemThemeWatch() {
 	st := &win.sysTheme
 	st.mu.Lock()
@@ -205,6 +242,30 @@ func (win *Window) stopSystemThemeWatch() {
 	if stop != nil {
 		stop()
 	}
+}
+
+// closeSystemThemeWatch снимает подписку при закрытии окна (tearDown) или
+// неудаче его создания и до следующего bringUp новую не допускает:
+// платформенный обработчик (на Linux — общий на процесс, на Windows — в
+// карте окон процесса) иначе пережил бы окно и держал движок, которого уже
+// нет.
+func (win *Window) closeSystemThemeWatch() {
+	st := &win.sysTheme
+	st.mu.Lock()
+	st.closed = true
+	stop := st.stop
+	st.stop = nil
+	st.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
+}
+
+// openSystemThemeWatch снова разрешает подписку: bringUp создаёт окно ОС.
+func (win *Window) openSystemThemeWatch() {
+	win.sysTheme.mu.Lock()
+	win.sysTheme.closed = false
+	win.sysTheme.mu.Unlock()
 }
 
 // systemThemeEvent принимает от платформы «тема, возможно, сменилась» — из
@@ -281,161 +342,4 @@ func (e *themeEdge) update(t native.SystemTheme) bool {
 	}
 	e.last = t
 	return true
-}
-
-// Портал настроек рабочего стола (XDG Desktop Portal) и его настройка темы.
-// Имена лежат здесь, а не в systheme_linux.go: по ним же разбирается
-// пришедший сигнал, а разбор проверяется на любой машине.
-const (
-	portalBusName        = "org.freedesktop.portal.Desktop"
-	portalObjPath        = "/org/freedesktop/portal/desktop"
-	portalSettingsIface  = "org.freedesktop.portal.Settings"
-	portalAppearanceNS   = "org.freedesktop.appearance"
-	portalColorSchemeKey = "color-scheme"
-	portalAccentKey      = "accent-color"
-)
-
-// Значения ключа color-scheme.
-const (
-	portalSchemeNoPreference = 0 // человек ничего не выбирал
-	portalSchemeDark         = 1
-	portalSchemeLight        = 2
-)
-
-// systemThemeFromPortalSignal разбирает сигнал SettingChanged(ssv) портала.
-//
-// Сигнал приходит на любую настройку любого пространства — акцентный цвет,
-// контраст, свои ключи GNOME, — и шина доставляет их все, раз правило
-// подписки одно на пространство. ok=false — сигнал не про цветовую схему, и
-// будить приложение он не должен.
-func systemThemeFromPortalSignal(msg *dbus.Message) (t native.SystemTheme, ok bool) {
-	if msg == nil || msg.Interface != portalSettingsIface || msg.Member != "SettingChanged" || len(msg.Body) < 3 {
-		return native.SystemThemeUnknown, false
-	}
-	ns, _ := msg.Body[0].(string)
-	key, _ := msg.Body[1].(string)
-	if ns != portalAppearanceNS || key != portalColorSchemeKey {
-		return native.SystemThemeUnknown, false
-	}
-	return systemThemeFromPortalValue(msg.Body[2]), true
-}
-
-// systemThemeFromPortalValue разбирает значение настройки, как оно пришло по
-// D-Bus.
-//
-// Читать значение можно двумя методами портала, и обёрнуто оно по-разному:
-// ReadOne (версия 2) отдаёт один variant, а старый Read — variant внутри
-// variant, о чём в документации сказано одной строкой, а на деле ломает
-// разбор вида «uint32 или ошибка». Поэтому variant снимается циклом, сколько
-// бы их ни было. То же значение приходит и в сигнале SettingChanged.
-//
-// 0 («нет предпочтения») — Unknown: человек ничего не выбирал, и тему решает
-// приложение.
-func systemThemeFromPortalValue(v any) native.SystemTheme {
-	for {
-		vr, ok := v.(dbus.Variant)
-		if !ok {
-			break
-		}
-		v = vr.Val
-	}
-	if v == nil {
-		return native.SystemThemeUnknown
-	}
-	n, err := dbus.ToUint(v)
-	if err != nil {
-		return native.SystemThemeUnknown
-	}
-	switch n {
-	case portalSchemeDark:
-		return native.SystemThemeDark
-	case portalSchemeLight:
-		return native.SystemThemeLight
-	}
-	return native.SystemThemeUnknown
-}
-
-// systemThemeFromGTKTheme разбирает переменную GTK_THEME.
-//
-// Её задают, когда нужно запустить программу в чужой теме поверх настроек
-// рабочего стола, — а значит, она важнее портала: GTK-приложение в такой
-// сессии поступает так же. Формат «Имя» или «Имя:вариант», где вариант —
-// dark или light (Adwaita:dark).
-//
-// Имя без слова dark и без варианта — Unknown, а не «светлая»: у стороннего
-// набора (Nordic, Dracula) тёмная тема и без этой подсказки в названии, и по
-// одному имени нельзя сказать наверняка. Лучше отдать решение порталу, чем
-// угадать неверно.
-func systemThemeFromGTKTheme(s string) native.SystemTheme {
-	s = strings.ToLower(strings.TrimSpace(s))
-	if s == "" {
-		return native.SystemThemeUnknown
-	}
-	name, variant, _ := strings.Cut(s, ":")
-	switch strings.TrimSpace(variant) {
-	case "dark":
-		return native.SystemThemeDark
-	case "light":
-		return native.SystemThemeLight
-	}
-	if strings.Contains(name, "dark") {
-		return native.SystemThemeDark
-	}
-	return native.SystemThemeUnknown
-}
-
-// accentFromPortalValue разбирает значение accent-color портала: структура из
-// трёх double (красный, зелёный, синий в [0, 1]). Снимает обёртки variant так
-// же, как systemThemeFromPortalValue.
-//
-// Портал сообщает «акцента нет» цветом вне диапазона [0, 1] (GNOME до выбора
-// акцента отдаёт (-1, -1, -1)): это ok=false, а не чёрный цвет.
-func accentFromPortalValue(v any) (color.RGBA, bool) {
-	for {
-		vr, ok := v.(dbus.Variant)
-		if !ok {
-			break
-		}
-		v = vr.Val
-	}
-	var f []any
-	switch t := v.(type) {
-	case dbus.Struct:
-		f = t.Fields
-	case *dbus.Struct:
-		if t != nil {
-			f = t.Fields
-		}
-	case []any:
-		f = t
-	}
-	if len(f) != 3 {
-		return color.RGBA{}, false
-	}
-	var c [3]uint8
-	for i, e := range f {
-		x, ok := e.(float64)
-		if !ok || math.IsNaN(x) || x < 0 || x > 1 {
-			return color.RGBA{}, false
-		}
-		c[i] = uint8(math.Round(x * 255))
-	}
-	return color.RGBA{R: c[0], G: c[1], B: c[2], A: 255}, true
-}
-
-// accentFromPortalSignal разбирает сигнал SettingChanged(ssv) портала.
-// matched=false — сигнал не про accent-color, и будить приложение он не должен.
-// matched=true, ok=false — пользователь сбросил акцент или значение
-// непонятно: последнее известное значение при этом остаётся.
-func accentFromPortalSignal(msg *dbus.Message) (c color.RGBA, ok, matched bool) {
-	if msg == nil || msg.Interface != portalSettingsIface || msg.Member != "SettingChanged" || len(msg.Body) < 3 {
-		return color.RGBA{}, false, false
-	}
-	ns, _ := msg.Body[0].(string)
-	key, _ := msg.Body[1].(string)
-	if ns != portalAppearanceNS || key != portalAccentKey {
-		return color.RGBA{}, false, false
-	}
-	c, ok = accentFromPortalValue(msg.Body[2])
-	return c, ok, true
 }

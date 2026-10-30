@@ -1,6 +1,6 @@
 //go:build linux && !android
 
-package core
+package shell
 
 import (
 	"os"

@@ -1,6 +1,6 @@
 //go:build linux && !android
 
-package core
+package shell
 
 import (
 	"image/color"
@@ -16,11 +16,11 @@ import (
 // как мы к ней потянемся — иначе на машине без D-Bus эта проверка зависла бы.
 func TestDetectSystemTheme_GTKThemeEnv(t *testing.T) {
 	t.Setenv("GTK_THEME", "Adwaita:dark")
-	if got := DetectSystemTheme(); got != native.SystemThemeDark {
+	if got := detectSystemTheme(); got != native.SystemThemeDark {
 		t.Errorf("GTK_THEME=Adwaita:dark → %v, ждал dark", got)
 	}
 	t.Setenv("GTK_THEME", "Adwaita:light")
-	if got := DetectSystemTheme(); got != native.SystemThemeLight {
+	if got := detectSystemTheme(); got != native.SystemThemeLight {
 		t.Errorf("GTK_THEME=Adwaita:light → %v, ждал light", got)
 	}
 }

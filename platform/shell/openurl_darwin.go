@@ -5,7 +5,8 @@
 // систему (это часть самой macOS, а не внешняя зависимость), а прямой путь —
 // NSWorkspace через Objective-C — потребовал бы ещё одного моста ради того же
 // результата.
-package core
+
+package shell
 
 import "os/exec"
 

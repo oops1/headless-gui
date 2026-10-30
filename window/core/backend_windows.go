@@ -7,7 +7,6 @@ package core
 // переданы бэкенду.
 
 import (
-	"image/color"
 	"time"
 
 	"github.com/oops1/headless-gui/v3/platform/native"
@@ -38,15 +37,3 @@ func NewNativeWindow() native.NativeWindow { return win32.NewWindow() }
 func nativeDoubleClickTime() time.Duration { return win32.DoubleClickTime() }
 
 func platformMonitors() []native.Monitor { return win32.EnumMonitors() }
-
-func detectSystemTheme() native.SystemTheme { return win32.ReadSystemTheme() }
-
-func detectSystemAccent() (color.RGBA, bool) { return win32.ReadSystemAccent() }
-
-func watchSystemTheme(nw native.NativeWindow, emit func(native.SystemTheme)) (stop func()) {
-	return win32.WatchSystemTheme(nw, emit)
-}
-
-func watchSystemAccent(nw native.NativeWindow, emit func(color.RGBA, bool)) (stop func()) {
-	return win32.WatchSystemAccent(nw, emit)
-}

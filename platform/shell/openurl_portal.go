@@ -3,7 +3,8 @@
 // запуск подпроцесса приходят снаружи (openBackend), поэтому ветвления —
 // «портал есть», «портала нет», «xdg-open не найден» — проверяются тестами в
 // общем прогоне на любой ОС, а не только на Linux-машине.
-package core
+
+package shell
 
 import (
 	"errors"
@@ -15,7 +16,7 @@ import (
 	"github.com/oops1/headless-gui/v3/platform/dbus"
 )
 
-// Имя и путь самого портала общие с чтением темы (systheme.go):
+// Имя и путь самого портала общие с чтением темы (systheme_portal.go):
 // portalBusName, portalObjPath.
 const (
 	portalOpenURIIf = "org.freedesktop.portal.OpenURI"

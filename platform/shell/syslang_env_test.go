@@ -1,6 +1,6 @@
 //go:build !windows
 
-package core
+package shell
 
 import (
 	"reflect"
@@ -14,12 +14,12 @@ func TestSystemLanguages_FromProcessEnv(t *testing.T) {
 	t.Setenv("LANG", "ru_RU.UTF-8")
 	t.Setenv("LANGUAGE", "ru:en_US")
 	want := []string{"ru", "en-US", "ru-RU"}
-	if got := SystemLanguages(); !reflect.DeepEqual(got, want) {
-		t.Errorf("SystemLanguages() = %q, ждал %q", got, want)
+	if got := systemLanguages(); !reflect.DeepEqual(got, want) {
+		t.Errorf("systemLanguages() = %q, ждал %q", got, want)
 	}
 
 	t.Setenv("LC_ALL", "C")
-	if got := SystemLanguages(); got != nil {
-		t.Errorf("при LC_ALL=C SystemLanguages() = %q, ждал пустой список", got)
+	if got := systemLanguages(); got != nil {
+		t.Errorf("при LC_ALL=C systemLanguages() = %q, ждал пустой список", got)
 	}
 }
