@@ -48,6 +48,9 @@ func goldenScene(t *testing.T, raise bool) *image.RGBA {
 	windows.AddChild(surf)
 
 	win := widget.NewWindow("Shell", 200, 210)
+	// Стиль заголовка — явно: по умолчанию он по ОС, и на macOS (кнопки
+	// слева, заголовок по центру) кадр разошёлся бы с эталоном.
+	win.TitleStyle = widget.WindowTitleWin
 	win.CornerRadius = 8
 	win.SetShadow(testShadow)
 	win.SetBounds(image.Rect(210, 90, 410, 300))
