@@ -13,7 +13,7 @@ import (
 	"image"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // DefaultFocusDurations — длительности меню выбора у кнопки «Фокусировка»,
@@ -40,6 +40,7 @@ func (c *CalendarFlyout) ensureFocusMenu() *widget.PopupMenu {
 		return p
 	}
 	p = widget.NewPopupMenu()
+	p.SetHost(c)
 	c.mu.Lock()
 	if c.focusMenu == nil {
 		c.focusMenu = p

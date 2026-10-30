@@ -20,8 +20,8 @@ import (
 	"image"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // ApplicationArea — область закреплённых и запущенных приложений.
@@ -780,7 +780,7 @@ func (a *ApplicationArea) ShowCommands(i int) {
 	case a.tm != nil && a.tm.GetFlag(KeyTaskbarTop, false):
 		edge = EdgeTop
 	}
-	a.menu.show(a.tm, menuItems(cmds), anchor, edge)
+	a.menu.show(a, a.tm, menuItems(cmds), anchor, edge)
 }
 
 // ToolTipAt возвращает подсказку кнопки под точкой: название приложения (у

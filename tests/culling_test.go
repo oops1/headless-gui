@@ -5,8 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Пропуск поддеревьев вне изменившейся области.
@@ -54,6 +55,7 @@ func cullScene(t *testing.T) (*engine.Engine, *countingPanel, *countingPanel) {
 }
 
 func TestCulling_SkipsUntouchedSubtree(t *testing.T) {
+	testreset.Globals(t)
 	eng, near, far := cullScene(t)
 	beforeNear, beforeFar := near.draws, far.draws
 
@@ -72,6 +74,7 @@ func TestCulling_SkipsUntouchedSubtree(t *testing.T) {
 
 // Выключатель возвращает прежнее поведение: рисуются все.
 func TestCulling_SwitchRestoresFullWalk(t *testing.T) {
+	testreset.Globals(t)
 	eng, _, far := cullScene(t)
 	eng.SetSubtreeCulling(false)
 	t.Cleanup(func() { eng.SetSubtreeCulling(true) })
@@ -87,6 +90,7 @@ func TestCulling_SwitchRestoresFullWalk(t *testing.T) {
 
 // Полный кадр рисует всё: пропуск работает только там, где заявлены области.
 func TestCulling_FullFrameDrawsEverything(t *testing.T) {
+	testreset.Globals(t)
 	eng, near, far := cullScene(t)
 	bn, bf := near.draws, far.draws
 
@@ -101,6 +105,7 @@ func TestCulling_FullFrameDrawsEverything(t *testing.T) {
 // Виджет, рисующий за своими границами, не должен пропускаться, когда
 // изменилась область его тени.
 func TestCulling_RespectsDrawMargin(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 400, 300))
@@ -137,6 +142,7 @@ func (m *marginPanel) DrawMargin() int { return m.margin }
 // Сравниваются кадры одной сцены при включённом и выключенном пропуске:
 // движок волен не звать Draw, но результат обязан быть тем же до пикселя.
 func TestCulling_FrameIsIdentical(t *testing.T) {
+	testreset.Globals(t)
 	render := func(culling bool) *image.RGBA {
 		root := widget.NewPanel(color.RGBA{R: 30, G: 40, B: 60, A: 255})
 		root.ShowHeader = false

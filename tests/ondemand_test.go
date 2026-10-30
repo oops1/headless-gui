@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
-	"github.com/oops1/headless-gui/v3/widget/datagrid"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
+	"github.com/oops1/headless-gui/v4/widget/datagrid"
 )
 
 // newOnDemandEngine — движок 50 fps с простым корнем, tooltips выключены
@@ -42,6 +43,7 @@ func waitCount(eng *engine.Engine, want uint64) bool {
 // пропускаются. Прежнее поведение «каждый тик» доступно через
 // SetRenderOnDemand(false).
 func TestOnDemand_IsDefaultMode(t *testing.T) {
+	testreset.Globals(t)
 	eng, _ := newOnDemandEngine()
 	if !eng.RenderOnDemand() {
 		t.Fatal("рендер по запросу должен быть режимом по умолчанию")
@@ -62,6 +64,7 @@ func TestOnDemand_IsDefaultMode(t *testing.T) {
 
 // SetRenderOnDemand(false) возвращает прежнее поведение: рендер каждый тик.
 func TestOnDemand_OptOutRendersContinuously(t *testing.T) {
+	testreset.Globals(t)
 	eng, _ := newOnDemandEngine()
 	eng.SetRenderOnDemand(false)
 	eng.Start()
@@ -73,6 +76,7 @@ func TestOnDemand_OptOutRendersContinuously(t *testing.T) {
 
 // В on-demand режиме простой UI не рендерится: счётчик кадров замирает.
 func TestOnDemand_IdleSkipsFrames(t *testing.T) {
+	testreset.Globals(t)
 	eng, _ := newOnDemandEngine()
 	eng.SetRenderOnDemand(true)
 	eng.Start()
@@ -94,6 +98,7 @@ func TestOnDemand_IdleSkipsFrames(t *testing.T) {
 
 // Invalidate() пробуждает рендер.
 func TestOnDemand_InvalidateTriggersFrame(t *testing.T) {
+	testreset.Globals(t)
 	eng, _ := newOnDemandEngine()
 	eng.SetRenderOnDemand(true)
 	eng.Start()
@@ -112,6 +117,7 @@ func TestOnDemand_InvalidateTriggersFrame(t *testing.T) {
 // кадров, наведение на виджет с hover-состоянием — рождает (самоинвалидация),
 // клик — инвалидирует полностью.
 func TestOnDemand_InputAutoInvalidates(t *testing.T) {
+	testreset.Globals(t)
 	eng, _ := newOnDemandEngine()
 	btn := widget.NewButton("btn")
 	btn.SetBounds(image.Rect(200, 100, 300, 130))
@@ -154,6 +160,7 @@ func TestOnDemand_InputAutoInvalidates(t *testing.T) {
 // 530 мс. Теперь TextInput инвалидирует свой прямоугольник только когда фазу
 // пора сменить, поэтому кадров примерно 2 в секунду вместо fps.
 func TestOnDemand_FocusedTextInputKeepsRendering(t *testing.T) {
+	testreset.Globals(t)
 	eng, _ := newOnDemandEngine() // 50 fps
 	ti := widget.NewTextInput("")
 	ti.SetBounds(image.Rect(10, 60, 200, 90))
@@ -190,6 +197,7 @@ func TestOnDemand_FocusedTextInputKeepsRendering(t *testing.T) {
 
 // Обновление биндинга (слой данных) инвалидирует через SetUIChangeNotifier.
 func TestOnDemand_BindingRefreshInvalidates(t *testing.T) {
+	testreset.Globals(t)
 	type vmT struct {
 		datagrid.PropertyNotifier
 		Title string
@@ -223,6 +231,7 @@ func TestOnDemand_BindingRefreshInvalidates(t *testing.T) {
 // InvalidateRect ограничивает diff заявленной областью: тайлы кадра лежат
 // только в тайл-диапазоне повреждения.
 func TestOnDemand_InvalidateRectLimitsDiff(t *testing.T) {
+	testreset.Globals(t)
 	eng, lbl := newOnDemandEngine()
 	eng.SetRenderOnDemand(true)
 	frames := eng.Frames()
@@ -266,6 +275,7 @@ drainLoop:
 
 // SetRoot не блокируется рендером и безопасен под нагрузкой (узкий e.mu).
 func TestEngine_ConcurrentSetRootAndEvents(t *testing.T) {
+	testreset.Globals(t)
 	eng, _ := newOnDemandEngine()
 	eng.Start()
 	defer eng.Stop()

@@ -5,8 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/core/overlay"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Дыра в картинке вынесенного оверлея.
@@ -28,9 +29,9 @@ import (
 // хост попапов, и возвращает картинку.
 func popupImageFor(t *testing.T, c *Canvas, od widget.OverlayDrawer, r image.Rectangle) *image.RGBA {
 	t.Helper()
-	ent := &popupEntry{}
-	oc := ent.overlayCanvas(c, r)
-	return renderOverlayInto(oc, od, r)
+	var a overlay.Arena
+	oc := a.CanvasFor(c, r)
+	return overlay.RenderOverlayInto(oc, od, r)
 }
 
 func TestPopupHost_CascadeLeavesATransparentHole(t *testing.T) {

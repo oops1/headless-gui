@@ -16,8 +16,8 @@ package desktop
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // ComponentTrayGroup — имя компонента группы в стилях темы (плашка).
@@ -76,6 +76,16 @@ func (g *TrayGroup) AddItem(it Item) {
 
 // Items возвращает значки группы.
 func (g *TrayGroup) Items() []Item { return append([]Item(nil), g.items...) }
+
+// ExtraChildren — значки для пометки поддерева (widget.ExtraChildrenLister):
+// группа держит их мимо Children().
+func (g *TrayGroup) ExtraChildren() []widget.Widget {
+	out := make([]widget.Widget, 0, len(g.items))
+	for _, it := range g.items {
+		out = append(out, it)
+	}
+	return out
+}
 
 // Close закрывает значки группы (отписывает их от источников).
 func (g *TrayGroup) Close() {
@@ -163,7 +173,7 @@ func (g *TrayGroup) Draw(ctx widget.DrawContext) {
 	}
 	for _, it := range g.items {
 		if !it.Bounds().Empty() {
-			it.Draw(ctx)
+			widget.DrawTraced(it, ctx)
 		}
 	}
 }

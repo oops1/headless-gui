@@ -11,10 +11,13 @@
 // (LoadUIFromXAMLFS). Здесь то же самое для шрифтов: каталог внутри fs.FS
 // регистрируется так же, как каталог на диске, и вся поставка укладывается в
 // один исполняемый файл.
+
 package engine
 
 import (
 	"fmt"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
+	"github.com/oops1/headless-gui/v4/widget"
 	"io"
 	"io/fs"
 	"path"
@@ -61,6 +64,7 @@ func (e *Engine) RegisterFontFS(fsys fs.FS, dir string) error {
 
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
+	defer widget.BumpTextMetricsRev() // замеры зарегистрированными шрифтами устарели
 
 	n := 0
 	var firstErr error
@@ -105,10 +109,10 @@ func (e *Engine) RegisterFontFS(fsys fs.FS, dir string) error {
 // своё «Roboto» после того, как приложение зарегистрировало собственное.
 func (e *Engine) registerFontBlob(stem string, data []byte) bool {
 	e.canvas.RegisterFont(stem, data)
-	if !e.canvas.hasFont(stem) {
+	if !e.canvas.HasFont(stem) {
 		return false
 	}
-	if fam := fontFamilyAlias(stem); fam != "" && fam != stem && !e.canvas.hasFont(fam) {
+	if fam := fontFamilyAlias(stem); fam != "" && fam != stem && !e.canvas.HasFont(fam) {
 		e.canvas.RegisterFont(fam, data)
 	}
 	return true
@@ -122,17 +126,17 @@ func readFontFS(fsys fs.FS, name string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	if st, err := f.Stat(); err == nil && st.Size() > maxFontFileSize {
-		return nil, fmt.Errorf("%s: файл шрифта слишком большой (%d байт > %d)", name, st.Size(), maxFontFileSize)
+	if st, err := f.Stat(); err == nil && st.Size() > hgtext.MaxFontFileSize {
+		return nil, fmt.Errorf("%s: файл шрифта слишком большой (%d байт > %d)", name, st.Size(), hgtext.MaxFontFileSize)
 	}
 	// Читаем на байт больше границы: усечённый шрифт бесполезен, и отличить
 	// «ровно по границе» от «больше» иначе нечем.
-	data, err := io.ReadAll(io.LimitReader(f, maxFontFileSize+1))
+	data, err := io.ReadAll(io.LimitReader(f, hgtext.MaxFontFileSize+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > maxFontFileSize {
-		return nil, fmt.Errorf("%s: файл шрифта слишком большой (> %d байт)", name, maxFontFileSize)
+	if int64(len(data)) > hgtext.MaxFontFileSize {
+		return nil, fmt.Errorf("%s: файл шрифта слишком большой (> %d байт)", name, hgtext.MaxFontFileSize)
 	}
 	return data, nil
 }

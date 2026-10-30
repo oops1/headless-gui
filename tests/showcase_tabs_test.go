@@ -4,8 +4,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
-	"github.com/oops1/headless-gui/v3/widget/treeview"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
+	"github.com/oops1/headless-gui/v4/widget/treeview"
 )
 
 // Витрина showcase показывает КАЖДЫЙ контрол движка — иначе о нём не узнают.
@@ -29,6 +30,7 @@ func showcaseReg(t *testing.T) map[string]widget.Widget {
 }
 
 func TestShowcase_ToolbarTab(t *testing.T) {
+	testreset.Globals(t)
 	reg := showcaseReg(t)
 
 	tb, ok := reg["tbMain"].(*widget.ToolBar)
@@ -65,6 +67,7 @@ func TestShowcase_ToolbarTab(t *testing.T) {
 }
 
 func TestShowcase_TreesAndTablesTab(t *testing.T) {
+	testreset.Globals(t)
 	reg := showcaseReg(t)
 
 	tw, ok := reg["treeDemo"].(*widget.TreeViewWidget)
@@ -95,6 +98,7 @@ func TestShowcase_TreesAndTablesTab(t *testing.T) {
 }
 
 func TestShowcase_CompareTab(t *testing.T) {
+	testreset.Globals(t)
 	reg := showcaseReg(t)
 
 	dv, ok := reg["diffDemo"].(*widget.DiffView)

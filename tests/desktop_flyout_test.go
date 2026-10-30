@@ -5,10 +5,11 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/desktop"
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/desktop"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Всплывающая панель рабочего стола — оверлей движка, а не обычный ребёнок.
@@ -19,6 +20,7 @@ import (
 // оверлеем, она молча начнёт обрезаться по окну — картинка останется
 // «почти правильной», и заметить это по тестам поведения нельзя.
 func TestDesktopFlyout_DrawsAsEngineOverlay(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 400, 300
 
 	tm := theme.NewManager()
@@ -87,6 +89,7 @@ func TestDesktopFlyout_DrawsAsEngineOverlay(t *testing.T) {
 
 // Панель не уезжает за экран, даже если значок стоит у самого края.
 func TestDesktopFlyout_FitsIntoScreen(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 400, 300
 	screen := image.Rect(0, 0, w, h)
 

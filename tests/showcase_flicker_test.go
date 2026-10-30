@@ -5,8 +5,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Мигание интерфейса.
@@ -153,6 +154,7 @@ func filterNoise(bad []image.Point, noise image.Rectangle) (image.Rectangle, int
 // Проводка курсором через всю сцену: подсветка обязана заявлять свою область
 // целиком.
 func TestShowcase_HoverDoesNotFlicker(t *testing.T) {
+	testreset.Globals(t)
 	eng, root := flickerScene(t)
 
 	b := root.Bounds()
@@ -166,6 +168,7 @@ func TestShowcase_HoverDoesNotFlicker(t *testing.T) {
 
 // Щелчки: открытие и закрытие меню, переключение вкладок, нажатия кнопок.
 func TestShowcase_ClicksDoNotFlicker(t *testing.T) {
+	testreset.Globals(t)
 	eng, root := flickerScene(t)
 
 	b := root.Bounds()
@@ -185,6 +188,7 @@ func TestShowcase_ClicksDoNotFlicker(t *testing.T) {
 
 // Прокрутка колесом: список обязан заявлять всю область, которую сдвинул.
 func TestShowcase_WheelDoesNotFlicker(t *testing.T) {
+	testreset.Globals(t)
 	eng, root := flickerScene(t)
 
 	b := root.Bounds()
@@ -234,6 +238,7 @@ func diffBox(a, b *image.RGBA) image.Rectangle {
 // Сравнение идёт НА ОДНОМ движке: два разных движка дают разную картинку из-за
 // общих на процесс мелочей (шрифты, измеритель), и сравнивать их бессмысленно.
 func TestShowcase_OcclusionKeepsThePicture(t *testing.T) {
+	testreset.Globals(t)
 	eng, root := flickerScene(t)
 
 	// Проводим курсором и щёлкаем: часть виджетов меняет вид, вкладки

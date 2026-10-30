@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/testengine"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testengine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Появление и исчезновение всплывающих панелей по анимации темы.
@@ -253,8 +253,8 @@ func TestFlyout_AnimationInvalidatesOnlyItsArea(t *testing.T) {
 
 	// Далеко от панели: ни тень, ни путь выезда сюда не доходят.
 	far := &countingItem{Item: newWallPanel(image.Rect(0, 0, w, 48))}
-	// Под панелью: перерисовываться должна.
-	near := &countingItem{Item: newWallPanel(image.Rect(0, 200, w, 520))}
+	// Под панелью: здесь панель должна появиться на экране.
+	near := newWallPanel(image.Rect(0, 200, w, 520))
 	root.AddChild(far)
 	root.AddChild(near)
 
@@ -270,8 +270,8 @@ func TestFlyout_AnimationInvalidatesOnlyItsArea(t *testing.T) {
 	eng.SetRenderOnDemand(true)
 	eng.SetRoot(root)
 	eng.RenderOnce()
-	eng.RenderOnce()
-	farBefore, nearBefore := far.draws, near.draws
+	before := eng.RenderOnce()
+	farBefore := far.draws
 
 	f.Open(image.Rect(0, h-40, 48, h))
 	eng.RenderOnce()
@@ -281,14 +281,17 @@ func TestFlyout_AnimationInvalidatesOnlyItsArea(t *testing.T) {
 	widget.StepAnimations(t0.Add(70 * time.Millisecond))
 	eng.RenderOnce()
 	widget.StepAnimations(t0.Add(time.Second))
-	eng.RenderOnce()
+	after := eng.RenderOnce()
 
 	if far.draws != farBefore {
 		t.Errorf("далёкая область перерисована %d раз: анимация панели будит кадр целиком",
 			far.draws-farBefore)
 	}
-	if near.draws == nearBefore {
-		t.Error("область под панелью не перерисована — панель на экране не появилась")
+	// Под панелью кадр изменился. Draw панели-подложки здесь не считается:
+	// на пути команд виджет с верным списком не рисуется заново, панель
+	// ложится поверх воспроизведённого списка.
+	if region := f.paintedRegion(); regionEqual(before, after, region) {
+		t.Errorf("область под панелью %v не изменилась — панель на экране не появилась", region)
 	}
 
 	// И закрытие тоже.
@@ -306,6 +309,19 @@ func TestFlyout_AnimationInvalidatesOnlyItsArea(t *testing.T) {
 
 // pixelAt берёт пиксель кадра.
 func pixelAt(img *image.RGBA, x, y int) color.RGBA { return img.RGBAAt(x, y) }
+
+// regionEqual сообщает, совпадают ли два кадра в области r.
+func regionEqual(a, b *image.RGBA, r image.Rectangle) bool {
+	r = r.Intersect(a.Rect).Intersect(b.Rect)
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			if a.RGBAAt(x, y) != b.RGBAAt(x, y) {
+				return false
+			}
+		}
+	}
+	return true
+}
 
 func TestFlyout_FadesIn(t *testing.T) {
 	testreset.Globals(t)

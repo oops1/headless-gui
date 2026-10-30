@@ -3,8 +3,9 @@ package tests
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
-	"github.com/oops1/headless-gui/v3/widget/datagrid"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
+	"github.com/oops1/headless-gui/v4/widget/datagrid"
 )
 
 type person struct {
@@ -43,6 +44,7 @@ func eqStr(a, b []string) bool {
 }
 
 func TestCollectionView_Filter(t *testing.T) {
+	testreset.Globals(t)
 	v := widget.NewCollectionView(sampleOC())
 	v.SetFilter(func(it interface{}) bool { return it.(*person).Age >= 18 })
 	got := names(v.Items())
@@ -53,6 +55,7 @@ func TestCollectionView_Filter(t *testing.T) {
 }
 
 func TestCollectionView_SortAscDesc(t *testing.T) {
+	testreset.Globals(t)
 	v := widget.NewCollectionView(sampleOC())
 	v.SetSort(widget.SortDescription{Property: "Name"}) // регистронезависимо
 	if got := names(v.Items()); !eqStr(got, []string{"alice", "Bob", "Charlie", "Dave"}) {
@@ -65,6 +68,7 @@ func TestCollectionView_SortAscDesc(t *testing.T) {
 }
 
 func TestCollectionView_MultiSort(t *testing.T) {
+	testreset.Globals(t)
 	v := widget.NewCollectionView(sampleOC())
 	// Сначала по City (asc), затем по Age (desc) внутри города.
 	v.SetSort(
@@ -78,6 +82,7 @@ func TestCollectionView_MultiSort(t *testing.T) {
 }
 
 func TestCollectionView_FilterPlusSort(t *testing.T) {
+	testreset.Globals(t)
 	v := widget.NewCollectionView(sampleOC())
 	v.SetFilter(func(it interface{}) bool { return it.(*person).City == "NYC" })
 	v.AddSort(widget.SortDescription{Property: "Age"})
@@ -87,6 +92,7 @@ func TestCollectionView_FilterPlusSort(t *testing.T) {
 }
 
 func TestCollectionView_Group(t *testing.T) {
+	testreset.Globals(t)
 	v := widget.NewCollectionView(sampleOC())
 	v.SetGroup("City")
 	groups := v.Groups()
@@ -103,6 +109,7 @@ func TestCollectionView_Group(t *testing.T) {
 }
 
 func TestCollectionView_LiveRefreshOnSourceChange(t *testing.T) {
+	testreset.Globals(t)
 	oc := sampleOC()
 	v := widget.NewCollectionView(oc)
 	v.SetFilter(func(it interface{}) bool { return it.(*person).Age >= 18 })
@@ -116,6 +123,7 @@ func TestCollectionView_LiveRefreshOnSourceChange(t *testing.T) {
 }
 
 func TestCollectionView_ViewChangedFires(t *testing.T) {
+	testreset.Globals(t)
 	v := widget.NewCollectionView(sampleOC())
 	fired := 0
 	v.AddViewChanged(func() { fired++ })

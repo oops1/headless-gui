@@ -6,10 +6,12 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 func TestModalAdapter_IsModal(t *testing.T) {
+	testreset.Globals(t)
 	p := widget.NewPanel(color.RGBA{A: 255})
 	m := widget.NewModalAdapter(p)
 	if !m.IsModal() {
@@ -18,6 +20,7 @@ func TestModalAdapter_IsModal(t *testing.T) {
 }
 
 func TestModalAdapter_DimColor_Default(t *testing.T) {
+	testreset.Globals(t)
 	p := widget.NewPanel(color.RGBA{A: 255})
 	m := widget.NewModalAdapter(p)
 	dim := m.DimColor()
@@ -27,6 +30,7 @@ func TestModalAdapter_DimColor_Default(t *testing.T) {
 }
 
 func TestModalAdapter_DimColor_Custom(t *testing.T) {
+	testreset.Globals(t)
 	p := widget.NewPanel(color.RGBA{A: 255})
 	custom := color.RGBA{R: 0, G: 0, B: 0, A: 200}
 	m := widget.NewModalAdapterWithDim(p, custom)
@@ -36,6 +40,7 @@ func TestModalAdapter_DimColor_Custom(t *testing.T) {
 }
 
 func TestModalAdapter_DelegatesMouseClick(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	btn.SetBounds(image.Rect(0, 0, 100, 40))
 	clicked := false
@@ -53,6 +58,7 @@ func TestModalAdapter_DelegatesMouseClick(t *testing.T) {
 }
 
 func TestModalAdapter_DelegatesMouseMove(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	btn.SetBounds(image.Rect(0, 0, 100, 40))
 
@@ -66,6 +72,7 @@ func TestModalAdapter_DelegatesMouseMove(t *testing.T) {
 }
 
 func TestModalAdapter_ImplementsModalWidget(t *testing.T) {
+	testreset.Globals(t)
 	p := widget.NewPanel(color.RGBA{A: 255})
 	m := widget.NewModalAdapter(p)
 	// Проверяем, что ModalAdapter реализует ModalWidget

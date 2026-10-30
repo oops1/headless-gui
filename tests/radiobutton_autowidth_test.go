@@ -5,12 +5,14 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Переключатель устроен как флажок (кружок, отступ, подпись) и получал те же
 // ровные 80 точек без Width, что флажок в GG-69, — исправлен вместе с ним.
 func TestRadioButton_AutoWidthInDockPanel(t *testing.T) {
+	testreset.Globals(t)
 	root, reg, err := widget.LoadUIFromXAMLFS([]byte(`<DockPanel Width="800" Height="28">
   <RadioButton x:Name="long" DockPanel.Dock="Left" GroupName="g" Content="по дате фиксации"/>
   <RadioButton x:Name="short" DockPanel.Dock="Left" GroupName="g" Content="Все"/>

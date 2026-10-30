@@ -5,8 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/core/loop"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Список damage-областей вместо одного объединения.
@@ -65,12 +66,12 @@ func TestDamage_CollapsesWhenTooMany(t *testing.T) {
 
 	// Заведомо больше порога — и все непересекающиеся, чтобы ни одна не
 	// поглотилась.
-	for i := 0; i < maxDamageRects+5; i++ {
+	for i := 0; i < loop.MaxDamageRects+5; i++ {
 		x := i * 8
 		e.InvalidateRect(image.Rect(x, 0, x+4, 4))
 	}
 	rects, _ := e.consumeDamage()
-	if len(rects) > maxDamageRects {
+	if len(rects) > loop.MaxDamageRects {
 		t.Errorf("список не схлопнулся: %d областей", len(rects))
 	}
 }

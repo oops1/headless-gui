@@ -11,9 +11,10 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
-	dgrid "github.com/oops1/headless-gui/v3/widget/datagrid"
-	"github.com/oops1/headless-gui/v3/widget/treeview"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
+	dgrid "github.com/oops1/headless-gui/v4/widget/datagrid"
+	"github.com/oops1/headless-gui/v4/widget/treeview"
 )
 
 // wheelDown/wheelUp — события колеса в точке (x, y).
@@ -40,6 +41,7 @@ func newScrollableListView() *widget.ListView {
 }
 
 func TestWheel_ListView_ScrollsDownAndUp(t *testing.T) {
+	testreset.Globals(t)
 	lv := newScrollableListView()
 
 	if got := lv.ScrollY(); got != 0 {
@@ -65,6 +67,7 @@ func TestWheel_ListView_ScrollsDownAndUp(t *testing.T) {
 }
 
 func TestWheel_ListView_ClampAtBounds(t *testing.T) {
+	testreset.Globals(t)
 	lv := newScrollableListView()
 
 	// У верхней границы колесо вверх ничего не двигает → не поглощается.
@@ -90,6 +93,7 @@ func TestWheel_ListView_ClampAtBounds(t *testing.T) {
 }
 
 func TestWheel_ListView_ContentFits_NotConsumed(t *testing.T) {
+	testreset.Globals(t)
 	lv := widget.NewListView("a", "b") // 2 строки — помещаются в 100px
 	lv.SetBounds(image.Rect(0, 0, 200, 100))
 
@@ -102,6 +106,7 @@ func TestWheel_ListView_ContentFits_NotConsumed(t *testing.T) {
 }
 
 func TestWheel_ListView_ThroughEngine(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	lv := newScrollableListView()
 	eng.SetRoot(lv)
@@ -126,6 +131,7 @@ func newScrollableTreeView() *widget.TreeViewWidget {
 }
 
 func TestWheel_TreeView_ScrollsDownAndUp(t *testing.T) {
+	testreset.Globals(t)
 	w := newScrollableTreeView()
 
 	if !w.OnMouseButton(wheelDown(50, 50)) {
@@ -145,6 +151,7 @@ func TestWheel_TreeView_ScrollsDownAndUp(t *testing.T) {
 }
 
 func TestWheel_TreeView_ClampAtBounds(t *testing.T) {
+	testreset.Globals(t)
 	w := newScrollableTreeView()
 
 	if w.OnMouseButton(wheelUp(50, 50)) {
@@ -164,6 +171,7 @@ func TestWheel_TreeView_ClampAtBounds(t *testing.T) {
 }
 
 func TestWheel_TreeView_ContentFits_NotConsumed(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewTreeViewWidget()
 	w.Tree.ItemHeight = 20
 	w.AddRoot(treeview.NewItem("a"))
@@ -176,6 +184,7 @@ func TestWheel_TreeView_ContentFits_NotConsumed(t *testing.T) {
 }
 
 func TestWheel_TreeView_ThroughEngine(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	w := newScrollableTreeView()
 	eng.SetRoot(w)
@@ -210,6 +219,7 @@ func newScrollableDataGrid(rows int) *widget.DataGridWidget {
 }
 
 func TestWheel_DataGrid_ScrollsDownAndUp(t *testing.T) {
+	testreset.Globals(t)
 	w := newScrollableDataGrid(30)
 
 	if !w.OnMouseButton(wheelDown(50, 50)) {
@@ -229,6 +239,7 @@ func TestWheel_DataGrid_ScrollsDownAndUp(t *testing.T) {
 }
 
 func TestWheel_DataGrid_ClampAtBounds(t *testing.T) {
+	testreset.Globals(t)
 	w := newScrollableDataGrid(30)
 
 	if w.OnMouseButton(wheelUp(50, 50)) {
@@ -248,6 +259,7 @@ func TestWheel_DataGrid_ClampAtBounds(t *testing.T) {
 }
 
 func TestWheel_DataGrid_ContentFits_NotConsumed(t *testing.T) {
+	testreset.Globals(t)
 	w := newScrollableDataGrid(2) // 2 строки помещаются
 
 	if w.OnMouseButton(wheelDown(50, 50)) {
@@ -256,6 +268,7 @@ func TestWheel_DataGrid_ContentFits_NotConsumed(t *testing.T) {
 }
 
 func TestWheel_DataGrid_ThroughEngine(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	w := newScrollableDataGrid(30)
 	eng.SetRoot(w)

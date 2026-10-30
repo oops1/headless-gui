@@ -6,12 +6,14 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // TestWindow_OnDragMove_KeepsEdgeResize — приложение забрало себе
 // перемещение окна, но ресайз за края продолжает работать.
 func TestWindow_OnDragMove_KeepsEdgeResize(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("win", 400, 300)
 	w.SetBounds(image.Rect(100, 100, 500, 400))
 	w.OnDragMove = func(dx, dy int) {} // перемещение ведёт приложение

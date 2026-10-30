@@ -14,8 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 const (
@@ -101,7 +101,7 @@ func (t *Taskbar) slideTo(want int, animated bool) {
 	}
 	dur := defaultSlide
 	if t.tm != nil {
-		if t.tm.MotionReduced() {
+		if t.tm.ReducesMotion() {
 			// «Меньше движения»: нулевая длительность токена — не «токена нет»,
 			// и умолчание в 140 мс сюда подставлять нельзя.
 			dur = 0

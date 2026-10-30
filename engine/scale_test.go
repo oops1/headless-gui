@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Смежные логические прямоугольники на дробном масштабе не оставляют
@@ -21,7 +21,7 @@ func TestScale_NoGapsAdjacentRects(t *testing.T) {
 	if c.W != 150 || c.H != 150 {
 		t.Fatalf("физический размер %dx%d, ожидался 150x150", c.W, c.H)
 	}
-	c.blitBackground()
+	c.BlitBackground()
 
 	red := color.RGBA{R: 255, A: 255}
 	blue := color.RGBA{B: 255, A: 255}
@@ -37,11 +37,11 @@ func TestScale_NoGapsAdjacentRects(t *testing.T) {
 	}
 	// Вся физическая область [0,63)x[0,63) обязана быть закрашена только
 	// красным или синим — чёрный пиксель означал бы щель.
-	maxP := c.sx(42)
+	maxP := c.PhysX(42)
 	for y := 0; y < maxP; y++ {
 		for x := 0; x < maxP; x++ {
-			off := c.back.PixOffset(x, y)
-			r, g, b := c.back.Pix[off], c.back.Pix[off+1], c.back.Pix[off+2]
+			off := c.Back().PixOffset(x, y)
+			r, g, b := c.Back().Pix[off], c.Back().Pix[off+1], c.Back().Pix[off+2]
 			if g != 0 || (r == 0 && b == 0) || (r != 0 && b != 0) {
 				t.Fatalf("щель/нахлёст в физическом пикселе (%d,%d): rgb=%d,%d,%d", x, y, r, g, b)
 			}
@@ -64,7 +64,7 @@ func TestScale_TextMeasureStable(t *testing.T) {
 		t.Errorf("логическая ширина при 2x = %d, при 1x = %d (дрейф %d)", w2, w1, diff)
 	}
 	// Физическое измерение при 2x примерно вдвое больше логического.
-	phys := eng2.canvas.measureWithFallback(eng2.canvas.fontCache, "Пример Example 123", 12)
+	phys := eng2.canvas.DefaultFont().Measure("Пример Example 123", 12)
 	if phys < w1*2-4 || phys > w1*2+8 {
 		t.Errorf("физическая ширина %d, ожидалась ~%d", phys, w1*2)
 	}
@@ -100,12 +100,12 @@ func TestScale_PreservesFonts(t *testing.T) {
 	if before == 0 {
 		t.Skip("нет именованных шрифтов (assets не найдены)")
 	}
-	fallbacks := len(eng.canvas.fallbacks)
+	fallbacks := len(eng.canvas.Fallbacks())
 	eng.SetScale(2)
 	if after := len(eng.AvailableFonts()); after != before {
 		t.Errorf("именованные шрифты потеряны при SetScale: %d → %d", before, after)
 	}
-	if got := len(eng.canvas.fallbacks); got != fallbacks {
+	if got := len(eng.canvas.Fallbacks()); got != fallbacks {
 		t.Errorf("fallback-шрифты потеряны при SetScale: %d → %d", fallbacks, got)
 	}
 }
@@ -114,12 +114,12 @@ func TestScale_PreservesFonts(t *testing.T) {
 func TestScale_SetResolutionPreservesFonts(t *testing.T) {
 	testreset.Globals(t)
 	eng := New(200, 100, 20)
-	fallbacks := len(eng.canvas.fallbacks)
+	fallbacks := len(eng.canvas.Fallbacks())
 	if fallbacks == 0 {
 		t.Skip("нет fallback-шрифтов")
 	}
 	eng.SetResolution(400, 300)
-	if got := len(eng.canvas.fallbacks); got != fallbacks {
+	if got := len(eng.canvas.Fallbacks()); got != fallbacks {
 		t.Errorf("fallback-шрифты потеряны при SetResolution: %d → %d", fallbacks, got)
 	}
 }
@@ -200,7 +200,7 @@ func TestScale_VisualSample(t *testing.T) {
 		eng := New(300, 120, 20)
 		eng.SetScale(k)
 		c := eng.canvas
-		c.blitBackground()
+		c.BlitBackground()
 		accent := color.RGBA{R: 0, G: 120, B: 212, A: 255}
 		white := color.RGBA{R: 235, G: 235, B: 235, A: 255}
 		c.FillRoundRect(12, 12, 130, 34, 8, accent)
@@ -213,7 +213,7 @@ func TestScale_VisualSample(t *testing.T) {
 		if k == 2 {
 			name = prefix + "_2x.png"
 		}
-		savePNG(c.back, name)
+		savePNG(c.Back(), name)
 		t.Logf("сохранено: %s", name)
 	}
 }

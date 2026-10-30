@@ -14,7 +14,7 @@
 // Файл собран инструментом localize_xaml из прежнего русского showcase.xaml.
 package showcasestrings
 
-import "github.com/oops1/headless-gui/v3/widget"
+import "github.com/oops1/headless-gui/v4/widget"
 
 // showcaseRU — переводы интерфейса showcase на русский.
 var showcaseRU = map[string]string{

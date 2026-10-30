@@ -5,7 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Значок пункта меню из разметки — часть запроса GG-53.
@@ -13,6 +14,7 @@ import (
 // Значки Go.Git вкомпилированы, но разметке отставать незачем: у Button и
 // TextInput путь в атрибуте уже читается, а у пункта меню — нет.
 func TestMenuIcon_FromXAML(t *testing.T) {
+	testreset.Globals(t)
 	dir := t.TempDir()
 	uiDir := filepath.Join(dir, "ui")
 	if err := os.MkdirAll(uiDir, 0o755); err != nil {
@@ -61,6 +63,7 @@ func TestMenuIcon_FromXAML(t *testing.T) {
 // Недоступный значок не ломает загрузку разметки: меню без картинки понятнее,
 // чем окно, не открывшееся из-за неё.
 func TestMenuIcon_MissingIconIsSkipped(t *testing.T) {
+	testreset.Globals(t)
 	dir := t.TempDir()
 	xamlPath := filepath.Join(dir, "menu.xaml")
 	const xaml = `<Canvas Width="300" Height="200">

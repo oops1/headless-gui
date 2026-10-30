@@ -5,8 +5,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // actionOwner — виджет, рисующий два узла сам и принимающий действия над ними.
@@ -34,7 +34,7 @@ func (o *actionOwner) AccessChildren() []widget.AccessInfo {
 
 func (o *actionOwner) AccessAction(id string, action widget.AccessActionKind) bool {
 	o.calls = append(o.calls, id+":"+action.String())
-	o.onLoop = o.eng.loopRunning() && o.eng.loopGID.Load() == curGoroutineID()
+	o.onLoop = o.eng.loopRunning() && o.eng.lp.GoroutineID() == curGoroutineID()
 	return o.reply
 }
 
@@ -120,7 +120,7 @@ func TestAccessAction_FocusesOwner(t *testing.T) {
 		if !eng.AccessAction(o, "L", act) {
 			t.Fatalf("%v отвергнуто", act)
 		}
-		if !o.focused || eng.focus.get() != widget.Widget(o) {
+		if !o.focused || eng.in.Focused() != widget.Widget(o) {
 			t.Errorf("%v: фокус на владельце не получен", act)
 		}
 	}

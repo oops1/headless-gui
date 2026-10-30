@@ -15,8 +15,8 @@ import (
 	"image"
 	"strconv"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Ключи наведения и выбора вида Windows 11; префиксы не пересекаются с
@@ -59,6 +59,11 @@ func (m *StartMenu) gridSnapshot() gridSnap {
 
 // measureUI — ширина строки обычным шрифтом интерфейса размером pt.
 func measureUI(text string, pt float64) int { return widget.MeasureUIText(text, pt) }
+
+// measureUIFor — замер движком дерева виджета w (владелец, ADR-0008).
+func measureUIFor(w widget.Widget, text string, pt float64) int {
+	return widget.MeasureTextFor(w, text, pt)
+}
 
 // drawGrid рисует меню Windows 11. Прямоугольник панели берётся у Flyout: он же
 // сдвинут шагом появления, и содержимое едет вместе с подложкой.

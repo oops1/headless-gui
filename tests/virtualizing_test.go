@@ -6,7 +6,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 func makeItems(n int) []interface{} {
@@ -31,6 +32,7 @@ func newVIC() (*widget.VirtualizingItemsControl, *int) {
 }
 
 func TestVirtualizing_OnlyVisibleMaterialized(t *testing.T) {
+	testreset.Globals(t)
 	v, _ := newVIC()
 	v.SetItems(makeItems(10000))
 	// Высота 280 → 10 видимых строк + буфер 2*2 = максимум ~14.
@@ -49,6 +51,7 @@ func TestVirtualizing_OnlyVisibleMaterialized(t *testing.T) {
 }
 
 func TestVirtualizing_ScrollChangesWindow(t *testing.T) {
+	testreset.Globals(t)
 	v, _ := newVIC()
 	v.SetItems(makeItems(10000))
 	v.SetBounds(image.Rect(0, 0, 200, 280))
@@ -72,6 +75,7 @@ func TestVirtualizing_ScrollChangesWindow(t *testing.T) {
 }
 
 func TestVirtualizing_ScrollClampsAtEnd(t *testing.T) {
+	testreset.Globals(t)
 	v, _ := newVIC()
 	v.SetItems(makeItems(50))
 	v.SetBounds(image.Rect(0, 0, 200, 280))
@@ -83,6 +87,7 @@ func TestVirtualizing_ScrollClampsAtEnd(t *testing.T) {
 }
 
 func TestVirtualizing_BindCollectionView(t *testing.T) {
+	testreset.Globals(t)
 	oc := sampleOC() // из collectionview_test.go (4 person)
 	cv := widget.NewCollectionView(oc)
 	v := widget.NewVirtualizingItemsControl()
@@ -113,6 +118,7 @@ func TestVirtualizing_BindCollectionView(t *testing.T) {
 // Сцена повторяет вкладку «3.2.5» витрины: контент-канва вкладки смещена
 // вправо на ширину сайдбара (220px) и вниз под шапку, список лежит внутри неё.
 func TestVirtualizing_RowsNotDoubleShiftedInsideCanvas(t *testing.T) {
+	testreset.Globals(t)
 	const (
 		itemH   = 26
 		listW   = 470

@@ -6,8 +6,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Усечение подписи кнопки (GG-49) и свой кегль у кнопки, флажка и списка
@@ -58,6 +59,7 @@ func widgetScene(t *testing.T, w widget.Widget, r image.Rectangle) *image.RGBA {
 
 // Длинная подпись не вылезает за кнопку.
 func TestButton_EllipsizesLabel(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("Очень длинная подпись кнопки, которая точно не влезет")
 	img := widgetScene(t, btn, image.Rect(40, 40, 160, 72))
 
@@ -72,6 +74,7 @@ func TestButton_EllipsizesLabel(t *testing.T) {
 
 // Короткая подпись не трогается.
 func TestButton_ShortLabelUntouched(t *testing.T) {
+	testreset.Globals(t)
 	short := widget.NewButton("OK")
 	a := widgetScene(t, short, image.Rect(40, 40, 200, 72))
 
@@ -113,6 +116,7 @@ func diffBoxOf(a, b *image.RGBA) image.Rectangle {
 // Поэтому сравниваем кадр с подписью и кадр без неё — расходятся они ровно на
 // буквах.
 func TestFontSize_AppliesToWidgets(t *testing.T) {
+	testreset.Globals(t)
 	rect := image.Rect(20, 30, 380, 70)
 	cases := []struct {
 		name string
@@ -155,6 +159,7 @@ func TestFontSize_AppliesToWidgets(t *testing.T) {
 
 // Ноль означает общий размер: виджет без своего кегля рисуется как раньше.
 func TestFontSize_ZeroMeansDefault(t *testing.T) {
+	testreset.Globals(t)
 	plain := widget.NewButton("Текст")
 	a := widgetScene(t, plain, image.Rect(40, 40, 200, 72))
 
@@ -171,6 +176,7 @@ func TestFontSize_ZeroMeansDefault(t *testing.T) {
 
 // Атрибут разметки читается всеми тремя тегами.
 func TestFontSize_FromXAML(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Window Width="400" Height="200"><Canvas>
 	  <Button x:Name="b" Left="10" Top="10" Width="120" Height="30" Content="Кнопка" FontSize="18"/>
 	  <CheckBox x:Name="c" Left="10" Top="50" Width="120" Height="24" Content="Флажок" FontSize="9"/>
@@ -194,6 +200,7 @@ func TestFontSize_FromXAML(t *testing.T) {
 
 // Вид стрелки списка задаётся и в разметке (GG-55).
 func TestDropdownArrow_FromXAML(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Window Width="400" Height="200"><Canvas>
 	  <ComboBox x:Name="a" Left="10" Top="10" Width="160" Height="28" ArrowStyle="Chevron"/>
 	  <ComboBox x:Name="b" Left="10" Top="50" Width="160" Height="28" ArrowStyle="Triangle"/>

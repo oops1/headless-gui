@@ -13,8 +13,8 @@ import (
 	"image/color"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // ComponentNotifications — имя компонента для стилей темы.
@@ -137,6 +137,7 @@ func NewNotificationCenter(tm *theme.Manager, ns Notifications) *NotificationCen
 		ns:     ns,
 	}
 	nc.view = newRichView(tm, ncModeCenter, nc.viewSource())
+	nc.view.owner = nc
 	nc.Content = nc.draw
 	nc.Size = nc.size
 	nc.Place = nc.place

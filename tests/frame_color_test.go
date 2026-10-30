@@ -5,8 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Цвет рамки главного окна — запрос GG-56.
@@ -48,6 +49,7 @@ func xorOf(c color.RGBA) color.RGBA {
 
 // Без заданного цвета главное окно рисуется как раньше — XOR-рамкой.
 func TestFrameColor_DefaultIsXOR(t *testing.T) {
+	testreset.Globals(t)
 	got, w := frameScene(t, nil)
 	if w.FrameColor.A != 0 {
 		t.Fatalf("у окна без темы с рамкой появился цвет рамки %v", w.FrameColor)
@@ -62,6 +64,7 @@ func TestFrameColor_DefaultIsXOR(t *testing.T) {
 
 // Свой цвет красит рамку главного окна.
 func TestFrameColor_SetFrameColorPaintsMainWindow(t *testing.T) {
+	testreset.Globals(t)
 	got, _ := frameScene(t, func(w *widget.Window) { w.SetFrameColor(accent) })
 	if got != accent {
 		t.Errorf("рамка %v, задан %v", got, accent)
@@ -71,6 +74,7 @@ func TestFrameColor_SetFrameColorPaintsMainWindow(t *testing.T) {
 // Смена темы не сбрасывает цвет, заданный приложением: акцент системы не
 // должен слетать при переключении светлой и тёмной темы.
 func TestFrameColor_SurvivesThemeSwitch(t *testing.T) {
+	testreset.Globals(t)
 	got, _ := frameScene(t, func(w *widget.Window) {
 		w.SetFrameColor(accent)
 		w.ApplyTheme(widget.ThemeByName("Win11 Light"))
@@ -82,6 +86,7 @@ func TestFrameColor_SurvivesThemeSwitch(t *testing.T) {
 
 // Цвет рамки — часть темы: Theme.WindowFrame красит рамку без кода в окне.
 func TestFrameColor_FromTheme(t *testing.T) {
+	testreset.Globals(t)
 	th := widget.ThemeByName("Win10 Dark")
 	th.WindowFrame = accent
 	got, _ := frameScene(t, func(w *widget.Window) { w.ApplyTheme(th) })
@@ -92,6 +97,7 @@ func TestFrameColor_FromTheme(t *testing.T) {
 
 // Неактивное окно приглушает рамку, как Windows гасит акцент окна без фокуса.
 func TestFrameColor_InactiveIsDimmed(t *testing.T) {
+	testreset.Globals(t)
 	got, _ := frameScene(t, func(w *widget.Window) {
 		w.SetFrameColor(accent)
 		w.SetActive(false)
@@ -106,6 +112,7 @@ func TestFrameColor_InactiveIsDimmed(t *testing.T) {
 
 // Нулевой цвет снимает закрепление: рамка снова прежняя.
 func TestFrameColor_ZeroRestoresXOR(t *testing.T) {
+	testreset.Globals(t)
 	got, w := frameScene(t, func(w *widget.Window) {
 		w.SetFrameColor(accent)
 		w.SetFrameColor(color.RGBA{})

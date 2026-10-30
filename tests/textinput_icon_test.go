@@ -5,8 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Значок в начале поля ввода — запрос GG-46.
@@ -53,6 +54,7 @@ func countRed(img *image.RGBA) int {
 
 // Значок виден на экране.
 func TestLeadingIcon_IsDrawn(t *testing.T) {
+	testreset.Globals(t)
 	plain := widget.NewTextInput("поиск")
 	_, before := inputScene(t, plain)
 	if got := countRed(before); got != 0 {
@@ -70,6 +72,7 @@ func TestLeadingIcon_IsDrawn(t *testing.T) {
 
 // Текст и подсказка сдвигаются вправо: значок не наезжает на них.
 func TestLeadingIcon_ShiftsText(t *testing.T) {
+	testreset.Globals(t)
 	// Ищем самый левый закрашенный столбец текста в поле без значка и с ним.
 	leftMostText := func(ti *widget.TextInput) int {
 		_, img := inputScene(t, ti)
@@ -113,6 +116,7 @@ func TestLeadingIcon_ShiftsText(t *testing.T) {
 // Позицию каретки наружу никто не отдаёт, да и незачем: важно, куда попадёт
 // набранный символ. Это и проверяем — так же, как это увидит человек.
 func TestLeadingIcon_CaretFollowsTheClick(t *testing.T) {
+	testreset.Globals(t)
 	insertPos := func(icon image.Image) int {
 		ti := widget.NewTextInput("")
 		ti.LeadingIcon = icon
@@ -154,6 +158,7 @@ func indexOfB(s string) int {
 
 // Поле без значка ведёт себя ровно как раньше.
 func TestLeadingIcon_AbsentChangesNothing(t *testing.T) {
+	testreset.Globals(t)
 	a := widget.NewTextInput("подсказка")
 	_, img1 := inputScene(t, a)
 

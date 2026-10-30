@@ -6,7 +6,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // benchTextScene строит текстоёмкую сцену: сетка лейблов на панели.
@@ -125,11 +125,11 @@ func BenchmarkFillRoundRect(b *testing.B) {
 func BenchmarkDiffFullNoChange(b *testing.B) {
 	eng := New(1920, 1080, 20)
 	c := eng.canvas
-	c.blitBackground()
-	c.diffAndSync()
+	c.BlitBackground()
+	c.DiffAndSync()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		c.diffAndSync()
+		c.DiffAndSync()
 	}
 }

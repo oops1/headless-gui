@@ -12,9 +12,9 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/oops1/headless-gui/v3/internal/focusreq"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/focusreq"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 var (
@@ -67,6 +67,7 @@ func (m *StartMenu) resetForOpen() {
 // бы кадр.
 func (m *StartMenu) attachOnOpen() {
 	m.resubscribe()
+	m.liveAttach()
 	v := m.v
 	v.mu.Lock()
 	keep := v.keepFocus
@@ -104,6 +105,10 @@ func (m *StartMenu) resubscribe() {
 			open := v.sideOpen
 			v.mu.Unlock()
 			v.sideW.Set(m.sidebarTarget(open))
+			// Вид мог смениться: у меню без плиток живых подписок нет.
+			if m.IsOpen() {
+				m.liveAttach()
+			}
 			m.Invalidate()
 		})))
 	}
@@ -151,6 +156,7 @@ func (m *StartMenu) detachOnClose() {
 	for _, u := range unsubs {
 		u()
 	}
+	m.liveDetach()
 	v.listBar.hide()
 	v.tileBar.hide()
 	v.gridFade.Set(0)
@@ -886,6 +892,7 @@ func (m *StartMenu) ensurePopup() *widget.PopupMenu {
 		return p
 	}
 	p = widget.NewPopupMenu()
+	p.SetHost(m)
 	v.mu.Lock()
 	if v.popup == nil {
 		v.popup = p

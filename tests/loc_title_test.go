@@ -5,8 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // {Loc} в заголовке — запрос GG-48.
@@ -25,6 +26,7 @@ const locTitleXAML = `<Window x:Name="win" Title="{Loc app.title}" Width="800" H
 </Window>`
 
 func TestLocTitle_FollowsLanguageSwitch(t *testing.T) {
+	testreset.Globals(t)
 	widget.ClearLocalizedItems()
 	t.Cleanup(widget.ClearLocalizedItems)
 
@@ -80,6 +82,7 @@ func TestLocTitle_FollowsLanguageSwitch(t *testing.T) {
 // Смена заголовка перерисовывает панель и перекладывает стопку: ширина корешка
 // вкладки считается по подписи, и без перекладки полоса вкладок разъезжается.
 func TestLocTitle_RedrawsAfterChange(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{R: 20, G: 20, B: 24, A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 600, 400))
@@ -116,6 +119,7 @@ func TestLocTitle_RedrawsAfterChange(t *testing.T) {
 // Повторная установка того же заголовка ничего не делает — иначе смена языка
 // без изменений перекладывала бы весь док.
 func TestLocTitle_SameTitleIsNoOp(t *testing.T) {
+	testreset.Globals(t)
 	p := widget.NewDockPane("id", "Файлы", nil)
 	p.SetTitle("Файлы")
 	if p.Title != "Файлы" {

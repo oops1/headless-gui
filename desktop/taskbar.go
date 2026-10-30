@@ -4,8 +4,8 @@ import (
 	"image"
 	"image/color"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Slot — область панели задач, в которую становится элемент.
@@ -147,6 +147,9 @@ const (
 // NewTaskbar создаёт панель задач, оформляемую темами из tm.
 func NewTaskbar(tm *theme.Manager) *Taskbar {
 	t := &Taskbar{tm: tm}
+	// Рамка фокуса рисуется панелью поверх элементов (drawFocus): смена фокуса
+	// у элемента перезаписывает и её команды.
+	t.SetDirtyOnChildInvalidate(true)
 	langID := widget.AddLanguageListener(func(string) {
 		t.relayout()
 		t.Invalidate()

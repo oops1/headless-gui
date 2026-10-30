@@ -5,7 +5,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // ─── Recording DrawContext ──────────────────────────────────────────────────
@@ -78,6 +79,7 @@ func (c *recCtx) findBadgeAndTitle(locale string) (badgeLeft int, haveBadge bool
 const longTitle = "Очень длинный заголовок окна который заведомо шире узкого окна двести пикселей"
 
 func TestTitleBadge_WinEllipsized(t *testing.T) {
+	testreset.Globals(t)
 	prev := widget.Locale()
 	widget.SetLocale("EN")
 	defer widget.SetLocale(prev)
@@ -109,6 +111,7 @@ func TestTitleBadge_WinEllipsized(t *testing.T) {
 }
 
 func TestTitleBadge_MacEllipsized(t *testing.T) {
+	testreset.Globals(t)
 	prev := widget.Locale()
 	widget.SetLocale("EN")
 	defer widget.SetLocale(prev)
@@ -137,6 +140,7 @@ func TestTitleBadge_MacEllipsized(t *testing.T) {
 // TestTitleBadge_ShortTitleNotClipped — короткий заголовок в широком окне НЕ
 // обрезается (эллипсис не срабатывает без необходимости).
 func TestTitleBadge_ShortTitleNotClipped(t *testing.T) {
+	testreset.Globals(t)
 	prev := widget.Locale()
 	widget.SetLocale("EN")
 	defer widget.SetLocale(prev)

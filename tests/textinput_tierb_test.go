@@ -3,7 +3,8 @@ package tests
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // type a string char-by-char.
@@ -14,6 +15,7 @@ func typeStr(ti *widget.TextInput, s string) {
 }
 
 func TestTextInput_MaxLength(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	ti.MaxLength = 5
 	typeStr(ti, "abcdefgh")
@@ -23,6 +25,7 @@ func TestTextInput_MaxLength(t *testing.T) {
 }
 
 func TestTextInput_Undo(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	typeStr(ti, "abc")
 	// Ctrl+Z three times → empty (each char is one edit step).
@@ -39,6 +42,7 @@ func TestTextInput_Undo(t *testing.T) {
 }
 
 func TestTextInput_Redo(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	typeStr(ti, "ab")
 	ctrlZ := widget.KeyEvent{Code: widget.KeyZ, Mod: widget.ModCtrl, Pressed: true}
@@ -57,6 +61,7 @@ func TestTextInput_Redo(t *testing.T) {
 }
 
 func TestTextInput_UndoRedoShiftZ(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	typeStr(ti, "x")
 	ctrlZ := widget.KeyEvent{Code: widget.KeyZ, Mod: widget.ModCtrl, Pressed: true}
@@ -71,6 +76,7 @@ func TestTextInput_UndoRedoShiftZ(t *testing.T) {
 
 // New edits should clear the redo stack (WPF behavior).
 func TestTextInput_RedoClearedOnEdit(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	typeStr(ti, "ab")
 	ctrlZ := widget.KeyEvent{Code: widget.KeyZ, Mod: widget.ModCtrl, Pressed: true}

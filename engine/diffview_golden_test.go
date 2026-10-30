@@ -4,8 +4,8 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Эталонные кадры контрола сравнения DiffView: карточки, S-коннекторы,
@@ -83,9 +83,9 @@ func diffGoldenScene(t *testing.T, th *widget.Theme, prep func(d *widget.DiffVie
 	widget.ApplyThemeTree(root, th)
 	prep(d)
 
-	c.blitBackground()
+	c.BlitBackground()
 	root.Draw(c)
-	return c.back
+	return c.Back()
 }
 
 func TestGolden_DiffView(t *testing.T) {

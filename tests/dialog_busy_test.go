@@ -5,14 +5,16 @@ package tests
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // TestBusyDialog_ShowsAndCloses — диалог открывается модально, полоса
 // стартует в неопределённом режиме, SetProgress переводит её на значение,
 // Close закрывает (повторный вызов безопасен).
 func TestBusyDialog_ShowsAndCloses(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(900, 600, 30)
 	eng.SetRoot(widget.NewPanel(widget.DarkTheme().WindowBG))
 	mb := widget.NewMessageBox(eng)
@@ -47,6 +49,7 @@ func TestBusyDialog_ShowsAndCloses(t *testing.T) {
 // TestBusyDialog_CancelClosesAndNotifies — с onCancel диалог получает ✕ и
 // Escape, а колбэк вызывается ровно один раз.
 func TestBusyDialog_CancelClosesAndNotifies(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(900, 600, 30)
 	eng.SetRoot(widget.NewPanel(widget.DarkTheme().WindowBG))
 	mb := widget.NewMessageBox(eng)
@@ -66,6 +69,7 @@ func TestBusyDialog_CancelClosesAndNotifies(t *testing.T) {
 // TestDialogCloseButton_FiresOnRelease — ✕ диалога срабатывает на отпускании
 // кнопки: нажать, увести курсор и отпустить — значит передумать.
 func TestDialogCloseButton_FiresOnRelease(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(900, 600, 30)
 	eng.SetRoot(widget.NewPanel(widget.DarkTheme().WindowBG))
 	mb := widget.NewMessageBox(eng)

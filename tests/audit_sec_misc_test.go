@@ -11,14 +11,16 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
-	dg "github.com/oops1/headless-gui/v3/widget/datagrid"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
+	dg "github.com/oops1/headless-gui/v4/widget/datagrid"
 )
 
 // TestObservableCollectionUnsubscribe — подписка снимается по дескриптору,
 // а не «последняя добавленная»: чужой обработчик остаётся на месте.
 func TestObservableCollectionUnsubscribe(t *testing.T) {
+	testreset.Globals(t)
 	oc := dg.NewObservableCollection()
 	var a, b int
 	ida := oc.AddCollectionChanged(func(dg.CollectionChangedEvent) { a++ })
@@ -51,6 +53,7 @@ func TestObservableCollectionUnsubscribe(t *testing.T) {
 // TestPropertyNotifierRemoveByFunc — RemovePropertyChanged снимает именно
 // переданный обработчик, а не последний добавленный.
 func TestPropertyNotifierRemoveByFunc(t *testing.T) {
+	testreset.Globals(t)
 	var pn dg.PropertyNotifier
 	var first, second int
 	h1 := func(any, string) { first++ }
@@ -68,6 +71,7 @@ func TestPropertyNotifierRemoveByFunc(t *testing.T) {
 // TestPasswordNotInUndoHistory — в режиме пароля Ctrl+Z после очистки не
 // возвращает пароль, а прежние руны затираются.
 func TestPasswordNotInUndoHistory(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(300, 100, 30)
 	root := widget.NewPanel(color.RGBA{A: 255})
 	root.SetBounds(image.Rect(0, 0, 300, 100))
@@ -95,6 +99,7 @@ func TestPasswordNotInUndoHistory(t *testing.T) {
 // TestSetThemeUnderFrameLock — смена темы во время активного рендера не
 // вызывает гонок (запускать под -race): палитра меняется под frameMu.
 func TestSetThemeUnderFrameLock(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(200, 120, 60)
 	root := widget.NewPanel(color.RGBA{A: 255})
 	root.SetBounds(image.Rect(0, 0, 200, 120))
@@ -122,6 +127,7 @@ func TestSetThemeUnderFrameLock(t *testing.T) {
 // параллельно DrawOverlay/OverlayBounds из «рендер»-горутины: под -race без
 // сообщений о гонке (раньше popupX/child писались и читались без замка).
 func TestPopupMenuShowWhileDrawing(t *testing.T) {
+	testreset.Globals(t)
 	widget.SetScreenBounds(800, 600)
 	m := widget.NewPopupMenu()
 	m.SetItems([]widget.MenuItem{
@@ -165,6 +171,7 @@ func TestPopupMenuShowWhileDrawing(t *testing.T) {
 // RegisterFallbackFont отклоняются, а не регистрируются как «ещё один
 // Go Regular»; RegisterFallbackFontFile возвращает ошибку.
 func TestInvalidFontNotSilentlySubstituted(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(64, 64, 10)
 	defer eng.Stop()
 	garbage := []byte("this is definitely not a font file")
@@ -201,6 +208,7 @@ func TestInvalidFontNotSilentlySubstituted(t *testing.T) {
 // TestCollectionViewRemoveViewChanged — AddViewChangedHandle/RemoveViewChanged:
 // снятие по дескриптору, чужой слушатель остаётся.
 func TestCollectionViewRemoveViewChanged(t *testing.T) {
+	testreset.Globals(t)
 	oc := dg.NewObservableCollectionFrom([]interface{}{1, 2, 3})
 	cv := widget.NewCollectionView(oc)
 	var a, b int
@@ -236,6 +244,7 @@ func TestCollectionViewRemoveViewChanged(t *testing.T) {
 // TestBindingScopeDisposeUnsubscribesCollectionView — ItemsControl поверх
 // CollectionView: Dispose снимает слушателя представления.
 func TestBindingScopeDisposeUnsubscribesCollectionView(t *testing.T) {
+	testreset.Globals(t)
 	oc := dg.NewObservableCollectionFrom([]interface{}{
 		&itemRow{Name: "Аня"}, &itemRow{Name: "Боб"},
 	})
@@ -266,6 +275,7 @@ func TestBindingScopeDisposeUnsubscribesCollectionView(t *testing.T) {
 // TestVICRebindCollectionView — повторный BindCollectionView снимает
 // прежнюю подписку (иначе N перепривязок = N живых замыканий и N SetItems).
 func TestVICRebindCollectionView(t *testing.T) {
+	testreset.Globals(t)
 	cv1 := widget.NewCollectionView(dg.NewObservableCollectionFrom([]interface{}{1}))
 	cv2 := widget.NewCollectionView(dg.NewObservableCollectionFrom([]interface{}{2}))
 	vic := widget.NewVirtualizingItemsControl()

@@ -5,7 +5,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // TestCanvasSnapshot_CopiesFilledRegion: Snapshot возвращает независимую копию
@@ -14,7 +14,7 @@ func TestCanvasSnapshot_CopiesFilledRegion(t *testing.T) {
 	testreset.Globals(t)
 	e := New(100, 80, 20)
 	c := e.canvas
-	c.blitBackground() // чёрный фон
+	c.BlitBackground() // чёрный фон
 
 	fill := color.RGBA{R: 10, G: 200, B: 60, A: 255}
 	c.FillRect(20, 15, 30, 25, fill)
@@ -47,7 +47,7 @@ func TestCanvasSnapshot_ClipAndEmpty(t *testing.T) {
 	testreset.Globals(t)
 	e := New(60, 40, 20)
 	c := e.canvas
-	c.blitBackground()
+	c.BlitBackground()
 
 	// Частично за холстом → клип до видимой части (20x20).
 	snap := c.Snapshot(image.Rect(40, 20, 200, 200))
@@ -70,7 +70,7 @@ func TestCanvasSnapshot_HiDPIPhysicalPixels(t *testing.T) {
 	e := New(100, 80, 20)
 	e.SetScale(2)
 	c := e.canvas
-	c.blitBackground()
+	c.BlitBackground()
 
 	fill := color.RGBA{R: 200, G: 30, B: 30, A: 255}
 	c.FillRect(10, 10, 20, 20, fill)

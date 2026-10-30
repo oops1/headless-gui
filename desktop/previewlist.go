@@ -16,9 +16,9 @@ package desktop
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/internal/focusreq"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/focusreq"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // previewMaxListThumbs — сколько миниатюр с заголовками встаёт в ряд, прежде

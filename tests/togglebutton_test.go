@@ -5,8 +5,9 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Кнопка-переключатель — запрос GG-28.
@@ -18,6 +19,7 @@ import (
 // Background на каждый клик и на каждую смену темы.
 
 func TestToggleButton_ClickKeepsTheState(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("Фильтр")
 	btn.SetToggle(true)
 	btn.SetBounds(image.Rect(0, 0, 80, 30))
@@ -45,6 +47,7 @@ func TestToggleButton_ClickKeepsTheState(t *testing.T) {
 
 // Обычная кнопка состояние не держит: включение — свойство переключателя.
 func TestToggleButton_PlainButtonStaysStateless(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("Обычная")
 	btn.SetBounds(image.Rect(0, 0, 80, 30))
 	btn.OnMouseButton(widget.MouseEvent{X: 10, Y: 10, Button: widget.MouseLeft, Pressed: true})
@@ -58,6 +61,7 @@ func TestToggleButton_PlainButtonStaysStateless(t *testing.T) {
 // Клавиатура включает переключатель так же, как мышь: иначе он слушался бы
 // только мыши.
 func TestToggleButton_KeyboardTogglesToo(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("Фильтр")
 	btn.SetToggle(true)
 	btn.SetBounds(image.Rect(0, 0, 80, 30))
@@ -72,6 +76,7 @@ func TestToggleButton_KeyboardTogglesToo(t *testing.T) {
 // пользователя, и обработчик, синхронизирующий группу кнопок, ушёл бы в
 // рекурсию.
 func TestToggleButton_SetCheckedIsSilent(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("Фильтр")
 	btn.SetToggle(true)
 	fired := 0
@@ -87,6 +92,7 @@ func TestToggleButton_SetCheckedIsSilent(t *testing.T) {
 // Снятие режима переключателя гасит состояние: «нажатая» кнопка, переставшая
 // быть переключателем, осталась бы нажатой навсегда.
 func TestToggleButton_TurningOffClearsTheState(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("Фильтр")
 	btn.SetToggle(true)
 	btn.SetChecked(true)
@@ -99,6 +105,7 @@ func TestToggleButton_TurningOffClearsTheState(t *testing.T) {
 
 // Разметка: тег даёт переключатель, атрибут — начальное состояние.
 func TestToggleButton_FromXAML(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Window Width="200" Height="100">
 	  <Canvas>
 	    <ToggleButton x:Name="filter" Left="10" Top="10" Width="80" Height="28"
@@ -137,6 +144,7 @@ func TestToggleButton_FromXAML(t *testing.T) {
 // Проверка по пикселям, а не по полю: приложение обходилось перекраской
 // Background именно потому, что состояние без вида ему не помогало.
 func TestToggleButton_LooksPressedWhenChecked(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(widget.Theme{}.WindowBG)
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 120, 60))

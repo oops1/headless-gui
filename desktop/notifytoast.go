@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // NotificationToast — всплывающая карточка нового уведомления.
@@ -74,6 +74,7 @@ func NewNotificationToast(tm *theme.Manager, ns Notifications) *NotificationToas
 		culture:    func() DateCulture { return t.Culture },
 		now:        t.now,
 	})
+	t.view.owner = t
 	t.Content = t.draw
 	t.Size = t.size
 	t.Place = t.place

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/output"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/output"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // columns — виджет, раскладка которого зависит от ширины (как у
@@ -112,7 +112,7 @@ func settledEqual(t *testing.T, e *Engine, s *slowConsumer) {
 	for {
 		e.frameMu.Lock()
 		e.mu.RLock()
-		front := e.canvas.front
+		front := e.canvas.Front()
 		e.mu.RUnlock()
 		s.mu.Lock()
 		same := front.Rect == s.cur.Rect && bytes.Equal(front.Pix, s.cur.Pix)

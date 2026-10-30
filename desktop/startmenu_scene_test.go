@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/desktop"
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/internal/testengine"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/desktop"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testengine"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Сцена Windows 10 для проверки меню «Пуск» с плитками: панель задач со

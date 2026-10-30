@@ -6,7 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // newTB создаёт TextBox в движке (точный измеритель текста зарегистрирован).
@@ -35,6 +36,7 @@ func tbKey(tb *widget.TextBox, code widget.KeyCode, mod widget.KeyMod) {
 
 // Ввод с Enter даёт многострочный текст.
 func TestTextBox_MultilineInput(t *testing.T) {
+	testreset.Globals(t)
 	tb := newTB(t, 300, 100)
 	tbType(tb, "Привет\nмир 123")
 	if got := tb.GetText(); got != "Привет\nмир 123" {
@@ -47,6 +49,7 @@ func TestTextBox_MultilineInput(t *testing.T) {
 
 // Перенос по словам: длинная строка без \n занимает несколько строк.
 func TestTextBox_WordWrap(t *testing.T) {
+	testreset.Globals(t)
 	tb := newTB(t, 160, 120)
 	tb.SetText(strings.Repeat("слово ", 12))
 	if n := tb.LineCount(); n < 3 {
@@ -62,6 +65,7 @@ func TestTextBox_WordWrap(t *testing.T) {
 
 // Стрелки вверх/вниз ходят по строкам, сохраняя целевую колонку.
 func TestTextBox_UpDown(t *testing.T) {
+	testreset.Globals(t)
 	tb := newTB(t, 300, 100)
 	tb.SetText("первая строка\nвторая\nтретья строка")
 	// Каретка в конце. Вверх дважды — на первую строку.
@@ -81,6 +85,7 @@ func TestTextBox_UpDown(t *testing.T) {
 
 // Home/End — границы строки; Ctrl+Home/End — границы документа.
 func TestTextBox_HomeEnd(t *testing.T) {
+	testreset.Globals(t)
 	tb := newTB(t, 300, 100)
 	tb.SetText("один\nдва\nтри")
 	tbKey(tb, widget.KeyUp, 0) // на вторую строку
@@ -104,6 +109,7 @@ func TestTextBox_HomeEnd(t *testing.T) {
 
 // Ctrl+стрелки — прыжки по словам.
 func TestTextBox_CtrlWordJump(t *testing.T) {
+	testreset.Globals(t)
 	tb := newTB(t, 300, 100)
 	tb.SetText("alpha beta gamma")
 	tbKey(tb, widget.KeyHome, widget.ModCtrl)
@@ -123,6 +129,7 @@ func TestTextBox_CtrlWordJump(t *testing.T) {
 
 // Shift+навигация выделяет; Ctrl+C/X/V работают с буфером обмена.
 func TestTextBox_SelectionClipboard(t *testing.T) {
+	testreset.Globals(t)
 	tb := newTB(t, 300, 100)
 	tb.SetText("hello world")
 	tbKey(tb, widget.KeyHome, widget.ModCtrl)
@@ -150,6 +157,7 @@ func TestTextBox_SelectionClipboard(t *testing.T) {
 
 // Ctrl+A + Delete очищают документ; undo возвращает.
 func TestTextBox_SelectAllDeleteUndo(t *testing.T) {
+	testreset.Globals(t)
 	tb := newTB(t, 300, 100)
 	tb.SetText("раз\nдва")
 	tbKey(tb, widget.KeyA, widget.ModCtrl)
@@ -169,6 +177,7 @@ func TestTextBox_SelectAllDeleteUndo(t *testing.T) {
 
 // PgDn/PgUp листают постранично, каретка остаётся видимой (скролл едет).
 func TestTextBox_PageScroll(t *testing.T) {
+	testreset.Globals(t)
 	tb := newTB(t, 300, 80) // мало строк на экран
 	var b strings.Builder
 	for i := 0; i < 40; i++ {
@@ -196,6 +205,7 @@ func TestTextBox_PageScroll(t *testing.T) {
 
 // ReadOnly: правка блокируется, копирование работает.
 func TestTextBox_ReadOnly(t *testing.T) {
+	testreset.Globals(t)
 	tb := newTB(t, 300, 100)
 	tb.SetText("const")
 	tb.ReadOnly = true
@@ -213,6 +223,7 @@ func TestTextBox_ReadOnly(t *testing.T) {
 
 // Клик мышью ставит каретку, drag выделяет.
 func TestTextBox_MouseSelect(t *testing.T) {
+	testreset.Globals(t)
 	tb := newTB(t, 300, 100)
 	tb.SetText("abc def")
 	// Клик в начало.
@@ -227,6 +238,7 @@ func TestTextBox_MouseSelect(t *testing.T) {
 
 // Сквозной headless-тест: фокус через движок, ввод через SendKeyEvent.
 func TestTextBox_EngineInput(t *testing.T) {
+	testreset.Globals(t)
 	eng := newDialogEngine()
 	tb := widget.NewTextBox("")
 	tb.SetBounds(image.Rect(10, 10, 310, 110))

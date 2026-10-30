@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Номер нажатия в серии (двойной, тройной щелчок) считает движок — один раз
@@ -45,6 +46,7 @@ func press(eng *engine.Engine, x, y int) {
 }
 
 func TestClickCount_DoubleAndTriple(t *testing.T) {
+	testreset.Globals(t)
 	eng, spy := clickSpyEngine(t)
 
 	press(eng, 20, 20)
@@ -71,6 +73,7 @@ func TestClickCount_DoubleAndTriple(t *testing.T) {
 // Отпускание несёт номер своего нажатия: обработчик release должен видеть ту
 // же серию, что и press.
 func TestClickCount_ReleaseKeepsNumber(t *testing.T) {
+	testreset.Globals(t)
 	eng, spy := clickSpyEngine(t)
 
 	press(eng, 20, 20)
@@ -87,6 +90,7 @@ func TestClickCount_ReleaseKeepsNumber(t *testing.T) {
 
 // Серию рвёт что угодно из трёх: далёкий курсор, другая кнопка, долгая пауза.
 func TestClickCount_SeriesBreaks(t *testing.T) {
+	testreset.Globals(t)
 	eng, spy := clickSpyEngine(t)
 	eng.SetDoubleClickTime(30 * time.Millisecond)
 
@@ -109,6 +113,7 @@ func TestClickCount_SeriesBreaks(t *testing.T) {
 // Интервал движок берёт системный — тот, который человек выставил в
 // параметрах мыши; окно сообщает его при запуске.
 func TestClickCount_RespectsInterval(t *testing.T) {
+	testreset.Globals(t)
 	eng, spy := clickSpyEngine(t)
 	eng.SetDoubleClickTime(40 * time.Millisecond)
 
@@ -128,6 +133,7 @@ func TestClickCount_RespectsInterval(t *testing.T) {
 // Тройной щелчок по многострочному полю выделяет строку. Раньше третье
 // нажатие сбрасывало выделение и ставило каретку.
 func TestTextBox_TripleClickSelectsLine(t *testing.T) {
+	testreset.Globals(t)
 	tb := widget.NewTextBox("")
 	tb.SetBounds(image.Rect(0, 0, 300, 120))
 	tb.SetText("первая строка\nвторая строка\nтретья")
@@ -151,6 +157,7 @@ func TestTextBox_TripleClickSelectsLine(t *testing.T) {
 
 // Двойной щелчок по-прежнему выделяет слово — его и считали виджеты сами.
 func TestTextBox_DoubleClickSelectsWord(t *testing.T) {
+	testreset.Globals(t)
 	tb := widget.NewTextBox("")
 	tb.SetBounds(image.Rect(0, 0, 300, 120))
 	tb.SetText("первая строка")
@@ -172,6 +179,7 @@ func TestTextBox_DoubleClickSelectsWord(t *testing.T) {
 // Событие может прийти и не от движка — прямым вызовом OnMouseButton. Тогда
 // Clicks равен нулю, и виджет считает серию сам, как считал раньше.
 func TestTextBox_CountsWithoutEngine(t *testing.T) {
+	testreset.Globals(t)
 	tb := widget.NewTextBox("")
 	tb.SetBounds(image.Rect(0, 0, 300, 120))
 	tb.SetText("первая строка")
@@ -190,6 +198,7 @@ func TestTextBox_CountsWithoutEngine(t *testing.T) {
 // Поле в одну строку: тройной щелчок выделяет всё — «строка» здесь и есть
 // всё поле.
 func TestTextInput_TripleClickSelectsAll(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	ti.SetBounds(image.Rect(0, 0, 300, 32))
 	ti.SetText("строка целиком")

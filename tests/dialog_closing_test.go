@@ -3,8 +3,9 @@ package tests
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Право остановить закрытие модалки — запрос GG-50 (первый пункт с этим
@@ -26,6 +27,7 @@ func closingScene(t *testing.T) (*engine.Engine, *widget.Dialog) {
 
 // Возврат false останавливает закрытие: диалог остаётся в стеке.
 func TestDialogClosing_VetoKeepsDialog(t *testing.T) {
+	testreset.Globals(t)
 	_, dlg := closingScene(t)
 
 	asked := 0
@@ -43,6 +45,7 @@ func TestDialogClosing_VetoKeepsDialog(t *testing.T) {
 
 // Возврат true закрывает, как и раньше.
 func TestDialogClosing_AllowCloses(t *testing.T) {
+	testreset.Globals(t)
 	_, dlg := closingScene(t)
 	dlg.OnClosing = func() bool { return true }
 
@@ -55,6 +58,7 @@ func TestDialogClosing_AllowCloses(t *testing.T) {
 
 // Без хука поведение прежнее.
 func TestDialogClosing_NoHookClosesAsBefore(t *testing.T) {
+	testreset.Globals(t)
 	_, dlg := closingScene(t)
 
 	dlg.RequestClose()
@@ -67,6 +71,7 @@ func TestDialogClosing_NoHookClosesAsBefore(t *testing.T) {
 // CancelAction не зовётся при остановленном закрытии: «отмена» — состоявшееся
 // действие, и сообщать о ней, когда её не было, нельзя.
 func TestDialogClosing_VetoSkipsCancelAction(t *testing.T) {
+	testreset.Globals(t)
 	_, dlg := closingScene(t)
 
 	canceled := 0
@@ -88,6 +93,7 @@ func TestDialogClosing_VetoSkipsCancelAction(t *testing.T) {
 
 // Escape идёт тем же путём, что и ✕.
 func TestDialogClosing_VetoHoldsAgainstEscape(t *testing.T) {
+	testreset.Globals(t)
 	eng, dlg := closingScene(t)
 	dlg.OnClosing = func() bool { return false }
 
@@ -101,6 +107,7 @@ func TestDialogClosing_VetoHoldsAgainstEscape(t *testing.T) {
 // Ради чего всё затевалось: из хука можно показать второй диалог, а первый
 // дождётся ответа, оставаясь в стеке.
 func TestDialogClosing_SecondDialogWaitsForAnswer(t *testing.T) {
+	testreset.Globals(t)
 	eng, dlg := closingScene(t)
 
 	var question *widget.Dialog

@@ -8,7 +8,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // GG-66: кнопка без Width в DockPanel получала ровно 80 точек, не глядя ни на
@@ -31,6 +32,7 @@ func pngIcon(t *testing.T, size int) []byte {
 // Длинная подпись со значком не обрезается, короткая кнопка остаётся прежних
 // 80 точек — раскладки, где их хватало, не меняются.
 func TestButton_AutoWidthInDockPanel(t *testing.T) {
+	testreset.Globals(t)
 	fsys := fstest.MapFS{"icons/wc.png": {Data: pngIcon(t, 16)}}
 	root, reg, err := widget.LoadUIFromXAMLFS([]byte(`<DockPanel Width="800" Height="32">
   <Button x:Name="wc" DockPanel.Dock="Left" Content="Рабочая копия" Icon="icons/wc.png"/>
@@ -63,6 +65,7 @@ func TestButton_AutoWidthInDockPanel(t *testing.T) {
 
 // Заданный Width по-прежнему главнее измерения.
 func TestButton_ExplicitWidthWins(t *testing.T) {
+	testreset.Globals(t)
 	root, reg, err := widget.LoadUIFromXAMLFS([]byte(`<DockPanel Width="800" Height="32">
   <Button x:Name="b" DockPanel.Dock="Left" Width="60" Content="Очень длинная подпись кнопки"/>
   <Label Content="остаток"/>

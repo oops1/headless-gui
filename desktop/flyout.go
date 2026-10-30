@@ -18,8 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Edge — с какой стороны панели задач всплывает окно.
@@ -178,7 +178,9 @@ type Flyout struct {
 	// 0 — взять метрику темы KeyFlyoutSlideDistance; отрицательное — до
 	// самого края экрана (боковая панель выезжает из-за края целиком).
 	SlideDistance int
-	// AnimKey — имя анимации темы, управляющей появлением. Пусто — AnimMenuOpen.
+	// AnimKey — имя анимации темы, управляющей появлением и уходом. Пусто —
+	// theme.AnimFlyoutOpen. Ключ, не объявленный темой, берёт запасной:
+	// flyout.open, затем menu.open (animKeys).
 	AnimKey theme.Key
 
 	open int32
@@ -389,11 +391,13 @@ func (f *Flyout) Invalidate() { f.invalidateOverlay(image.Rectangle{}) }
 // invalidateOverlay заявляет текущую область оверлея и, если задана, прежнюю.
 func (f *Flyout) invalidateOverlay(also image.Rectangle) {
 	f.Base.Invalidate() // значок мог измениться сам по себе
+	// Область оверлея — владельческая (InvalidateArea): дерево под панелью не
+	// менялось, перезаписывать соседей незачем.
 	if r := f.dirtyRect(); !r.Empty() && f.visible() {
-		widget.InvalidateRect(r)
+		f.InvalidateArea(r)
 	}
 	if !also.Empty() {
-		widget.InvalidateRect(also)
+		f.InvalidateArea(also)
 	}
 }
 
@@ -485,6 +489,12 @@ func (f *Flyout) OverlayBounds() image.Rectangle {
 
 // HasOverlay реализует widget.OverlayDrawer.
 func (f *Flyout) HasOverlay() bool { return f.visible() && !f.restRect().Empty() }
+
+// AnimatesOverlay реализует widget.SelfAnimatedOverlay: выезд и проявление
+// панель ведёт сама (flyoutmotion.go), переход движка к ней не применяется.
+func (f *Flyout) AnimatesOverlay() bool { return true }
+
+var _ widget.SelfAnimatedOverlay = (*Flyout)(nil)
 
 // DrawOverlay рисует подложку по стилю темы и отдаёт содержимому остальное.
 //

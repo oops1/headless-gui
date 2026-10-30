@@ -4,7 +4,8 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Окно и диалог без штатной полосы заголовка — запрос GG-51.
@@ -16,6 +17,7 @@ import (
 
 // Без полосы содержимое начинается от верха диалога.
 func TestChromeless_ContentStartsAtTop(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 400, 300)
 	withBar := d.ContentBounds()
 
@@ -34,6 +36,7 @@ func TestChromeless_ContentStartsAtTop(t *testing.T) {
 // Кнопка ✕ убирается вместе с полосой: рисовать её поверх чужой шапки движок
 // не вправе.
 func TestChromeless_HidesCloseButton(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 400, 300)
 	if !d.ShowCloseButton {
 		t.Fatal("у обычного диалога нет ✕ — проверять нечего")
@@ -52,6 +55,7 @@ func TestChromeless_HidesCloseButton(t *testing.T) {
 
 // Полоса заголовка перестаёт рисоваться.
 func TestChromeless_TitleBarIsGone(t *testing.T) {
+	testreset.Globals(t)
 	withBar := widget.NewDialog("Заголовок", 300, 200)
 	a := widgetScene(t, withBar, image.Rect(40, 20, 340, 110))
 
@@ -73,6 +77,7 @@ func TestChromeless_TitleBarIsGone(t *testing.T) {
 
 // Объявленная область тащит диалог так же, как раньше полоса заголовка.
 func TestChromeless_DragAreaMovesDialog(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 400, 300)
 	d.SetChromeless(true)
 	d.SetBounds(image.Rect(100, 100, 500, 400))
@@ -93,6 +98,7 @@ func TestChromeless_DragAreaMovesDialog(t *testing.T) {
 // Вне объявленной области диалог не тащится: остальное содержимое остаётся
 // содержимым.
 func TestChromeless_OutsideDragAreaDoesNotMove(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 400, 300)
 	d.SetChromeless(true)
 	d.SetBounds(image.Rect(100, 100, 500, 400))
@@ -114,6 +120,7 @@ func TestChromeless_OutsideDragAreaDoesNotMove(t *testing.T) {
 // виджеты приложения, и проверка «под курсором чей-то ребёнок» отменяла бы
 // перетаскивание всегда.
 func TestChromeless_DragAreaBeatsChildren(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 400, 300)
 	d.SetChromeless(true)
 	d.SetBounds(image.Rect(0, 0, 400, 300))
@@ -136,6 +143,7 @@ func TestChromeless_DragAreaBeatsChildren(t *testing.T) {
 // Borderless-окно: своей полосы нет, и без объявленной области его было не
 // сдвинуть — WantsCapture отвечал «нет» безусловно.
 func TestChromeless_BorderlessWindowDrag(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Настройки", 400, 300)
 	w.Style = widget.WindowStyleNone
 	w.SetBounds(image.Rect(0, 0, 400, 300))

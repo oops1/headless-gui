@@ -14,8 +14,8 @@ import (
 	"image"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // ComponentWidgets — имя компонента кнопки виджетов в стилях темы. Части:
@@ -142,10 +142,10 @@ func (b *WidgetsButton) PreferredSize(avail image.Point) image.Point {
 		ts, cs := b.textStyles()
 		tw := 0
 		if c.Temperature != "" {
-			tw = widget.MeasureUIText(c.Temperature, fontSizeOf(ts))
+			tw = widget.MeasureTextFor(b, c.Temperature, fontSizeOf(ts))
 		}
 		if c.Caption != "" {
-			if cw := widget.MeasureUIText(c.Caption, fontSizeOf(cs)); cw > tw {
+			if cw := widget.MeasureTextFor(b, c.Caption, fontSizeOf(cs)); cw > tw {
 				tw = cw
 			}
 		}

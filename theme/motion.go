@@ -2,6 +2,7 @@ package theme
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -62,21 +63,91 @@ func AnimationKindOf(k Key) AnimKind {
 	return kind
 }
 
+// MotionProfile — профиль движения движка (engine.SetMotionProfile).
+//
+// Флаг FlagMotionReduce — настройка темы, а значит всего приложения. Профиль
+// — свойство движка: два движка одного процесса (сессия удалённого стола и
+// локальный экран) живут с разными, и решает это не пользователь, а то, куда
+// идёт кадр.
+type MotionProfile uint8
+
+const (
+	// MotionFull — анимации как объявлены.
+	MotionFull MotionProfile = iota
+	// MotionReduced — как флаг FlagMotionReduce, но для одного движка:
+	// декоративные мгновенны, функциональные укорочены.
+	MotionReduced
+	// MotionOff — без движения: мгновенны и функциональные; шаг анимаций
+	// доводит до конца и те, что заведены без токена темы и без
+	// widget.MotionDur. Зациклённые (индикаторы работы) и таймеры идут.
+	MotionOff
+	// MotionRemote — длительности как в MotionFull, но промежуточных
+	// состояний не больше widget.RemoteMotionSteps на переход: каждый кадр
+	// анимации уходит по сети, и плавность там стоит канала.
+	MotionRemote
+)
+
+// motionProbe — как узнать профиль вызывающего; ставит пакет widget.
+var motionProbe atomic.Pointer[func() MotionProfile]
+
+// SetMotionProfileProbe задаёт, как узнать профиль движения вызывающего.
+// Пакет widget отвечает профилем движка, на горутине которого идёт вызов;
+// приложению звать не нужно. nil снимает пробу.
+func SetMotionProfileProbe(f func() MotionProfile) {
+	if f == nil {
+		motionProbe.Store(nil)
+		return
+	}
+	motionProbe.Store(&f)
+}
+
+// CallerMotionProfile — профиль движения вызывающего (см.
+// SetMotionProfileProbe); без пробы — MotionFull.
+func CallerMotionProfile() MotionProfile {
+	if f := motionProbe.Load(); f != nil {
+		return (*f)()
+	}
+	return MotionFull
+}
+
 // MotionReduced сообщает, включён ли режим «меньше движения» в теме.
 func (t *Theme) MotionReduced() bool {
 	return t != nil && t.FlagOr(FlagMotionReduce, false)
 }
 
+// ReducesMotion сообщает, уменьшено ли движение для вызывающего: флагом темы
+// или профилем движения движка, на горутине которого идёт вызов
+// (MotionReduced, MotionOff). Это и спрашивает компонент, решающий сам, как
+// обойтись без анимации; MotionReduced — только флаг темы.
+func (t *Theme) ReducesMotion() bool {
+	switch CallerMotionProfile() {
+	case MotionReduced, MotionOff:
+		return true
+	}
+	return t.MotionReduced()
+}
+
 // AnimReduced применяет режим «меньше движения» к анимации k: декоративная
 // получает нулевую длительность, функциональная — не больше метрики
-// KeyMotionReduceFunctionalMS (по умолчанию нуль). Кривая сохраняется. Без
-// флага возвращает a как есть.
+// KeyMotionReduceFunctionalMS (по умолчанию нуль). Кривая сохраняется.
+//
+// Режим включает флаг темы или профиль движения движка, на горутине которого
+// идёт вызов (MotionReduced); профиль MotionOff обнуляет и функциональные.
+// Без флага и профиля возвращает a как есть.
 func (t *Theme) AnimReduced(k Key, a AnimSpec) AnimSpec {
-	if !t.MotionReduced() || a.Duration <= 0 {
+	if a.Duration <= 0 {
+		return a
+	}
+	p := CallerMotionProfile()
+	if p == MotionOff {
+		a.Duration, a.DurationMS = 0, 0
+		return a
+	}
+	if !t.MotionReduced() && p != MotionReduced {
 		return a
 	}
 	limit := time.Duration(0)
-	if AnimationKindOf(k) == AnimFunctional {
+	if t != nil && AnimationKindOf(k) == AnimFunctional {
 		if ms := t.MetricOr(KeyMotionReduceFunctionalMS, 0); ms > 0 {
 			limit = time.Duration(ms * float64(time.Millisecond))
 		}
@@ -94,6 +165,15 @@ func (m *Manager) MotionReduced() bool {
 	t := m.active
 	m.mu.RUnlock()
 	return t.MotionReduced()
+}
+
+// ReducesMotion — Theme.ReducesMotion активной темы: флаг темы или профиль
+// движка вызывающего.
+func (m *Manager) ReducesMotion() bool {
+	m.mu.RLock()
+	t := m.active
+	m.mu.RUnlock()
+	return t.ReducesMotion()
 }
 
 // GetAnimationRaw возвращает анимацию активной темы как она объявлена, без

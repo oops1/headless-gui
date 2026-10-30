@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/output"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/output"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // compositeFrames собирает полное изображение холста, накладывая дельта-тайлы
@@ -65,6 +66,7 @@ func compositeFrames(t *testing.T, eng *engine.Engine, w, h int) *image.RGBA {
 // СНИМОК панели, а не сплошной прямоугольник. Проверяем, что в позиции призрака
 // (над центром) присутствует характерный цвет контента панели, смешанный с фоном.
 func TestDockGhost_SnapshotFollowsCursor(t *testing.T) {
+	testreset.Globals(t)
 	blue := color.RGBA{R: 0, G: 0, B: 180, A: 255}  // центр
 	green := color.RGBA{R: 0, G: 200, B: 0, A: 255} // контент панели
 
@@ -123,6 +125,7 @@ func openLeftFlyout(t *testing.T, eng *engine.Engine, p *widget.DockPane) {
 // TestDockFlyout_HoldOverPanel: курсор, доведённый до выехавшей панели и внутри
 // неё, НЕ схлопывает flyout (регресс: раньше зона удержания была только ярлыком).
 func TestDockFlyout_HoldOverPanel(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)
@@ -151,6 +154,7 @@ func TestDockFlyout_HoldOverPanel(t *testing.T) {
 // TestDockFlyout_ClickCenterDismisses: клик по центру (вне панели) сворачивает
 // flyout через Dismissable-семантику (как клик мимо dropdown).
 func TestDockFlyout_ClickCenterDismisses(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)
@@ -174,6 +178,7 @@ func TestDockFlyout_ClickCenterDismisses(t *testing.T) {
 // TestDockFlyout_PinDocks: кнопка 📌 (pin) в титлбаре выехавшей панели
 // возвращает её в docked-состояние и завершает flyout.
 func TestDockFlyout_PinDocks(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)
@@ -202,6 +207,7 @@ func TestDockFlyout_PinDocks(t *testing.T) {
 // TestDockFlyout_CloseButton: ✕ в титлбаре выехавшей панели закрывает её
 // (state Closed) и завершает flyout.
 func TestDockFlyout_CloseButton(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)
@@ -230,6 +236,7 @@ func TestDockFlyout_CloseButton(t *testing.T) {
 // ширине панели (не менеджера); (2) в позиции призрака — контент панели
 // (зелёный), а не центр (синий).
 func TestDockFlyout_DragGhostIsPaneNotManager(t *testing.T) {
+	testreset.Globals(t)
 	blue := color.RGBA{R: 0, G: 0, B: 180, A: 255}  // центр
 	green := color.RGBA{R: 0, G: 200, B: 0, A: 255} // контент панели
 
@@ -285,6 +292,7 @@ func TestDockFlyout_DragGhostIsPaneNotManager(t *testing.T) {
 // TestDockFlyout_FloatButton: кнопка float в титлбаре выехавшей панели делает
 // её плавающей (state Floating) и завершает flyout.
 func TestDockFlyout_FloatButton(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)

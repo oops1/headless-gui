@@ -5,8 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Контекстное меню по профилю темы — то, что видно на экране: скругление,
@@ -62,6 +63,7 @@ func lum(c color.RGBA) int { return (int(c.R) + int(c.G) + int(c.B)) / 3 }
 // писалась без смешивания, и чёрная плёнка (0,0,0,18) выходила почти
 // чёрной — текст на ней не читался.
 func TestPopupMenu_TranslucentHoverBlends(t *testing.T) {
+	testreset.Globals(t)
 	m := pmMenu(widget.MenuItem{Text: "Копировать"}, widget.MenuItem{Text: "Вставить"})
 	m.HoverBG = color.RGBA{A: 18} // чёрная плёнка, предумноженная запись
 	img := pmRender(t, m, 0)
@@ -78,6 +80,7 @@ func TestPopupMenu_TranslucentHoverBlends(t *testing.T) {
 
 // Пункты 1 и 2: скругление меню и плашки, отступ плашки от краёв.
 func TestPopupMenu_RoundedMenuAndInsetPlate(t *testing.T) {
+	testreset.Globals(t)
 	m := pmMenu(widget.MenuItem{Text: "Копировать"}, widget.MenuItem{Text: "Вставить"})
 	m.CornerRadius, m.ItemCorner, m.ItemInset, m.PaddingY = 8, 4, 4, 4
 	m.HoverBG = color.RGBA{B: 255, A: 255}
@@ -111,6 +114,7 @@ func TestPopupMenu_RoundedMenuAndInsetPlate(t *testing.T) {
 
 // Пункт 5: сочетание берёт цвет из стиля, а не смешивается с фоном.
 func TestPopupMenu_ShortcutColourFromStyle(t *testing.T) {
+	testreset.Globals(t)
 	item := widget.MenuItem{Text: "Отменить", Shortcut: "CTRL+Z"}
 	plain := pmMenu(item)
 	styled := pmMenu(item)
@@ -147,6 +151,7 @@ func TestPopupMenu_ShortcutColourFromStyle(t *testing.T) {
 
 // Пункт 4: тонкий шеврон у правого края вместо глифа «▸» у поля.
 func TestPopupMenu_ThinChevron(t *testing.T) {
+	testreset.Globals(t)
 	sub := []widget.MenuItem{{Text: "Папку"}}
 	m := pmMenu(widget.MenuItem{Text: "Создать", SubItems: sub})
 	m.ChevronRight = 18
@@ -175,6 +180,7 @@ func TestPopupMenu_ThinChevron(t *testing.T) {
 
 // Пункт 6: поля слева и справа и отступ разделителя — раздельно.
 func TestPopupMenu_SeparatePadsAndSeparatorInset(t *testing.T) {
+	testreset.Globals(t)
 	m := pmMenu(
 		widget.MenuItem{Text: "Копировать", Shortcut: "Ctrl+C"},
 		widget.MenuItem{Separator: true},
@@ -223,6 +229,7 @@ func TestPopupMenu_SeparatePadsAndSeparatorInset(t *testing.T) {
 
 // Пункт 7: мягкая тень по Elevation вместо прямоугольника со смещением 2.
 func TestPopupMenu_SoftShadowByElevation(t *testing.T) {
+	testreset.Globals(t)
 	probe := func(elev float64) int {
 		m := pmMenu(widget.MenuItem{Text: "Копировать"})
 		m.ShadowColor = color.RGBA{A: 140}
@@ -251,6 +258,7 @@ func TestPopupMenu_SoftShadowByElevation(t *testing.T) {
 // Пункт 9: одноцветный значок берёт цвет текста в каждом состоянии, значок
 // для плашки наведения подменяется.
 func TestPopupMenu_IconFollowsItemState(t *testing.T) {
+	testreset.Globals(t)
 	icon := image.NewRGBA(image.Rect(0, 0, 16, 16))
 	for y := 0; y < 16; y++ {
 		for x := 0; x < 16; x++ {

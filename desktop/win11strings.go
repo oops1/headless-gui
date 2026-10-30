@@ -4,7 +4,7 @@
 // подсказки, поэтому следует за языком без пересоздания.
 package desktop
 
-import "github.com/oops1/headless-gui/v3/widget"
+import "github.com/oops1/headless-gui/v4/widget"
 
 // Ключи строк.
 const (

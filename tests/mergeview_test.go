@@ -8,8 +8,9 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Контрол трёхстороннего слияния MergeView — GG-57. Три стороны только
@@ -38,6 +39,7 @@ func mergeScene(t *testing.T, mv *widget.MergeView) *engine.Engine {
 // Конфликт, решения и итог: пока решения нет — маркеры git, после решения —
 // строки выбранной стороны.
 func TestMergeView_ResolveConflict(t *testing.T) {
+	testreset.Globals(t)
 	mv := widget.NewMergeView("", "")
 	var unresolved []int
 	mv.OnResolvedChanged = func(n int) { unresolved = append(unresolved, n) }
@@ -88,6 +90,7 @@ func TestMergeView_ResolveConflict(t *testing.T) {
 
 // Стиль diff3 добавляет в маркеры базу, подписи сторон берутся из SetSides.
 func TestMergeView_StyleAndLabels(t *testing.T) {
+	testreset.Globals(t)
 	mv := widget.NewMergeView("", "")
 	mv.SetTexts(mvBase, mvOurs, mvTheirs)
 	mv.SetSides(
@@ -112,6 +115,7 @@ func TestMergeView_StyleAndLabels(t *testing.T) {
 // Решение не трогает правки руками в соседних блоках: строки блока заменяются
 // на месте, а не пересобирается весь итог.
 func TestMergeView_ResolveKeepsManualEdits(t *testing.T) {
+	testreset.Globals(t)
 	mv := widget.NewMergeView("", "")
 	mv.SetTexts(mvBase, mvOurs, mvTheirs)
 
@@ -141,6 +145,7 @@ func TestMergeView_ResolveKeepsManualEdits(t *testing.T) {
 // Правка итога с клавиатуры через движок: набор, Tab внутрь текста, отмена и
 // повтор; стороны при этом только для чтения.
 func TestMergeView_KeyboardEditing(t *testing.T) {
+	testreset.Globals(t)
 	mv := widget.NewMergeView("", "")
 	mv.SetTexts(mvBase, mvOurs, mvTheirs)
 	eng := mergeScene(t, mv)
@@ -184,6 +189,7 @@ func TestMergeView_KeyboardEditing(t *testing.T) {
 
 // Отмена возвращает и решение по конфликту, а не только правку текста.
 func TestMergeView_UndoResolve(t *testing.T) {
+	testreset.Globals(t)
 	mv := widget.NewMergeView("", "")
 	mv.SetTexts(mvBase, mvOurs, mvTheirs)
 	ci := -1
@@ -210,6 +216,7 @@ func TestMergeView_UndoResolve(t *testing.T) {
 
 // Навигация: F7 переходит к конфликту, ResolveAll закрывает всё разом.
 func TestMergeView_NavigationAndResolveAll(t *testing.T) {
+	testreset.Globals(t)
 	base := "a\nb\nc\nd\ne\nf\ng\n"
 	ours := "a\nНАШЕ1\nc\nd\ne\nНАШЕ2\ng\n"
 	theirs := "a\nИХ1\nc\nd\ne\nИХ2\ng\n"
@@ -250,6 +257,7 @@ func TestMergeView_NavigationAndResolveAll(t *testing.T) {
 
 // Панель базы прячется, и её отсутствие не ломает раскладку и доступность.
 func TestMergeView_AccessibilityChildren(t *testing.T) {
+	testreset.Globals(t)
 	mv := widget.NewMergeView("", "")
 	mv.SetTexts(mvBase, mvOurs, mvTheirs)
 	mv.SetSides(
@@ -309,6 +317,7 @@ func hasState(states []string, want string) bool {
 // Разметка из fs.FS: тег, три стороны вкомпилированными файлами, ShowBase и
 // стиль маркеров.
 func TestMergeView_XAMLFromFS(t *testing.T) {
+	testreset.Globals(t)
 	fsys := fstest.MapFS{
 		"base.txt":   {Data: []byte(mvBase)},
 		"ours.txt":   {Data: []byte(mvOurs)},
@@ -338,6 +347,7 @@ func TestMergeView_XAMLFromFS(t *testing.T) {
 
 // Команда разметки: ResolvedCommand получает число оставшихся конфликтов.
 func TestMergeView_XAMLCommand(t *testing.T) {
+	testreset.Globals(t)
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "base.txt"), mvBase)
 	writeFile(t, filepath.Join(dir, "ours.txt"), mvOurs)

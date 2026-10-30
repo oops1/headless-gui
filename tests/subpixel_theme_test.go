@@ -7,10 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	hgfonts "github.com/oops1/headless-gui/v3/assets/fonts"
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	hgfonts "github.com/oops1/headless-gui/v4/assets/fonts"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 func subpixelEngine(t *testing.T) *engine.Engine {
@@ -27,6 +28,7 @@ func subpixelEngine(t *testing.T) *engine.Engine {
 // Профиль Windows 10 включает режим, профиль без флага выключает то, что
 // включила тема; ширина строк при этом меняется и возвращается.
 func TestTextSubpixel_FollowsProfile(t *testing.T) {
+	testreset.Globals(t)
 	eng := subpixelEngine(t)
 	m := fontTestManager(t)
 	str := strings.Repeat("i", 40)
@@ -62,6 +64,7 @@ func TestTextSubpixel_FollowsProfile(t *testing.T) {
 
 // Остальные темы режима не включают.
 func TestTextSubpixel_OtherProfilesStayOff(t *testing.T) {
+	testreset.Globals(t)
 	eng := subpixelEngine(t)
 	m := fontTestManager(t)
 	for _, name := range []string{
@@ -79,6 +82,7 @@ func TestTextSubpixel_OtherProfilesStayOff(t *testing.T) {
 
 // Флаг включается на лету любому профилю: Manager.SetFlag и ApplyThemeProfile.
 func TestTextSubpixel_FlagOnTheFly(t *testing.T) {
+	testreset.Globals(t)
 	eng := subpixelEngine(t)
 	m := fontTestManager(t)
 	if err := eng.SetThemeProfile(m, theme.ProfileWindows11); err != nil {
@@ -102,6 +106,7 @@ func TestTextSubpixel_FlagOnTheFly(t *testing.T) {
 
 // Явный вызов приложения главнее темы — в обе стороны, пока выбор не вернули.
 func TestTextSubpixel_ExplicitWinsOverTheme(t *testing.T) {
+	testreset.Globals(t)
 	eng := subpixelEngine(t)
 	m := fontTestManager(t)
 
@@ -136,6 +141,7 @@ func TestTextSubpixel_ExplicitWinsOverTheme(t *testing.T) {
 
 // Мост туда и обратно сохраняет просьбу.
 func TestTextSubpixel_BridgeRoundTrip(t *testing.T) {
+	testreset.Globals(t)
 	m := fontTestManager(t)
 	rt, ok := m.GetTheme(theme.ProfileWindows10)
 	if !ok {

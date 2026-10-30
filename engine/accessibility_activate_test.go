@@ -5,8 +5,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // accessFindByName ищет узел семантического дерева по имени (обход в глубину).
@@ -71,7 +71,7 @@ func TestActivateAccessible_ClicksButton(t *testing.T) {
 	if clicks != 1 {
 		t.Fatalf("OnClick вызван %d раз, ожидался 1", clicks)
 	}
-	if got := eng.focus.get(); got != widget.Widget(btn) {
+	if got := eng.in.Focused(); got != widget.Widget(btn) {
 		t.Fatalf("после клика фокус на %#v, ожидалась кнопка", got)
 	}
 	if !btn.IsFocused() {
@@ -183,7 +183,7 @@ func TestFocusAccessible(t *testing.T) {
 	if !eng.FocusAccessible(second) {
 		t.Fatal("FocusAccessible вернул false для видимой включённой кнопки")
 	}
-	if got := eng.focus.get(); got != widget.Widget(second) {
+	if got := eng.in.Focused(); got != widget.Widget(second) {
 		t.Fatalf("фокус на %#v, ожидалась вторая кнопка", got)
 	}
 	if first.IsFocused() {
@@ -245,7 +245,7 @@ func TestFocusAccessible_Rejects(t *testing.T) {
 		if eng.FocusAccessible(c.w) {
 			t.Errorf("FocusAccessible(%s) вернул true", c.name)
 		}
-		if got := eng.focus.get(); got != widget.Widget(ok) {
+		if got := eng.in.Focused(); got != widget.Widget(ok) {
 			t.Fatalf("после отказа (%s) фокус уехал на %#v", c.name, got)
 		}
 	}

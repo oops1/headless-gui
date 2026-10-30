@@ -1,0 +1,1910 @@
+// Package raster — холст движка (Canvas): отрисовка вне экрана в RGBA-буфер с
+// HiDPI-масштабом, сглаженные фигуры, тени, размытие подложки, Mica, текст
+// шрифтами core/text, разметка областей кадра и дифф тайлов (задача 4.1 плана
+// 4.0). Холст реализует draw.DrawContext и его необязательные возможности
+// (core/draw). Когда рисовать и что отдавать в кадр, решает движок (engine);
+// пакет engine держит прежние имена алиасами (engine.Canvas).
+//
+// Буферы холста:
+//   - front — последний отправленный потребителю кадр;
+//   - back — буфер рисования: у холста движка — окно над front под то, что
+//     кадр рисует в холст сам (ADR-0007, singlebuf.go), у отдельного холста
+//     и клонов попапов — полный буфер; чужая память потребителя
+//     (SetExternalBack, AttachBack) — тоже полный back.
+//
+// Тайлы 64×64 сравниваются с front побайтово — из окон воркеров
+// (SyncTileFrom), при сбросе окна back (FlushBackWindow) или по всему
+// полному back (DiffAndSync); изменившиеся копируются во front и
+// возвращаются как []output.DirtyTile.
+package raster
+
+import (
+	"bytes"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
+	"github.com/oops1/headless-gui/v4/internal/workpool"
+	"image"
+	"image/color"
+	stdraw "image/draw"
+	"math"
+	"reflect"
+	"runtime"
+	"sort"
+	"sync"
+	"sync/atomic"
+
+	"golang.org/x/image/draw"
+	"golang.org/x/image/math/fixed"
+
+	"github.com/oops1/headless-gui/v4/internal/pixsimd"
+	"github.com/oops1/headless-gui/v4/output"
+)
+
+// Canvas — off-screen RGBA-холст: front — последний отданный кадр, back —
+// буфер рисования (у холста движка — окно над front, ADR-0007, singlebuf.go;
+// у отдельного холста и клонов попапов — полный буфер). Реализует интерфейс
+// widget.DrawContext.
+type Canvas struct {
+	front      *image.RGBA           // последний отправленный кадр
+	// backdrops — области размытия прошлого кадра, backdropsNext — текущего
+	// (backdropdamage.go).
+	backdrops, backdropsNext []image.Rectangle
+	back                     *image.RGBA // текущий рендер-таргет (может быть чужой памятью — см. SetSurface)
+	backOwn                  *image.RGBA // собственный back-буфер холста; back переключается на него, когда внешняя память не задана
+	format                   PixelFormat // порядок каналов back-буфера (см. pixelformat.go)
+	formatOwn                PixelFormat // порядок каналов СОБСТВЕННОГО буфера: чужая память вправе иметь свой, и после возврата к своему буферу надо вернуться к нему же
+	bgImage                  *image.RGBA // фоновое изображение (масштабировано под холст, закодировано в format — см. SetBackground)
+	// Обои для материала Mica (mica.go): отдельный источник, его исходник (для
+	// пересборки при смене разрешения), кэш размытых обоев и, у буфера
+	// всплывающего оверлея, основной холст, у которого обои берутся.
+	wallImg    image.Image
+	wallScaled *image.RGBA
+	mica       *micaCache
+	wallParent *Canvas
+	fontCache  *hgtext.FontCache      // кэш шрифта по умолчанию
+	namedFonts *hgtext.FontTable      // именованные шрифты (FontFamily из XAML), под замком — core/text/fonttable.go
+	families   *hgtext.FontFamilies   // таблица семейств: выбор шрифта по весу и наклону (core/text/fontfamily.go)
+	fallbacks  []*hgtext.FallbackFont // fallback-шрифты для отсутствующих глифов (BUG-2); файлы грузятся лениво (core/text/fallbackfont.go)
+	clip       image.Rectangle        // активная область отсечения
+	hasClip    bool                   // включено ли отсечение
+	round      roundClipState         // отсечение по скруглённому контуру (clipround.go)
+	baseClip   image.Rectangle        // базовый клип кадра (damage-область частичной перерисовки)
+	hasBase    bool                   // активен ли базовый клип
+	scaleTmp   *image.RGBA            // переиспользуемый буфер для DrawImageScaled
+	rscr       *rectScratch           // рабочие буферы DrawImageRect (imagerect.go)
+	// recycle — класть данные тайлов в переработываемые буферы (output.Slab)
+	// вместо новых; slabs — буферы текущего кадра, их забирает TakeSlabs.
+	// Воркеры diffTiles добавляют под slabMu.
+	recycle bool
+	// noTileData — тайлы кадра без Data (Engine.SetFrameTileData).
+	noTileData bool
+	slabMu  sync.Mutex
+	slabs   []*output.Slab
+	// diffWork, blitWork — переиспользуемые задания пула воркеров для
+	// параллельного диффа и блита (workpool.go). У каждого холста свои: холст
+	// рисует одна горутина, и два задания одного вида у него не идут сразу.
+	diffWork diffJob
+	blitWork blitJob
+	// Шаблоны теней и рабочий буфер их сборки (shadowcache.go).
+	shadowCache    map[shadowKey]*shadowTemplate
+	shadowClock    uint64
+	shadowBuf      []byte
+	shadowCacheOff bool
+	// shaper — шейпинг сложного текста (RTL, лигатуры; см. core/text/shaper.go).
+	// Один на холст и его клоны (CloneForSize, растр повёрнутого текста):
+	// личные typesetting-face шрифтов холста читаются только под его замком.
+	shaper *hgtext.Shaper
+	W, H   int // ФИЗИЧЕСКИЙ размер буферов (логический × scale)
+	// marks — признак содержимого по тайлам за текущий кадр (regions.go).
+	marks []tileMark
+	// maskKind — чем считается то, что рисуют маски альфы и цветные глифы
+	// прямо сейчас: буквами, фигурой, тенью. Через них идут все три.
+	maskKind output.RegionKind
+
+	// drawDamage — области ЭТОГО кадра в логических координатах, по которым
+	// обход решает, что можно не рисовать (widget.CullScope). Живут на
+	// канвасе, а не в пакете widget: у каждого движка кадр свой.
+	drawDamage []image.Rectangle
+	// cullingOn — разрешён ли пропуск поддеревьев в этом движке. Атомарный:
+	// выключатель дёргает приложение из своей горутины, а читает обход в
+	// горутине кадра.
+	cullingOn atomic.Bool
+	// occlusionOn — разрешено ли вычитание перекрытого (widget/occlusion.go).
+	// Отдельный выключатель от cullingOn: ошибиться в них можно по-разному —
+	// пропуск по damage промахивается мимо изменившегося, а вычитание верит
+	// объявлению виджета о собственной непрозрачности.
+	occlusionOn atomic.Bool
+
+	tilesX int
+	tilesY int
+
+	// HiDPI (см. scale.go): виджеты живут в логических пикселях,
+	// буферы — в физических. При scale == 1 пути тождественны прежним.
+	scale              float64
+	logicalW, logicalH int
+
+	// fontRev растёт при смене состава шрифтов: по нему кэшированные
+	// клоны канваса (popup-оверлеи) понимают, что устарели. Атомарный: шрифты
+	// регистрирует горутина приложения, а сверяет горутина кадра.
+	fontRev atomic.Uint64
+
+	// Кэш результата масштабирования (см. DrawImageScaled).
+	scaledCache  map[scaledKey]*scaledEntry
+	scaledClock  uint64
+	scaledPixels int
+	// inv — общий журнал сбросов кэша движка (imagecache.go): сброс, заказанный
+	// у движка, доходит до каждого его холста, включая холсты попапов. nil у
+	// холста, созданного отдельно от движка. invSeen — номер последней
+	// применённой записи журнала.
+	inv     *ImageInvalidator
+	invSeen uint64
+
+	// plainText — холст промежуточного растра (повёрнутый текст): подъём
+	// контраста применяется один раз, к настоящему цвету, а не к белому, а
+	// LCD-сглаживание не имеет смысла (подпиксели повёрнутого растра лежат не
+	// вдоль строки монитора).
+	plainText bool
+	// lutRow — буфер строки маски после таблицы контраста (кадр рисуется одной
+	// горутиной; у каждого холста свой).
+	lutRow []uint8
+
+	// Холст-окно (window.go): isWindow — буфер back лежит в координатах кадра
+	// с ненулевым началом, frame — границы кадра, center и centerMark —
+	// центральный тайл и его признак, views/viewRev — личные виды общих
+	// шрифтов холста движка и ревизия, с которой они сделаны; sharedFonts —
+	// окно горутины кадра со шрифтами холста движка без видов. Ссылку на
+	// холст движка окно не держит: воркеры живут дольше холста (смена
+	// разрешения), и прежний холст должен уйти сборщику.
+	isWindow    bool
+	sharedFonts bool
+	frame       image.Rectangle
+	center      image.Rectangle
+	centerMark  tileMark
+	views       map[*hgtext.FontCache]*hgtext.FontCache
+	viewRev     uint64
+	// noPool — холсту нельзя обращаться к пулу воркеров (сам рисует в
+	// задании пула: вложенный workpool.Run — взаимная блокировка).
+	noPool bool
+	// scaledOverride — готовые растры крупных картинок с горутины кадра;
+	// scaledBudget — бюджет пикселей кэша масштабирования (0 — умолчание).
+	scaledOverride func(src image.Image, pw, ph int) *image.RGBA
+	scaledBudget   int
+	// blurSmall, blurLine — переиспользуемые буферы размытия подложки
+	// (backdrop.go): уменьшенная картинка и строка растяжения.
+	blurSmall *image.RGBA
+	blurLine  []byte
+
+	// Один буфер кадра (singlebuf.go): single — back есть окно над front;
+	// backClean — окно равно front в своих границах; backLive — в окно
+	// рисовали, и оно не сброшено; backUsed/backIdle — окно задавалось в
+	// этом кадре / кадров подряд не задавалось; touched — тайлы окна под
+	// сброс; changed — тайлы, изменившиеся в кадре (воркеры и сброс);
+	// flushMark и flushed — что сброс изменил; flushWork — задание пула.
+	single                         bool
+	backClean, backLive, backUsed  bool
+	backIdle                       int
+	touched, changed, flushMark    []bool
+	flushed                        []int
+	flushWork                      flushJob
+	// snapWin — окно для снимков рекордера (RenderSnapshot).
+	snapWin *Canvas
+	// offWin — окно для картинок вне кадра (RenderOffscreen): всегда
+	// FormatRGBA с альфой, каким бы ни был формат кадра.
+	offWin *Canvas
+}
+
+// colorRGBA — синоним для сигнатур window.go.
+type colorRGBA = color.RGBA
+
+// RegisterFont регистрирует именованный шрифт (TTF-данные) в реестре холста.
+// fontName соответствует FontFamily в XAML.
+func (c *Canvas) RegisterFont(fontName string, ttfData []byte) {
+	if c.namedFonts == nil {
+		c.namedFonts = hgtext.NewFontTable()
+	}
+	fc := hgtext.NewFontCacheLike(ttfData, c.fontCache)
+	if fc != nil {
+		c.namedFonts.Set(fontName, fc)
+		c.registerFace(fontName, fc)
+		c.fontRev.Add(1)
+	}
+}
+
+// FontFor возвращает FontCache для именованного шрифта; если не найден — default.
+//
+// Имя, которого в реестре нет буквально, ещё не значит «шрифт по умолчанию»:
+// это может быть название семейства («Open Sans» при файле
+// OpenSans-Regular.ttf) или составное имя widget.FontFace с весом и наклоном —
+// их разбирает таблица семейств.
+func (c *Canvas) FontFor(fontName string) *hgtext.FontCache {
+	if fontName != "" && c.namedFonts != nil {
+		if fc, ok := c.namedFonts.Get(fontName); ok {
+			return c.view(fc)
+		}
+		if fc := c.faceFor(fontName); fc != nil {
+			return fc // faceFor уже отдаёт личный вид
+		}
+	}
+	return c.fontCache
+}
+
+// HasFont сообщает, зарегистрирован ли именованный шрифт.
+func (c *Canvas) HasFont(name string) bool {
+	if c.namedFonts == nil {
+		return false
+	}
+	_, ok := c.namedFonts.Get(name)
+	return ok
+}
+
+// SetDefaultFont делает зарегистрированный именованный шрифт шрифтом по умолчанию
+// (используется DrawText/DrawTextSize и как primary для fallback). Возвращает
+// false, если шрифт с таким именем не зарегистрирован.
+func (c *Canvas) SetDefaultFont(name string) bool {
+	if name == "" {
+		return false
+	}
+	if c.namedFonts == nil {
+		return false
+	}
+	if fc, ok := c.namedFonts.Get(name); ok && fc != nil {
+		c.fontCache = fc
+		c.families.SetDefaultFace(fc)
+		c.fontRev.Add(1)
+		return true
+	}
+	return false
+}
+
+// FontNames возвращает отсортированный список зарегистрированных именованных шрифтов.
+func (c *Canvas) FontNames() []string {
+	if c.namedFonts == nil {
+		return nil
+	}
+	return c.namedFonts.Names()
+}
+
+// AddFallbackFont добавляет fallback-шрифт из TTF/OTF-данных (BUG-2).
+// Используется для рун, отсутствующих в основном шрифте.
+func (c *Canvas) AddFallbackFont(ttfData []byte) bool {
+	fc := hgtext.NewFontCacheLike(ttfData, c.fontCache)
+	if fc == nil {
+		return false
+	}
+	c.fallbacks = append(c.fallbacks, hgtext.NewReadyFallback(fc))
+	c.fontRev.Add(1)
+	return true
+}
+
+// fcForRune возвращает FontCache, содержащий глиф для руны r: сначала primary,
+// затем fallback-цепочку. Второе значение — найден ли глиф вообще: если false,
+// ни один шрифт не покрывает руну (вызывающий код пропускает отрисовку, чтобы
+// не рисовать уродливый .notdef-квадрат «тофу»).
+func (c *Canvas) fcForRune(primary *hgtext.FontCache, r rune) (*hgtext.FontCache, bool) {
+	if primary.HasGlyph(r) {
+		return primary, true
+	}
+	// Цепочка идёт по порядку и догружает свои файлы по мере надобности
+	// (fallbackfont.go): шрифты после первого подходящего не трогаются.
+	var found *hgtext.FontCache
+	c.EachFallback(primary, func(fb *hgtext.FontCache) bool {
+		if fb.HasGlyph(r) {
+			found = fb
+			return true
+		}
+		return false
+	})
+	if found != nil {
+		return found, true
+	}
+	return primary, false
+}
+
+func NewCanvas(w, h int, fc *hgtext.FontCache) *Canvas {
+	return NewCanvasScaled(w, h, 1.0, fc)
+}
+
+// NewCanvasScaled создаёт холст логического размера (w, h) с HiDPI-масштабом
+// scale: буферы аллоцируются в физических пикселях (w×scale, h×scale).
+//
+// Размеры валидируются здесь же (SEC-10, вторая линия обороны после
+// ClampCanvasSize в New/SetResolution): отрицательные и нулевые стороны
+// давали пустые буферы и tilesX/tilesY ≤ 0 — всю дальнейшую тайловую
+// арифметику это превращало в мусор, а масштаб мог раздуть физический
+// размер сверх любых границ.
+func NewCanvasScaled(w, h int, scale float64, fc *hgtext.FontCache) *Canvas {
+	if scale <= 0 {
+		scale = 1
+	}
+	w, h = ClampCanvasSize(w, h)
+	pw := int(math.Round(float64(w) * scale))
+	ph := int(math.Round(float64(h) * scale))
+	pw, ph = ClampCanvasSize(pw, ph) // масштаб мог вывести за предел
+	return newCanvasPhys(pw, ph, w, h, scale, fc)
+}
+
+// newCanvasPhys создаёт холст с ЯВНЫМ физическим размером pw×ph и логическим
+// w×h при масштабе scale. Обычный путь (NewCanvasScaled) выводит физический
+// размер из логического; режим «масштаб внутри кадра» (scalewithin.go)
+// наоборот держит физический и выводит логический, и округление между ними
+// не обязано сходиться в точности — поэтому оба размера задаются явно.
+func newCanvasPhys(pw, ph, w, h int, scale float64, fc *hgtext.FontCache) *Canvas {
+	if scale <= 0 {
+		scale = 1
+	}
+	ts := output.TileSize
+	backBuf := image.NewRGBA(image.Rect(0, 0, pw, ph))
+	c := &Canvas{
+		front:      image.NewRGBA(image.Rect(0, 0, pw, ph)),
+		back:       backBuf,
+		backOwn:    backBuf,
+		fontCache:  fc,
+		namedFonts: hgtext.NewFontTable(),
+		families:   hgtext.NewFontFamilies(),
+		shaper:     &hgtext.Shaper{},
+		W:          pw,
+		H:          ph,
+		tilesX:     (pw + ts - 1) / ts,
+		tilesY:     (ph + ts - 1) / ts,
+		scale:      scale,
+		logicalW:   w,
+		logicalH:   h,
+	}
+	// Пропуск поддеревьев включён по умолчанию: контракт отрисовки объявлен,
+	// а приложение с нарушенным вернёт прежний обход одной строкой
+	// (Engine.SetSubtreeCulling).
+	c.cullingOn.Store(true)
+	c.occlusionOn.Store(true)
+	c.mica = &micaCache{levels: map[int]*micaLevel{}}
+	c.initTileMarks()
+	return c
+}
+
+// ─── Background ──────────────────────────────────────────────────────────────
+
+// SetBackground масштабирует src до размера холста и сохраняет как фон.
+// Фон блиттируется в back-буфер в начале каждого кадра — до отрисовки виджетов.
+// Использует билинейную интерполяцию (golang.org/x/image/draw.BiLinear).
+func (c *Canvas) SetBackground(src image.Image) {
+	dst := image.NewRGBA(image.Rect(0, 0, c.W, c.H))
+	draw.BiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), stdraw.Over, nil)
+	if c.format == FormatBGRX {
+		// Кодируем ОДИН раз здесь, а не на каждом BlitBackground: фон не
+		// меняется от кадра к кадру, а BlitBackground вызывается каждый.
+		swapRB(dst.Pix)
+	}
+	c.bgImage = dst
+}
+
+// DrawDamage реализует widget.CullScope: области кадра в логических
+// координатах. Пустой список — рисуем всё.
+func (c *Canvas) DrawDamage() []image.Rectangle { return c.drawDamage }
+
+// SubtreeCullingEnabled реализует widget.CullScope.
+func (c *Canvas) SubtreeCullingEnabled() bool { return c.cullingOn.Load() }
+
+// SetDrawDamage задаёт области кадра (вызывает движок перед обходом).
+func (c *Canvas) SetDrawDamage(rects []image.Rectangle) {
+	c.drawDamage = append(c.drawDamage[:0], rects...)
+}
+
+// ClearDrawDamage снимает ограничение: обход пройдёт целиком.
+func (c *Canvas) ClearDrawDamage() { c.drawDamage = c.drawDamage[:0] }
+
+// ClearBackground снимает фоновое изображение: BlitBackground снова будет
+// заливать буфер чёрным.
+func (c *Canvas) ClearBackground() { c.bgImage = nil }
+
+// BlitBackground очищает back-буфер и копирует фон (если задан).
+// Вызывается до отрисовки виджетов — перезаписывает весь back (окно back —
+// в его границах, ADR-0007). Если фонового изображения нет — заливает буфер
+// чёрным цветом, чтобы при перемещении виджетов старые пиксели не оставались.
+func (c *Canvas) BlitBackground() {
+	c.BlitBackgroundIn(image.Rect(0, 0, c.W, c.H))
+}
+
+// markBackground помечает тайлы, накрытые фоном.
+//
+// Фон кладётся в начале каждого кадра построчным копированием, и пометки этот
+// путь не ставил вовсе. Из-за этого тайл, накрытый ТОЛЬКО фоном — а на
+// рабочем столе с обоями это почти весь экран, — оставался нетронутым, и
+// кадр сообщал о нём «неизвестно что». Потребитель, выбирающий кодек по
+// output.Frame.Regions, на обоях не получал ни одной подсказки и кодировал
+// каждый прямоугольник вслепую. Обои при этом — и самое большое на экране, и
+// то, на чём кодек без потерь теряет больше всего времени.
+//
+// Блит изображения помечается точно так же (DrawImage → MarkImage): фон —
+// тот же блит, только раньше остальных.
+func (c *Canvas) markBackground(r image.Rectangle) {
+	if c.bgImage != nil {
+		c.MarkImage(r)
+		return
+	}
+	// Пустой фон — сплошная чёрная заливка, накрывающая тайлы целиком.
+	// Сообщить о ней стоит: это команда заливки вместо тайла с пикселями.
+	c.markSolid(r, color.RGBA{A: 255}, true)
+}
+
+// BlitBackgroundIn — как BlitBackground, но только в области r (частичная
+// перерисовка): вне r back-буфер сохраняет прошлый кадр. Признак фона
+// ставится по всей r в пределах кадра: окно back уже тайлов, которые
+// кадр помечает (воркер хранит признак центра сам).
+func (c *Canvas) BlitBackgroundIn(r image.Rectangle) {
+	r = r.Intersect(c.back.Bounds())
+	if r.Empty() {
+		return
+	}
+	if c.bgImage != nil {
+		// bgImage — ВСЕГДА собственный image.NewRGBA(W,H) канваса (Stride =
+		// 4×W без запаса), а back может быть чужой памятью с другим шагом
+		// строки (см. SetSurface) — оффсет считаем для каждого раздельно,
+		// один и тот же off тут не годится. Построчно через PixOffset обеих
+		// сторон, а не одним copy: и шаг строки, и начало окна у back свои.
+		rowBytes := r.Dx() * 4
+		for y := r.Min.Y; y < r.Max.Y; y++ {
+			dOff := c.back.PixOffset(r.Min.X, y)
+			sOff := c.bgImage.PixOffset(r.Min.X, y)
+			copy(c.back.Pix[dOff:dOff+rowBytes], c.bgImage.Pix[sOff:sOff+rowBytes])
+		}
+		c.markBackground(r)
+		return
+	}
+	c.fillBlackRows(r)
+	c.markBackground(r)
+}
+
+// fillBlackRows заливает r непрозрачным чёрным: первая строка — по пикселю,
+// остальные — копированием первой.
+//
+// Раньше каждая строка заливалась побайтовым циклом, и в полном кадре без обоев
+// очистка фона занимала пятую часть времени кадра. copy — это memmove рантайма,
+// он и так векторный; строки при этом копируются по PixOffset, а не одним
+// куском: back может быть чужой памятью с другим шагом строки (SetSurface).
+func (c *Canvas) fillBlackRows(r image.Rectangle) {
+	if r.Empty() {
+		return
+	}
+	n := r.Dx() * 4
+	first := c.back.PixOffset(r.Min.X, r.Min.Y)
+	row0 := c.back.Pix[first : first+n]
+	for i := 0; i < n; i += 4 {
+		row0[i+0], row0[i+1], row0[i+2], row0[i+3] = 0, 0, 0, 255
+	}
+	for y := r.Min.Y + 1; y < r.Max.Y; y++ {
+		off := c.back.PixOffset(r.Min.X, y)
+		copy(c.back.Pix[off:off+n], row0)
+	}
+}
+
+// ─── Внешняя память back-буфера (Engine.SetSurface, surface.go) ────────────
+
+// SetExternalBack переключает back на память потребителя. Размер и шаг
+// строки здесь УЖЕ проверены вызывающим (Engine.SetSurface) — Canvas только
+// строит обёртку image.RGBA поверх чужого среза, без копирования.
+//
+// front остаётся собственным буфером канваса всегда (см. поле front) —
+// только back меняется.
+func (c *Canvas) SetExternalBack(pix []byte, stride int, f PixelFormat) {
+	c.back = &image.RGBA{Pix: pix, Stride: stride, Rect: image.Rect(0, 0, c.W, c.H)}
+	c.format = f
+	c.backClean = false // front уйдёт вперёд окна (singlebuf.go)
+}
+
+// setOwnFormat задаёт формат собственного буфера. Он же становится текущим,
+// пока рисуем в свой буфер.
+func (c *Canvas) setOwnFormat(f PixelFormat) {
+	c.formatOwn = f
+	if c.back == c.backOwn {
+		c.format = f
+	}
+}
+
+// UseOwnBack возвращает back к собственному буферу канваса
+// (Engine.SetSurface(nil, …, …)).
+func (c *Canvas) UseOwnBack() {
+	c.back = c.backOwn
+	// Формат возвращается вместе с буфером. Иначе порядок каналов, заданный
+	// чужой памятью, оставался бы у собственного буфера навсегда: после
+	// SetPixelFormat(BGRX) → SetSurface(внешний RGBA) → SetSurface(nil) все
+	// последующие кадры кодировались бы не тем, что просил вызывающий, а
+	// Engine.PixelFormat() сообщал бы неправду.
+	c.format = c.formatOwn
+}
+
+// ─── Clip ───────────────────────────────────────────────────────────────────
+
+// SetClip ограничивает все последующие операции рисования прямоугольником r
+// (ЛОГИЧЕСКИЕ координаты; внутренняя область отсечения — физическая).
+// При активном базовом клипе (частичная перерисовка) итоговая область —
+// пересечение r с базовым клипом: виджеты не могут рисовать вне damage.
+func (c *Canvas) SetClip(r image.Rectangle) {
+	pr := c.PhysRect(r)
+	if c.hasBase {
+		// hasClip остаётся true даже при пустом пересечении — рисовать
+		// вне damage нельзя (пустой clip == «не рисовать ничего»).
+		c.clip = pr.Intersect(c.baseClip)
+		c.hasClip = true
+		return
+	}
+	// Клип — в координатах кадра (у окна кадр шире буфера; запись зажимает
+	// clampRect).
+	c.clip = pr.Intersect(c.Frame())
+	// Пустое пересечение — «не рисовать ничего», как и в ветке частичной
+	// перерисовки выше. Прежде оно выключало отсечение вовсе: виджет, сужавший
+	// клип до своей части и оказавшийся за краем родителя, рисовал по всему
+	// кадру — поверх соседей (GG-73). И одна и та же операция вела себя
+	// по-разному в полном кадре и в частичном.
+	c.hasClip = true
+}
+
+// ClearClip снимает ограничение области рисования (до базового клипа,
+// если идёт частичная перерисовка).
+func (c *Canvas) ClearClip() {
+	if c.hasBase {
+		c.clip = c.baseClip
+		c.hasClip = true
+		return
+	}
+	c.hasClip = false
+}
+
+// SetBaseClip включает базовый клип кадра: вся отрисовка (включая
+// SetClip/ClearClip виджетов) ограничивается прямоугольником r.
+// Используется движком для частичной перерисовки по damage-области.
+func (c *Canvas) SetBaseClip(r image.Rectangle) {
+	c.baseClip = r.Intersect(c.Frame())
+	c.hasBase = true
+	c.clip = c.baseClip
+	c.hasClip = true
+}
+
+// ClearBaseClip выключает базовый клип (конец частичного кадра).
+func (c *Canvas) ClearBaseClip() {
+	c.hasBase = false
+	c.hasClip = false
+}
+
+// Clip возвращает текущую область отсечения в ЛОГИЧЕСКИХ координатах
+// (или полные логические границы холста).
+func (c *Canvas) Clip() image.Rectangle {
+	if c.hasClip {
+		return c.unRect(c.clip)
+	}
+	return image.Rect(0, 0, c.logicalW, c.logicalH) // у окна — тоже кадр
+}
+
+// clampRect пересекает r с текущей областью отсечения (или bounds холста).
+func (c *Canvas) clampRect(r image.Rectangle) image.Rectangle {
+	if c.hasClip {
+		r = r.Intersect(c.clip)
+	}
+	return r.Intersect(c.back.Bounds())
+}
+
+// ─── DrawContext ────────────────────────────────────────────────────────────
+
+// FillRect заливает прямоугольник сплошным цветом (координаты логические).
+func (c *Canvas) FillRect(x, y, w, h int, col color.RGBA) {
+	if col.A == 0 {
+		return
+	}
+	c.fillRectPx(c.PhysRect(image.Rect(x, y, x+w, y+h)), c.enc(col), false)
+}
+
+// FillRectAlpha заливает прямоугольник с альфа-смешиванием (Over).
+//
+// ВАЖНО: col — alpha-premultiplied (модель color.RGBA в Go): R,G,B ≤ A.
+// Прямой (straight) цвет вида {R:96, G:156, B:235, A:40} даст пересвет
+// и накопление при наложении. Перевести straight → premultiplied:
+// R*A/255, G*A/255, B*A/255.
+func (c *Canvas) FillRectAlpha(x, y, w, h int, col color.RGBA) {
+	c.fillRectPx(c.PhysRect(image.Rect(x, y, x+w, y+h)), c.enc(col), true)
+}
+
+// fillRectPx — заливка в ФИЗИЧЕСКИХ координатах (внутренний примитив).
+//
+// КОНТРАКТ: col приходит УЖЕ в порядке байт back-буфера (см. Canvas.enc) —
+// сама fillRectPx формат не знает и ничего не переставляет. Так и
+// backdrop.go может гонять сюда сырые байты, снятые прямо с back (после
+// размытия), не рискуя, что их перекодируют повторно.
+//
+// Ручные циклы вместо stdraw.Draw(&image.Uniform{...}): универсальный путь
+// стандартной библиотеки аллоцировал Uniform на каждый вызов (в профиле —
+// десятки тысяч объектов за секунды нагрузки). Src — заполнение первой строки
+// + copy остальных; Over — побайтово по формуле drawFillOver из image/draw
+// (та же 16-битная арифметика, поэтому результат идентичен до бита).
+func (c *Canvas) fillRectPx(r image.Rectangle, col color.RGBA, over bool) {
+	// Заливка — то, о чём потребителю знать выгоднее всего: сплошную область
+	// он передаёт командой протокола и не кодирует вовсе.
+	c.markSolid(r, col, !over || col.A == 255)
+	r = c.clampRect(r)
+	if r.Empty() {
+		return
+	}
+	// Скруглённое отсечение сужает каждую строку по-своему, поэтому заливка
+	// идёт построчно. Ветка стоит одну проверку, когда отсечения нет.
+	if c.round.active {
+		for y := r.Min.Y; y < r.Max.Y; y++ {
+			x0, x1, ok := c.round.spanX(y, r.Min.X, r.Max.X)
+			if !ok {
+				continue
+			}
+			c.fillRectRaw(image.Rect(x0, y, x1, y+1), col, over)
+		}
+		return
+	}
+	c.fillRectRaw(r, col, over)
+}
+
+// fillRectRaw — заливка уже зажатого прямоугольника, без проверок отсечения.
+func (c *Canvas) fillRectRaw(r image.Rectangle, col color.RGBA, over bool) {
+	if over && col.A != 255 {
+		if col.A == 0 {
+			return
+		}
+		const m = 1<<16 - 1
+		sr, sg, sb, sa := uint32(col.R)*0x101, uint32(col.G)*0x101, uint32(col.B)*0x101, uint32(col.A)*0x101
+		a := (m - sa) * 0x101
+		// Строка целиком уходит в pixsimd: там та же формула, а при сборке с
+		// GOEXPERIMENT=simd на процессоре с AVX2 — восемь пикселей за шаг.
+		// Затемнение под модалкой накрывает весь экран каждый кадр затухания.
+		for y := r.Min.Y; y < r.Max.Y; y++ {
+			i := c.back.PixOffset(r.Min.X, y)
+			pixsimd.OverSolidRow(c.back.Pix[i:i+r.Dx()*4], a, sr, sg, sb, sa)
+		}
+		return
+	}
+	// Src (или непрозрачный Over — то же самое): первая строка руками,
+	// остальные — копированием первой (memmove).
+	first := c.back.PixOffset(r.Min.X, r.Min.Y)
+	row0 := c.back.Pix[first : first+r.Dx()*4]
+	for x := 0; x < len(row0); x += 4 {
+		row0[x+0] = col.R
+		row0[x+1] = col.G
+		row0[x+2] = col.B
+		row0[x+3] = col.A
+	}
+	for y := r.Min.Y + 1; y < r.Max.Y; y++ {
+		i := c.back.PixOffset(r.Min.X, y)
+		copy(c.back.Pix[i:i+len(row0)], row0)
+	}
+}
+
+// FillRoundRect заливает прямоугольник со скруглёнными углами радиуса r.
+// Углы сглажены (AA-маски, см. aa.go); прямоугольное тело заливается
+// быстрым Src-fill. Полупрозрачные цвета идут по старому не-AA пути,
+// чтобы не смешивать семантики Src (тело) и Over (углы).
+// Все входные координаты логические; при HiDPI скейлятся здесь единожды.
+func (c *Canvas) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
+	if r <= 0 {
+		c.FillRect(x, y, w, h, col)
+		return
+	}
+	if r > w/2 {
+		r = w / 2
+	}
+	if r > h/2 {
+		r = h / 2
+	}
+	// Переход в физические координаты.
+	px, py := c.PhysX(x), c.PhysX(y)
+	pw, ph := c.sl(x, w), c.sl(y, h)
+	pr := c.st(r)
+	if pr > pw/2 {
+		pr = pw / 2
+	}
+	if pr > ph/2 {
+		pr = ph / 2
+	}
+	if col.A < 255 {
+		c.fillRoundRectLegacy(px, py, pw, ph, pr, c.enc(col))
+		return
+	}
+	// Тело идёт через fillRectPx, который col не кодирует (см. его
+	// контракт) — кодируем один раз здесь. Углы идут через drawCorners →
+	// drawAlphaMask, который кодирует col САМ (см. его комментарий), поэтому
+	// туда передаём исходный, ещё не закодированный col — не задваивать же
+	// перестановку каналов.
+	encCol := c.enc(col)
+	// Тело: средняя полоса на всю ширину + верх/низ между углами.
+	c.fillRectPx(image.Rect(px, py+pr, px+pw, py+ph-pr), encCol, false)
+	c.fillRectPx(image.Rect(px+pr, py, px+pw-pr, py+pr), encCol, false)
+	c.fillRectPx(image.Rect(px+pr, py+ph-pr, px+pw-pr, py+ph), encCol, false)
+	// Сглаженные углы.
+	c.drawCorners(cornersFor(pr, cornerFill), px, py, pw, ph, pr, col)
+}
+
+// fillRoundRectLegacy — ступенчатая заливка для полупрозрачных цветов
+// (A<255). Координаты ФИЗИЧЕСКИЕ. col приходит уже закодированным
+// (см. контракт fillRectPx) — вызывается только из FillRoundRect.
+//
+// Смешивает, а не пишет цвет как есть. Ветка выбирается ИМЕННО по
+// полупрозрачности, и запись без смешивания оставляла в буфере цвет с чужой
+// альфой: подсветка кнопки под курсором не ложилась плёнкой поверх панели, а
+// пробивала в ней дыру — на экране это выглядело светлым пятном, потому что
+// сквозь неё просвечивал фон приёмника.
+func (c *Canvas) fillRoundRectLegacy(x, y, w, h, r int, col color.RGBA) {
+	c.fillRectPx(image.Rect(x, y+r, x+w, y+h-r), col, true)
+	rf := float64(r)
+	for i := 0; i < r; i++ {
+		dy := float64(r - i - 1)
+		inset := r - int(math.Round(math.Sqrt(rf*rf-dy*dy)))
+		lineW := w - 2*inset
+		if lineW > 0 {
+			c.fillRectPx(image.Rect(x+inset, y+i, x+inset+lineW, y+i+1), col, true)     // верх
+			c.fillRectPx(image.Rect(x+inset, y+h-1-i, x+inset+lineW, y+h-i), col, true) // низ
+		}
+	}
+}
+
+// DrawRoundBorder рисует 1-пиксельный (логический) контур со скруглёнными
+// углами. Дуги углов сглажены (AA-маски четверть-кольца, см. aa.go).
+func (c *Canvas) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
+	// Полупрозрачная рамка — плёнка поверх фона, а не запись цвета вместе с
+	// чужой альфой: тонкая светлая обводка стеклянной панели иначе ложится
+	// сплошной белой линией.
+	blend := col.A < 255
+	if r <= 0 {
+		c.DrawBorder(x, y, w, h, col)
+		return
+	}
+	if r > w/2 {
+		r = w / 2
+	}
+	if r > h/2 {
+		r = h / 2
+	}
+	// Переход в физические координаты.
+	px, py := c.PhysX(x), c.PhysX(y)
+	pw, ph := c.sl(x, w), c.sl(y, h)
+	pr := c.st(r)
+	if pr > pw/2 {
+		pr = pw / 2
+	}
+	if pr > ph/2 {
+		pr = ph / 2
+	}
+	t := c.st(1) // физическая толщина линии
+	// Прямые стороны идут через fillRectPx (не кодирует col — см. его
+	// контракт), кодируем один раз для них; дуги — либо тот же путь
+	// (легаси), либо drawAlphaMask, который кодирует col САМ (см. FillRoundRect
+	// выше) — туда исходный, не закодированный col.
+	encCol := c.enc(col)
+	c.fillRectPx(image.Rect(px+pr, py, px+pw-pr, py+t), encCol, blend)       // верх
+	c.fillRectPx(image.Rect(px+pr, py+ph-t, px+pw-pr, py+ph), encCol, blend) // низ
+	c.fillRectPx(image.Rect(px, py+pr, px+t, py+ph-pr), encCol, blend)       // лево
+	c.fillRectPx(image.Rect(px+pw-t, py+pr, px+pw, py+ph-pr), encCol, blend) // право
+	if col.A < 255 {
+		c.drawRoundBorderCornersLegacy(px, py, pw, ph, pr, encCol)
+		return
+	}
+	// Сглаженные дуги углов.
+	c.drawCorners(cornersFor(pr, cornerRing), px, py, pw, ph, pr, col)
+}
+
+// drawRoundBorderCornersLegacy — прежние ступенчатые дуги (для A<255).
+// Координаты ФИЗИЧЕСКИЕ. col приходит уже закодированным (вызывается только
+// из DrawRoundBorder).
+func (c *Canvas) drawRoundBorderCornersLegacy(x, y, w, h, r int, col color.RGBA) {
+	// Полупрозрачные дуги СМЕШИВАЮТСЯ с фоном, как и прямые стороны рамки.
+	// Ветка выбирается по A<255, и запись цвета вместе с чужой альфой
+	// оставляла на углах «пробитые» точки: у стеклянной панели прямые стороны
+	// обводки ложились плёнкой, а четыре угла — дырами.
+	put := c.setPixelPx
+	if col.A < 255 {
+		put = c.blendPixelPx
+	}
+	rf := float64(r)
+	for i := 0; i <= r; i++ {
+		dy := float64(r - i)
+		dx := int(math.Round(math.Sqrt(rf*rf - dy*dy)))
+		put(x+r-dx, y+i, col)         // верхний левый
+		put(x+w-1-r+dx, y+i, col)     // верхний правый
+		put(x+r-dx, y+h-1-i, col)     // нижний левый
+		put(x+w-1-r+dx, y+h-1-i, col) // нижний правый
+	}
+}
+
+// blendPixelPx кладёт полупрозрачную точку поверх фона (Over), уважая клипы.
+// Отличается от setPixelPx только этим: та пишет цвет как есть.
+func (c *Canvas) blendPixelPx(x, y int, col color.RGBA) {
+	if c.hasClip && !image.Pt(x, y).In(c.clip) {
+		return
+	}
+	if !c.round.contains(x, y) {
+		return
+	}
+	if !image.Pt(x, y).In(c.back.Rect) {
+		return
+	}
+	// Один пиксель — тот же путь, что у заливки с alpha-смешиванием:
+	// прямоугольник 1×1 через fillRectPx, чтобы формулу смешивания не
+	// пришлось держать в двух местах.
+	c.fillRectPx(image.Rect(x, y, x+1, y+1), col, true)
+}
+
+// DrawBorder рисует 1-пиксельный (логический) контур прямоугольника.
+func (c *Canvas) DrawBorder(x, y, w, h int, col color.RGBA) {
+	// Полупрозрачная рамка — плёнка поверх фона, а не запись цвета вместе с
+	// чужой альфой: тонкая светлая обводка стеклянной панели иначе ложится
+	// сплошной белой линией.
+	blend := col.A < 255
+	px, py := c.PhysX(x), c.PhysX(y)
+	pw, ph := c.sl(x, w), c.sl(y, h)
+	t := c.st(1)
+	encCol := c.enc(col)                                               // fillRectPx col не кодирует — см. его контракт
+	c.fillRectPx(image.Rect(px, py, px+pw, py+t), encCol, blend)       // верх
+	c.fillRectPx(image.Rect(px, py+ph-t, px+pw, py+ph), encCol, blend) // низ
+	c.fillRectPx(image.Rect(px, py, px+t, py+ph), encCol, blend)       // лево
+	c.fillRectPx(image.Rect(px+pw-t, py, px+pw, py+ph), encCol, blend) // право
+}
+
+// DrawText рисует строку TTF-шрифтом (Go Regular) размером widget.DefaultFontSize()
+// (DefaultFontSize, пока приложение или тема не назначили другой).
+func (c *Canvas) DrawText(text string, x, y int, col color.RGBA) {
+	c.DrawTextSize(text, x, y, hgdraw.DefaultFontSize(), col)
+}
+
+// DrawTextSize рисует строку шрифтом по умолчанию произвольного размера (в пунктах).
+func (c *Canvas) DrawTextSize(text string, x, y int, sizePt float64, col color.RGBA) {
+	c.drawTextWithFont(c.fontCache, text, x, y, sizePt, col)
+}
+
+// DrawTextFont рисует строку именованным шрифтом (fontName="") → шрифт по умолчанию.
+func (c *Canvas) DrawTextFont(text string, x, y int, sizePt float64, fontName string, col color.RGBA) {
+	c.drawTextWithFont(c.FontFor(fontName), text, x, y, sizePt, col)
+}
+
+// clipPenSlackX — запас справа от клипа (физические пиксели), после которого
+// отрисовка строки прекращается. Покрывает отрицательный кернинг и левый свес
+// маски глифа (g.offX < 0) — то есть случаи, когда перо уже правее клипа, а
+// сам глиф ещё мог бы зацепить его край. 64 px кратно перекрывают и то и
+// другое для любого разумного кегля.
+const clipPenSlackX = 64
+
+func (c *Canvas) drawTextWithFont(fc *hgtext.FontCache, text string, x, y int, sizePt float64, col color.RGBA) {
+	// Обе ветки блиттируют кэшированные альфа-маски глифов (см. FontCache.Glyph)
+	// вместо повторной растеризации контуров через font.Drawer.
+	//
+	// HiDPI: позиция (x, y) логическая → физическая; метрики шрифта уже
+	// физические (DPI = 96 × scale), поэтому дальше всё в физических px.
+	px, py := c.PhysX(x), c.PhysX(y)
+	ascent, descent := fc.VMetrics(sizePt)
+	baseline := py + ascent
+
+	// Вертикальный отсев: строка целиком вне клипа — не итерируем руны вовсе
+	// (важно при частичной перерисовке, когда клип — небольшая damage-область).
+	// Запас 4px на глифы, выходящие за ascent/descent (акценты и т.п.).
+	if c.hasClip {
+		if py-4 >= c.clip.Max.Y || py+ascent+descent+4 <= c.clip.Min.Y {
+			return
+		}
+	}
+
+	// Сложный текст (RTL, арабский, индийские скрипты, комбинируемые знаки) —
+	// через шейпер (см. shaper.go). При недоступности шейпинга (шрифт не
+	// распарсился typesetting'ом) — деградация на per-rune путь ниже.
+	if hgtext.NeedsShaping(text) && c.drawShapedText(fc, text, px, baseline, sizePt, col) {
+		return
+	}
+
+	// Горизонтальный отсев (PERF-7): как только перо ушло правее клипа, все
+	// оставшиеся глифы гарантированно за его пределами — продвижение пера в
+	// LTR-шрифтах неотрицательно, а сложные скрипты уходят в шейпер выше.
+	// Длинная строка в узком поле/скролле раньше целиком прогонялась через
+	// кэши глифов и кернинга ради полностью отсечённого результата.
+	penLimit := fixed.Int26_6(math.MaxInt32) // клипа нет — предела нет
+	if c.hasClip {
+		penLimit = fixed.I(c.clip.Max.X + clipPenSlackX)
+	}
+
+	// Дробное позиционирование (Engine.SetTextSubpixel) включено на всех
+	// шрифтах разом, поэтому достаточно спросить основной.
+	sub := fc.Subpixel()
+	q := fc.Quality() // слой качества текста: контраст (хинтинг уже в масках)
+
+	// Быстрый путь: нет fallback-шрифтов — один шрифт, с кернингом
+	// (поведение прежнего font.Drawer.DrawString; отсутствующий глиф
+	// пропускается без продвижения пера — как делал Drawer с opentype).
+	if len(c.fallbacks) == 0 {
+		pen := fixed.I(px)
+		prev := rune(-1)
+		for _, r := range text {
+			if pen >= penLimit {
+				break
+			}
+			if prev >= 0 {
+				pen += fc.Kern(sizePt, prev, r)
+			}
+			g, gx := hgtext.PenGlyph(fc, sub, sizePt, r, pen)
+			if !g.OK {
+				continue
+			}
+			c.drawGlyphMask(g, gx+g.OffX, baseline+g.OffY, col, q)
+			pen += g.Advance
+			prev = r
+		}
+		return
+	}
+
+	// Fallback-путь: по рунам, выбирая шрифт с нужным глифом.
+	// Baseline от основного шрифта, кернинг не применяется (прежнее поведение).
+	pen := fixed.I(px)
+	for _, r := range text {
+		if pen >= penLimit {
+			break
+		}
+		chosen, found := c.fcForRune(fc, r)
+		g, gx := hgtext.PenGlyph(chosen, sub, sizePt, r, pen)
+		if found && g.OK {
+			c.drawGlyphMask(g, gx+g.OffX, baseline+g.OffY, col, q)
+		}
+		// Отсутствующий глиф не рисуем (без .notdef-квадрата), но сохраняем
+		// интервал по ширине пробела, чтобы текст не «слипался».
+		adv := g.Advance
+		if !found || !g.OK {
+			if sp := fc.Glyph(sizePt, ' '); sp.OK {
+				adv = sp.Advance
+			}
+		}
+		pen += adv
+	}
+}
+
+// drawGlyphMask альфа-блендит маску глифа из per-rune кэша.
+func (c *Canvas) drawGlyphMask(g hgtext.CachedGlyph, gx, gy int, col color.RGBA, q hgtext.TextQuality) {
+	lut := c.textLUT(q, col)
+	if g.LCD != nil {
+		c.withMaskKind(output.RegionText, func() { c.drawLCDMask(g.LCD, gx, gy, col, lut) })
+		return
+	}
+	if g.Mask == nil {
+		return
+	}
+	c.withMaskKind(output.RegionText, func() { c.drawAlphaMaskLUT(g.Mask, gx, gy, col, lut) })
+}
+
+// textLUT — таблица контраста слоя качества для цвета текста (nil — не нужна).
+// Холст промежуточного растра повёрнутого текста контраст не применяет: он
+// рисует белым, а кривая зависит от настоящего цвета (см. DrawTextRotated).
+func (c *Canvas) textLUT(q hgtext.TextQuality, col color.RGBA) *[256]uint8 {
+	if c.plainText {
+		return nil
+	}
+	return hgtext.ContrastLUT(col, q.ContrastSteps())
+}
+
+// drawAlphaMask альфа-блендит альфа-маску цветом col в back-буфер (Over,
+// premultiplied — как image/draw для font.Drawer). Учитывает clip.
+// (gx, gy) — позиция левого верхнего угла маски на холсте.
+//
+// В отличие от fillRectPx/setPixelPx, здесь col КОДИРУЕТСЯ (c.enc) прямо
+// внутри: часть вызывающих кода (aa.go — AA-фигуры, скруглённые углы) не
+// входит в файлы этой задачи и не может закодировать col сама на своей
+// стороне до вызова. Тем вызывающим в canvas.go, что уже закодировали col
+// сами (drawCorners из FillRoundRect/DrawRoundBorder — нет, туда специально
+// передаётся ИСХОДНЫЙ col), двойного кодирования тут нет: единственная
+// точка входа цвета для альфа-масок — эта функция.
+func (c *Canvas) drawAlphaMask(alpha *image.Alpha, gx, gy int, col color.RGBA) {
+	c.drawAlphaMaskLUT(alpha, gx, gy, col, nil)
+}
+
+// drawAlphaMaskLUT — drawAlphaMask с пересчётом покрытия таблицей lut (подъём
+// контраста текста, textquality.go); nil — покрытие как есть. Таблица
+// применяется к строке маски перед смешиванием, сама маска (кэш глифа) не
+// меняется.
+func (c *Canvas) drawAlphaMaskLUT(alpha *image.Alpha, gx, gy int, col color.RGBA, lut *[256]uint8) {
+	col = c.enc(col)
+	if b := alpha.Bounds(); !b.Empty() {
+		c.markKind(image.Rect(gx, gy, gx+b.Dx(), gy+b.Dy()))
+	}
+	mw, mh := alpha.Rect.Dx(), alpha.Rect.Dy()
+	r := c.clampRect(image.Rect(gx, gy, gx+mw, gy+mh))
+	if r.Empty() {
+		return
+	}
+	sr := uint32(col.R) * 0x101 // 16-бит premultiplied компоненты
+	sg := uint32(col.G) * 0x101
+	sb := uint32(col.B) * 0x101
+	sa := uint32(col.A) * 0x101
+	// Строки берём подсрезами (PERF-7), а смешивание строки — в pixsimd:
+	// арифметика прежняя, результат бит в бит тот же, а при сборке с
+	// GOEXPERIMENT=simd на процессоре с AVX2 — восемь пикселей за шаг. Это самое
+	// горячее место кадра: глифы, скругления и сглаженные фигуры идут через него.
+	mask := alpha.Pix
+	mStride := alpha.Stride
+	dst := c.back.Pix
+	for yy := r.Min.Y; yy < r.Max.Y; yy++ {
+		// Скруглённое отсечение сужает строку: текст в панели со скруглёнными
+		// углами не должен вылезать за кривую (см. clipround.go).
+		lx, rx, ok := c.round.spanX(yy, r.Min.X, r.Max.X)
+		if !ok {
+			continue
+		}
+		rw := rx - lx
+		mo := (yy-gy)*mStride + (lx - gx)
+		mRow := mask[mo : mo+rw]
+		if lut != nil {
+			if cap(c.lutRow) < rw {
+				c.lutRow = make([]uint8, rw+64)
+			}
+			row := c.lutRow[:rw]
+			for i, a := range mRow {
+				row[i] = lut[a]
+			}
+			mRow = row
+		}
+		dOff := c.back.PixOffset(lx, yy)
+		pixsimd.BlendMaskRow(dst[dOff:dOff+rw*4], mRow, sr, sg, sb, sa)
+	}
+}
+
+// drawColorGlyph блиттит цветной глиф эмодзи (premultiplied RGBA) в back-буфер
+// операцией Over. Цвет текста НЕ применяется — источник уже цветной. Учитывает
+// clip. (gx, gy) — позиция левого верхнего угла изображения на холсте.
+func (c *Canvas) drawColorGlyph(img *image.RGBA, gx, gy int) {
+	if b := img.Bounds(); !b.Empty() {
+		c.markKind(image.Rect(gx, gy, gx+b.Dx(), gy+b.Dy()))
+	}
+	iw, ih := img.Rect.Dx(), img.Rect.Dy()
+	r := c.clampRect(image.Rect(gx, gy, gx+iw, gy+ih))
+	if r.Empty() {
+		return
+	}
+	// img приходит из другого мира (COLR/эмодзи-глиф в emoji.go/colrv1.go,
+	// временный буфер тени в shadow.go) — всегда в "логическом" R,G,B,A,
+	// без понятия о формате back. Здесь единственная точка, где такие чужие
+	// пиксели копируются в back, поэтому здесь и переставляем R/B при
+	// FormatBGRX — по одному разу на пиксель, а не через отдельный проход.
+	swap := c.format == FormatBGRX
+	src := img.Pix
+	sStride := img.Stride
+	dst := c.back.Pix
+	for yy := r.Min.Y; yy < r.Max.Y; yy++ {
+		// Скруглённое отсечение: эмодзи в панели с кривыми углами обрезается
+		// так же, как текст и заливки.
+		lx, rx, ok := c.round.spanX(yy, r.Min.X, r.Max.X)
+		if !ok {
+			continue
+		}
+		sRow := (yy-gy)*sStride + (lx-gx)*4
+		dOff := c.back.PixOffset(lx, yy)
+		for xx := lx; xx < rx; xx++ {
+			sa := uint32(src[sRow+3])
+			if sa == 0 { // полностью прозрачный пиксель
+				sRow += 4
+				dOff += 4
+				continue
+			}
+			sr, sg, sb := src[sRow+0], src[sRow+1], src[sRow+2]
+			if swap {
+				sr, sb = sb, sr
+			}
+			inv := 255 - sa
+			p := dst[dOff : dOff+4 : dOff+4]
+			p[0] = uint8(uint32(sr) + uint32(p[0])*inv/255)
+			p[1] = uint8(uint32(sg) + uint32(p[1])*inv/255)
+			p[2] = uint8(uint32(sb) + uint32(p[2])*inv/255)
+			p[3] = uint8(sa + uint32(p[3])*inv/255)
+			sRow += 4
+			dOff += 4
+		}
+	}
+}
+
+// runeAdvance возвращает ширину руны в выбранном (с учётом fallback) шрифте.
+// Для непокрытых рун использует ширину пробела (соответствует drawTextWithFont).
+func (c *Canvas) runeAdvance(fc *hgtext.FontCache, r rune, sizePt float64) fixed.Int26_6 {
+	chosen, found := c.fcForRune(fc, r)
+	a, ok := chosen.Advance(sizePt, r)
+	if !ok || !found {
+		if sp, ok2 := fc.Advance(sizePt, ' '); ok2 {
+			return sp
+		}
+	}
+	return a
+}
+
+// measureWithFallback измеряет ширину строки с учётом fallback-шрифтов.
+func (c *Canvas) measureWithFallback(fc *hgtext.FontCache, text string, sizePt float64) int {
+	// Сложный текст: ширина после шейпинга (лигатуры меняют ширину строки).
+	if hgtext.NeedsShaping(text) {
+		if l := c.shaper.Layout(fc, c.fallbacks, text, sizePt); l != nil {
+			return l.Width.Round()
+		}
+	}
+	if len(c.fallbacks) == 0 {
+		return fc.Measure(text, sizePt)
+	}
+	var w fixed.Int26_6
+	for _, r := range text {
+		w += c.runeAdvance(fc, r, sizePt)
+	}
+	return w.Round()
+}
+
+// drawShapedText рисует строку через шейпер: глифы в видимом порядке,
+// маски растеризуются по GID и кэшируются. baseline — Y базовой линии.
+// false — шейпинг недоступен, вызывающий код рисует per-rune путём.
+func (c *Canvas) drawShapedText(fc *hgtext.FontCache, text string, x, baseline int, sizePt float64, col color.RGBA) bool {
+	l := c.shaper.Layout(fc, c.fallbacks, text, sizePt)
+	if l == nil {
+		return false
+	}
+	sizePx := fc.PixelSize(sizePt)
+	q := fc.Quality()
+	pen := fixed.I(x)
+	for _, g := range l.Glyphs {
+		// GID 0 = .notdef: руна не покрыта ни одним шрифтом — не рисуем
+		// «тофу»-квадрат (философия BUG-2), но перо продвигаем.
+		if g.GID == 0 {
+			pen += g.Adv
+			continue
+		}
+		// Цветной эмодзи (COLR/CBDT): блиттится как RGBA, цветом текста НЕ
+		// красится. Для обычных глифов colorGlyphFor сразу вернёт nil.
+		if cg := c.shaper.ColorGlyphFor(g, sizePx, col); cg != nil && cg.Img != nil {
+			gx := (pen + g.XOff).Round() + cg.OffX
+			gy := baseline - g.YOff.Round() + cg.OffY
+			c.withMaskKind(output.RegionText, func() { c.drawColorGlyph(cg.Img, gx, gy) })
+			pen += g.Adv
+			continue
+		}
+		m := c.shaper.GlyphMaskFor(g, sizePx, q.Hinting)
+		if m.Mask != nil {
+			// Точка отрисовки: перо + XOffset; YOffset положителен вверх.
+			gx := (pen + g.XOff).Round() + m.OffX
+			gy := baseline - g.YOff.Round() + m.OffY
+			lut := c.textLUT(q, col)
+			c.withMaskKind(output.RegionText, func() { c.drawAlphaMaskLUT(m.Mask, gx, gy, col, lut) })
+		}
+		pen += g.Adv
+	}
+	return true
+}
+
+// shapedRunePositions — накопленные ширины по логическим рунам для сложного
+// текста: advance каждого кластера распределяется поровну между его рунами.
+// Для RTL это ЛОГИЧЕСКИЕ позиции (для каретки TextInput), не визуальные.
+func (c *Canvas) shapedRunePositions(fc *hgtext.FontCache, text string, sizePt float64) []int {
+	l := c.shaper.Layout(fc, c.fallbacks, text, sizePt)
+	if l == nil {
+		return nil
+	}
+	runes := []rune(text)
+	n := len(runes)
+	// Суммарный advance по кластерам (cluster = индекс первой руны кластера).
+	clusterAdv := make(map[int]fixed.Int26_6, n)
+	for _, g := range l.Glyphs {
+		clusterAdv[g.Cluster] += g.Adv
+	}
+	// Границы кластеров в логическом порядке.
+	starts := make([]int, 0, len(clusterAdv))
+	for s := range clusterAdv {
+		starts = append(starts, s)
+	}
+	sort.Ints(starts)
+
+	pos := make([]int, n+1)
+	var acc fixed.Int26_6
+	for ci, s := range starts {
+		end := n
+		if ci+1 < len(starts) {
+			end = starts[ci+1]
+		}
+		adv := clusterAdv[s]
+		cnt := end - s
+		if cnt <= 0 {
+			continue
+		}
+		for k := 1; k <= cnt; k++ {
+			pos[s+k] = (acc + adv*fixed.Int26_6(k)/fixed.Int26_6(cnt)).Round()
+		}
+		acc += adv
+	}
+	return pos
+}
+
+// MeasureText возвращает ширину строки в ЛОГИЧЕСКИХ пикселях (шрифт по
+// умолчанию, sizePt). Внутреннее измерение физическое (DPI × scale),
+// результат приводится к логическим с округлением вверх.
+func (c *Canvas) MeasureText(text string, sizePt float64) int {
+	return c.toLogicalLen(c.measureWithFallback(c.fontCache, text, sizePt))
+}
+
+// MeasureTextFont возвращает ширину строки именованным шрифтом (логические px).
+func (c *Canvas) MeasureTextFont(text string, sizePt float64, fontName string) int {
+	return c.toLogicalLen(c.measureWithFallback(c.FontFor(fontName), text, sizePt))
+}
+
+// FontMetrics возвращает вертикальные метрики шрифта в ЛОГИЧЕСКИХ пикселях:
+// подъём и спуск от базовой линии и рекомендуемый зазор между строками.
+// Пустое имя (или незарегистрированное) — шрифт по умолчанию, как у
+// MeasureTextFont.
+//
+// Числа берутся из того же кэша vMetrics, по которому drawTextWithFont ставит
+// базовую линию (y + ascent), поэтому «подъём» здесь — ровно то расстояние, на
+// которое DrawText опускает базовую линию от переданного y. Без этого
+// приложения разбирали TTF сами (Блокнот — через opentype) ради одной цифры и
+// расходились с движком в округлении.
+//
+// HiDPI: метрики физические (DPI = 96 × scale), в логические переводятся
+// округлением к ближайшему — как и ширины MeasureRunePositions. Вверх, как
+// ширину в toLogicalLen, нельзя: ширина — это «сколько места зарезервировать»,
+// а подъём — «где базовая линия», и завышенный подъём сдвинул бы текст.
+func (c *Canvas) FontMetrics(fontName string, sizePt float64) (ascent, descent, lineGap int) {
+	m := c.FontFor(fontName).VMetricsFull(sizePt)
+	if c.scale == 1 {
+		return m.Ascent, m.Descent, m.LineGap
+	}
+	toLogical := func(px int) int { return int(math.Round(float64(px) / c.scale)) }
+	return toLogical(m.Ascent), toLogical(m.Descent), toLogical(m.LineGap)
+}
+
+// toLogicalLen переводит физическую длину в логическую (округление вверх:
+// зарезервированное по измерению место гарантированно вмещает текст).
+func (c *Canvas) toLogicalLen(px int) int {
+	if c.scale == 1 {
+		return px
+	}
+	return int(math.Ceil(float64(px) / c.scale))
+}
+
+// MeasureRunePositions возвращает накопленную ширину после каждого символа
+// (в ЛОГИЧЕСКИХ пикселях).
+// Результат: len(runes)+1 элементов; positions[0]==0, positions[n] — ширина text[:n].
+// Для сложного текста (шейпинг) позиции считаются по кластерам в ЛОГИЧЕСКОМ
+// порядке рун — визуальное позиционирование каретки в RTL не поддержано (v1).
+func (c *Canvas) MeasureRunePositions(text string, sizePt float64) []int {
+	pos := c.measureRunePositionsPx(text, sizePt)
+	if c.scale != 1 {
+		for i, p := range pos {
+			pos[i] = int(math.Round(float64(p) / c.scale))
+		}
+	}
+	return pos
+}
+
+// measureRunePositionsPx — позиции рун в физических пикселях.
+func (c *Canvas) measureRunePositionsPx(text string, sizePt float64) []int {
+	return c.measureRunePositionsPxFont(c.fontCache, text, sizePt)
+}
+
+// MeasureRunePositionsFont — как MeasureRunePositions, но ИМЕНОВАННЫМ шрифтом.
+//
+// Каретка и выделение в моноширинном тексте считаются по нему же: раскладка,
+// посчитанная шрифтом по умолчанию, разъезжается с нарисованной, как только
+// именованный шрифт действительно зарегистрирован. Пустое имя — шрифт по
+// умолчанию.
+func (c *Canvas) MeasureRunePositionsFont(text string, sizePt float64, fontName string) []int {
+	pos := c.measureRunePositionsPxFont(c.FontFor(fontName), text, sizePt)
+	if c.scale != 1 {
+		for i, p := range pos {
+			pos[i] = int(math.Round(float64(p) / c.scale))
+		}
+	}
+	return pos
+}
+
+func (c *Canvas) measureRunePositionsPxFont(fc *hgtext.FontCache, text string, sizePt float64) []int {
+	if hgtext.NeedsShaping(text) {
+		if pos := c.shapedRunePositions(fc, text, sizePt); pos != nil {
+			return pos
+		}
+	}
+	if len(c.fallbacks) == 0 {
+		return fc.MeasureRunes(text, sizePt)
+	}
+	runes := []rune(text)
+	pos := make([]int, len(runes)+1)
+	var w fixed.Int26_6
+	for i, r := range runes {
+		w += c.runeAdvance(fc, r, sizePt)
+		pos[i+1] = w.Round()
+	}
+	return pos
+}
+
+// SetPixel устанавливает цвет одного ЛОГИЧЕСКОГО пикселя (при HiDPI —
+// блок физических пикселей соответствующего размера). Учитывает clip.
+func (c *Canvas) SetPixel(x, y int, col color.RGBA) {
+	col = c.enc(col) // setPixelPx/fillRectPx col не кодируют — см. их контракт
+	if c.scale != 1 {
+		c.fillRectPx(image.Rect(c.PhysX(x), c.PhysX(y), c.PhysX(x+1), c.PhysX(y+1)), col, false)
+		return
+	}
+	c.setPixelPx(x, y, col)
+}
+
+// setPixelPx — один ФИЗИЧЕСКИЙ пиксель (внутренний примитив). col приходит
+// уже закодированным (см. контракт fillRectPx) — вызывающие кодируют сами.
+func (c *Canvas) setPixelPx(x, y int, col color.RGBA) {
+	if c.hasClip {
+		if !image.Pt(x, y).In(c.clip) {
+			return
+		}
+	}
+	if !c.round.contains(x, y) {
+		return
+	}
+	if image.Pt(x, y).In(c.back.Rect) {
+		c.back.SetRGBA(x, y, col)
+	}
+}
+
+// DrawHLine рисует горизонтальную линию длиной length логических пикселей.
+func (c *Canvas) DrawHLine(x, y, length int, col color.RGBA) {
+	c.FillRect(x, y, length, 1, col)
+}
+
+// DrawVLine рисует вертикальную линию длиной length логических пикселей.
+func (c *Canvas) DrawVLine(x, y, length int, col color.RGBA) {
+	c.FillRect(x, y, 1, length, col)
+}
+
+// DrawImage рисует изображение в (x, y); логический размер = размеру
+// картинки в пикселях (при HiDPI изображение растягивается на scale).
+//
+// Источник, объявленный непрозрачным (widget.OpaqueImage или непрозрачный по
+// типу — YCbCr, Gray), кладётся композицией Src, а не Over — см. blitSrcRect.
+func (c *Canvas) DrawImage(src image.Image, x, y int) {
+	orig := src
+	src, opaque := hgdraw.IsOpaqueImage(src)
+	if b := src.Bounds(); !b.Empty() {
+		c.MarkImage(c.PhysRect(image.Rect(x, y, x+b.Dx(), y+b.Dy())))
+	}
+	if c.scale != 1 {
+		c.DrawImageScaled(orig, x, y, src.Bounds().Dx(), src.Bounds().Dy())
+		return
+	}
+	r := c.clampRect(image.Rect(x, y, x+src.Bounds().Dx(), y+src.Bounds().Dy()))
+	if r.Empty() {
+		return
+	}
+	offset := src.Bounds().Min.Add(image.Pt(r.Min.X-x, r.Min.Y-y))
+	c.blitImage(r, src, offset, opaque)
+}
+
+// blitOver копирует src в back операцией Over в физической области r
+// (offset — точка src, соответствующая r.Min). Общая точка для
+// DrawImage/DrawImageScaled — единственное место, где в back попадают
+// пиксели чужого image.Image напрямую, минуя markSolid/drawAlphaMask.
+//
+// FormatRGBA: тот же stdraw.Draw, что был здесь и раньше, — байт в байт
+// прежнее поведение, никакого нового кода на этом пути не выполняется.
+//
+// FormatBGRX: stdraw.Draw не знает про наш порядок байт, а переписывать его
+// арифметику Over вручную — рискованно разойтись на пару значений округления
+// с оригиналом (тест ЗАДАЧИ 1 требует побитового совпадения с RGBA-рендером
+// той же сцены). Поэтому вместо этого прогоняем ТОТ ЖЕ stdraw.Draw во
+// временном RGBA-буфере: сначала "расколдовываем" в него текущее содержимое
+// затрагиваемой области back (снова R↔B), затем — обычный Over, затем
+// результат переносим назад с той же перестановкой. Дороже прямой записи,
+// зато арифметика смешивания гарантированно та же, что и в FormatRGBA.
+//
+// Скруглённый клип (SetRoundClip): изображение обязано обрезаться той же
+// кривой, что и заливки, — иначе у картинки внутри скруглённой панели торчат
+// прямые углы. Прямая часть контура (середина клипа) блитится одним вызовом,
+// как и без скругления; построчно, с суженным интервалом (spanX), идут только
+// угловые зоны — по radius строк сверху и снизу. Без скругления путь прежний,
+// байт в байт.
+func (c *Canvas) blitOver(r image.Rectangle, src image.Image, offset image.Point) {
+	c.blitImage(r, src, offset, false)
+}
+
+// blitImage — blitOver с признаком непрозрачного источника: тогда прямоугольные
+// части идут композицией Src (blitSrcRect), угловые строки скруглённого клипа
+// тоже — они сужены по spanX и копируются теми же построчными пролётами.
+func (c *Canvas) blitImage(r image.Rectangle, src image.Image, offset image.Point, opaque bool) {
+	rect := c.blitOverRect
+	if opaque {
+		rect = c.blitSrcRect
+	}
+	if !c.round.active {
+		rect(r, src, offset)
+		return
+	}
+	rd := &c.round
+	top := rd.rect.Min.Y + rd.radius
+	bot := rd.rect.Max.Y - rd.radius
+	row := func(y int) {
+		x0, x1, ok := rd.spanX(y, r.Min.X, r.Max.X)
+		if !ok {
+			return
+		}
+		rect(image.Rect(x0, y, x1, y+1), src, offset.Add(image.Pt(x0-r.Min.X, y-r.Min.Y)))
+	}
+	// Верхняя угловая зона (строки выше контура rd.rect отсекаются spanX).
+	for y := max(r.Min.Y, rd.rect.Min.Y); y < min(r.Max.Y, top); y++ {
+		row(y)
+	}
+	// Прямая часть: по вертикали — вся, по горизонтали — в границах контура.
+	if y0, y1 := max(r.Min.Y, top), min(r.Max.Y, bot); y0 < y1 {
+		x0, x1 := max(r.Min.X, rd.rect.Min.X), min(r.Max.X, rd.rect.Max.X)
+		if x0 < x1 {
+			rect(image.Rect(x0, y0, x1, y1), src, offset.Add(image.Pt(x0-r.Min.X, y0-r.Min.Y)))
+		}
+	}
+	// Нижняя угловая зона.
+	for y := max(r.Min.Y, bot); y < min(r.Max.Y, rd.rect.Max.Y); y++ {
+		row(y)
+	}
+}
+
+// blitOverRect — сам блит Over в прямоугольник r без учёта скруглённого
+// клипа (см. blitOver).
+func (c *Canvas) blitOverRect(r image.Rectangle, src image.Image, offset image.Point) {
+	if c.format != FormatBGRX {
+		stdraw.Draw(c.back, r, src, offset, stdraw.Over)
+		return
+	}
+	w, h := r.Dx(), r.Dy()
+	if w <= 0 || h <= 0 {
+		return
+	}
+	tmp := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		bOff := c.back.PixOffset(r.Min.X, r.Min.Y+y)
+		tOff := tmp.PixOffset(0, y)
+		row := c.back.Pix[bOff : bOff+w*4]
+		trow := tmp.Pix[tOff : tOff+w*4]
+		for i := 0; i < len(row); i += 4 {
+			trow[i+0], trow[i+1], trow[i+2], trow[i+3] = row[i+2], row[i+1], row[i+0], row[i+3]
+		}
+	}
+	stdraw.Draw(tmp, tmp.Bounds(), src, offset, stdraw.Over)
+	for y := 0; y < h; y++ {
+		bOff := c.back.PixOffset(r.Min.X, r.Min.Y+y)
+		tOff := tmp.PixOffset(0, y)
+		row := c.back.Pix[bOff : bOff+w*4]
+		trow := tmp.Pix[tOff : tOff+w*4]
+		for i := 0; i < len(row); i += 4 {
+			row[i+0], row[i+1], row[i+2], row[i+3] = trow[i+2], trow[i+1], trow[i+0], trow[i+3]
+		}
+	}
+}
+
+// ─── Кэш масштабирования ────────────────────────────────────────────────────
+
+const (
+	maxScaledEntries = 32       // записей в кэше DrawImageScaled
+	maxScaledPixels  = 16 << 20 // суммарный бюджет пикселей кэша
+)
+
+// scaledKey — ключ кэша: идентичность источника плюс запрошенный размер.
+type scaledKey struct {
+	src  uintptr
+	sb   image.Rectangle
+	w, h int
+}
+
+type scaledEntry struct {
+	img  *image.RGBA
+	used uint64 // такт последнего обращения (LRU)
+	// src удерживает источник, пока жива запись. Ключ хранит лишь АДРЕС
+	// источника (uintptr), а сборщик мусора вправе освободить объект и отдать
+	// тот же адрес новому изображению тех же размеров — оно получило бы чужой
+	// кадр. Пока запись держит src, адрес занят, и ключ не может «переехать».
+	// weak.Pointer здесь не подходит: go.mod объявляет Go 1.22, а пакет weak
+	// появился в 1.24.
+	src image.Image
+}
+
+// DrawImageScaled рисует изображение масштабированным до (w × h) логических
+// пикселей в позицию (x, y).
+// Кэш — по идентичности источника; мутировали пиксели — InvalidateImageCache.
+//
+// Непрозрачный источник (widget.OpaqueImage, YCbCr, Gray) физического размера
+// ровно pw×ph кладётся без масштабирования и без кэша композицией Src
+// (blitSrcRect): так просмотрщик отдаёт движку собственный буфер окна.
+func (c *Canvas) DrawImageScaled(src image.Image, x, y, w, h int) {
+	src, opaque := hgdraw.IsOpaqueImage(src)
+	if w > 0 && h > 0 {
+		c.MarkImage(c.PhysRect(image.Rect(x, y, x+w, y+h)))
+	}
+	px, py := c.PhysX(x), c.PhysX(y)
+	pw, ph := c.sl(x, w), c.sl(y, h)
+	dstRect := c.clampRect(image.Rect(px, py, px+pw, py+ph))
+	if dstRect.Empty() {
+		return
+	}
+	offset := image.Pt(dstRect.Min.X-px, dstRect.Min.Y-py)
+	// Картинка уже нужного ФИЗИЧЕСКОГО размера (векторный значок, растеризованный
+	// под масштаб холста, — widget.DrawSVG) кладётся как есть: растяжение 1:1
+	// ничего не добавило бы, кроме копии в кэше и лишнего прохода по пикселям.
+	if sb := src.Bounds(); sb.Dx() == pw && sb.Dy() == ph {
+		if rgba, ok := src.(*image.RGBA); ok {
+			c.blitImage(dstRect, rgba, sb.Min.Add(offset), opaque)
+			return
+		}
+		if opaque && opaqueFastType(src) {
+			c.blitImage(dstRect, src, sb.Min.Add(offset), true)
+			return
+		}
+	}
+	tmp := c.scaledFor(src, pw, ph)
+	c.blitOver(dstRect, tmp, offset)
+}
+
+// scaledFor возвращает src, масштабированный до pw×ph физических пикселей.
+func (c *Canvas) scaledFor(src image.Image, pw, ph int) *image.RGBA {
+	if c.scaledOverride != nil {
+		if img := c.scaledOverride(src, pw, ph); img != nil {
+			return img
+		}
+	}
+	need := image.Rect(0, 0, pw, ph)
+	key, cacheable := scaledCacheKey(src, pw, ph)
+	if cacheable {
+		c.syncImageInvalidations()
+		// ent.src == src — страховка поверх удержания ссылки: запись другого
+		// объекта с тем же ключом чужим кадром не отдаётся никогда.
+		if ent, ok := c.scaledCache[key]; ok && ent.src == src {
+			c.scaledClock++
+			ent.used = c.scaledClock
+			return ent.img
+		}
+	} else {
+		// Источник без стабильной идентичности — общий временный буфер.
+		tmp := c.scaleTmp
+		if tmp == nil || tmp.Bounds() != need {
+			tmp = image.NewRGBA(need)
+			c.scaleTmp = tmp
+		} else {
+			for i := range tmp.Pix {
+				tmp.Pix[i] = 0
+			}
+		}
+		draw.BiLinear.Scale(tmp, need, src, src.Bounds(), stdraw.Src, nil)
+		return tmp
+	}
+	img := image.NewRGBA(need)
+	draw.BiLinear.Scale(img, need, src, src.Bounds(), stdraw.Src, nil)
+	c.putScaled(key, src, img, pw*ph)
+	return img
+}
+
+// scaledCacheKey строит ключ кэша; false — источник кэшировать нельзя.
+func scaledCacheKey(src image.Image, w, h int) (scaledKey, bool) {
+	v := reflect.ValueOf(src)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return scaledKey{}, false
+	}
+	return scaledKey{src: v.Pointer(), sb: src.Bounds(), w: w, h: h}, true
+}
+
+// putScaled кладёт запись в кэш, вытесняя давние при переполнении.
+func (c *Canvas) putScaled(key scaledKey, src image.Image, img *image.RGBA, pixels int) {
+	budget := c.scaledBudget
+	if budget <= 0 {
+		budget = maxScaledPixels
+	}
+	if pixels > budget {
+		return // крупнее бюджета холста (у окна воркера он — доля общего)
+	}
+	if c.scaledCache == nil {
+		c.scaledCache = make(map[scaledKey]*scaledEntry, maxScaledEntries)
+	}
+	for len(c.scaledCache) >= maxScaledEntries || c.scaledPixels+pixels > budget {
+		if !c.evictScaled() {
+			break
+		}
+	}
+	c.scaledClock++
+	if old, ok := c.scaledCache[key]; ok { // запись с тем же ключом, но другим src — заменяем
+		c.scaledPixels -= old.img.Rect.Dx() * old.img.Rect.Dy()
+	}
+	c.scaledCache[key] = &scaledEntry{img: img, used: c.scaledClock, src: src}
+	c.scaledPixels += pixels
+}
+
+// evictScaled выбрасывает самую давно не использованную запись.
+func (c *Canvas) evictScaled() bool {
+	var (
+		oldKey scaledKey
+		oldEnt *scaledEntry
+	)
+	for k, ent := range c.scaledCache {
+		if oldEnt == nil || ent.used < oldEnt.used {
+			oldKey, oldEnt = k, ent
+		}
+	}
+	if oldEnt == nil {
+		return false
+	}
+	delete(c.scaledCache, oldKey)
+	c.scaledPixels -= oldEnt.img.Rect.Dx() * oldEnt.img.Rect.Dy()
+	return true
+}
+
+// InvalidateImageCache сбрасывает кэш масштабирования для src (nil — целиком).
+// Вызывать после мутации пикселей картинки на месте, из потока отрисовки.
+//
+// У холста, созданного движком, сброс заодно записывается в общий журнал
+// (imagecache.go): остальные холсты движка — попапы — применят его перед
+// следующим обращением к кэшу.
+func (c *Canvas) InvalidateImageCache(src image.Image) {
+	if src == nil {
+		c.dropScaled(0, true)
+		if c.inv != nil {
+			c.inv.Add(0, true)
+		}
+		return
+	}
+	src, _ = hgdraw.IsOpaqueImage(src) // кэш ключуется по обёрнутому изображению
+	v := reflect.ValueOf(src)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return
+	}
+	ptr := v.Pointer()
+	c.dropScaled(ptr, false)
+	if c.inv != nil {
+		c.inv.Add(ptr, false)
+	}
+}
+
+// dropScaled выбрасывает из кэша записи источника с адресом ptr (all — все).
+func (c *Canvas) dropScaled(ptr uintptr, all bool) {
+	if all {
+		c.scaledCache = nil
+		c.scaledPixels = 0
+		return
+	}
+	for k, ent := range c.scaledCache {
+		if k.src == ptr {
+			delete(c.scaledCache, k)
+			c.scaledPixels -= ent.img.Rect.Dx() * ent.img.Rect.Dy()
+		}
+	}
+}
+
+// Snapshot возвращает КОПИЮ прямоугольной области уже отрисованного back-буфера
+// как самостоятельный *image.RGBA. Прямоугольник r задаётся в ЛОГИЧЕСКИХ
+// координатах холста (как остальной DrawContext) и клипится по его границам;
+// возвращаемое изображение — в ФИЗИЧЕСКИХ пикселях (back-буфер физический) с
+// началом координат (0,0). Пустое пересечение с холстом → nil.
+//
+// Копия независима от буфера (последующий рендер её не меняет), поэтому снимок
+// можно хранить между кадрами — используется «призраком» drag&dock в
+// widget.DockManager (снимок панели следует за курсором). Пиксели —
+// premultiplied RGBA, как и весь back: снимок можно блиттить обратно через
+// DrawImage/DrawImageScaled (Over) без преобразований.
+func (c *Canvas) Snapshot(r image.Rectangle) *image.RGBA {
+	pr := c.PhysRect(r).Intersect(c.back.Bounds())
+	if pr.Empty() {
+		return nil
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, pr.Dx(), pr.Dy()))
+	rowBytes := pr.Dx() * 4
+	for y := 0; y < pr.Dy(); y++ {
+		src := c.back.PixOffset(pr.Min.X, pr.Min.Y+y)
+		d := dst.PixOffset(0, y)
+		copy(dst.Pix[d:d+rowBytes], c.back.Pix[src:src+rowBytes])
+	}
+	return dst
+}
+
+// ─── Tile diffing ───────────────────────────────────────────────────────────
+
+// DiffAndSync сравнивает back с front по тайлам и возвращает изменившиеся.
+func (c *Canvas) DiffAndSync() []output.DirtyTile {
+	return c.diffTiles(0, 0, c.tilesX-1, c.tilesY-1)
+}
+
+// diffAndSyncIn — как DiffAndSync, но сравнивает только тайлы, пересекающие
+// region (damage-область из InvalidateRect). Тайлы вне region не сравниваются
+// и НЕ синхронизируются — контракт: вызывающий заявил все изменённые области.
+func (c *Canvas) diffAndSyncIn(region image.Rectangle) []output.DirtyTile {
+	region = region.Intersect(image.Rect(0, 0, c.W, c.H))
+	if region.Empty() {
+		return nil
+	}
+	ts := output.TileSize
+	tx0 := region.Min.X / ts
+	ty0 := region.Min.Y / ts
+	tx1 := (region.Max.X - 1) / ts
+	ty1 := (region.Max.Y - 1) / ts
+	return c.diffTiles(tx0, ty0, tx1, ty1)
+}
+
+// DiffAndSyncInRects — diff по НЕСКОЛЬКИМ областям сразу.
+//
+// Области перебираются по одной, и общий тайл двух соседних областей не
+// попадёт в выдачу дважды: diffTiles синхронизирует front сразу после
+// извлечения тайла, поэтому при втором сравнении тайл уже равен и
+// отбрасывается. Отдельная дедупликация не нужна.
+func (c *Canvas) DiffAndSyncInRects(regions []image.Rectangle) []output.DirtyTile {
+	switch len(regions) {
+	case 0:
+		return nil
+	case 1:
+		return c.diffAndSyncIn(regions[0])
+	}
+	var out []output.DirtyTile
+	for _, r := range regions {
+		out = append(out, c.diffAndSyncIn(r)...)
+	}
+	return out
+}
+
+// diffTiles сравнивает тайлы в диапазоне индексов [tx0..tx1]×[ty0..ty1].
+// При достаточном объёме работа распараллеливается по рядам тайлов: каждый
+// воркер обрабатывает непересекающийся диапазон памяти (сравнение, извлечение
+// и синхронизация front — всё в границах своих рядов), поэтому гонок нет.
+func (c *Canvas) diffTiles(tx0, ty0, tx1, ty1 int) []output.DirtyTile {
+	if ty1 >= c.tilesY {
+		ty1 = c.tilesY - 1
+	}
+	if tx1 >= c.tilesX {
+		tx1 = c.tilesX - 1
+	}
+	if c.noPool {
+		return c.diffTileRows(tx0, ty0, tx1, ty1) // из окна воркера — без пула
+	}
+	if ty0 > ty1 || tx0 > tx1 {
+		return nil
+	}
+
+	rows := ty1 - ty0 + 1
+	total := rows * (tx1 - tx0 + 1)
+	workers := runtime.GOMAXPROCS(0)
+	if workers > rows {
+		workers = rows
+	}
+	// Порог: параллелить только заметный объём — сравнение одного тайла
+	// это ~16 КБ memcmp, на мелких диффах горутины дороже выигрыша.
+	if workers <= 1 || total < 64 {
+		return c.diffTileRows(tx0, ty0, tx1, ty1)
+	}
+
+	// Полосы раздаёт постоянный пул (workpool.go), а не горутины на кадр.
+	chunk := (rows + workers - 1) / workers
+	parts := (rows + chunk - 1) / chunk
+	j := &c.diffWork
+	j.c, j.tx0, j.tx1, j.ty0, j.ty1, j.chunk = c, tx0, tx1, ty0, ty1, chunk
+	if cap(j.results) < parts {
+		j.results = make([][]output.DirtyTile, parts)
+	}
+	j.results = j.results[:parts]
+	workpool.Run(j, &j.batch, parts)
+
+	var tiles []output.DirtyTile
+	for i, part := range j.results {
+		tiles = append(tiles, part...)
+		j.results[i] = nil // не держать данные тайлов до следующего кадра
+	}
+	return tiles
+}
+
+// diffTileRows — последовательный diff тайлов в диапазоне рядов [ty0..ty1].
+//
+// Два прохода: сначала сравнение находит изменившиеся тайлы, затем их данные
+// извлекаются в ОДИН слэб точного размера, а Data каждого тайла —
+// трёхиндексный срез в него. Раньше на каждый тайл выделялся собственный
+// буфер — при активной перерисовке это был крупнейший источник мусора движка
+// (десятки МБ/с в профиле); слэб через append тоже не годился — рост с
+// удвоением копирует данные и оставляет позади до слэба мусора за кадр.
+func (c *Canvas) diffTileRows(tx0, ty0, tx1, ty1 int) []output.DirtyTile {
+	ts := output.TileSize
+
+	// Проход 1: какие тайлы изменились и сколько байт им нужно.
+	var tiles []output.DirtyTile
+	total := 0
+	for ty := ty0; ty <= ty1; ty++ {
+		for tx := tx0; tx <= tx1; tx++ {
+			px := tx * ts
+			py := ty * ts
+			pw := min(ts, c.W-px)
+			ph := min(ts, c.H-py)
+			if !c.tilesEqual(px, py, pw, ph) {
+				tiles = append(tiles, output.DirtyTile{X: px, Y: py, W: pw, H: ph})
+				total += pw * ph * 4
+			}
+		}
+	}
+	return c.extractTiles(tiles, total)
+}
+
+// extractTiles — второй проход диффа: данные изменившихся тайлов в один слэб
+// и синхронизация front.
+func (c *Canvas) extractTiles(tiles []output.DirtyTile, total int) []output.DirtyTile {
+	if len(tiles) == 0 {
+		return nil
+	}
+
+	if c.noTileData {
+		for _, t := range tiles {
+			c.syncTile(t.X, t.Y, t.W, t.H)
+		}
+		return tiles
+	}
+
+	// Проход 2: одна аллокация под все данные, извлечение и синхронизация.
+	slab := c.newSlab(total)
+	for i := range tiles {
+		t := &tiles[i]
+		start := len(slab)
+		slab = c.appendTile(slab, t.X, t.Y, t.W, t.H)
+		t.Data = slab[start:len(slab):len(slab)]
+		c.syncTile(t.X, t.Y, t.W, t.H)
+	}
+	return tiles
+}
+
+// DiffAndSyncTiles сравнивает и синхронизирует только тайлы с индексами idx
+// (ряд за рядом, см. TileGrid; по возрастанию): хэш-дифф (ADR-0006) отдаёт
+// нарисованные тайлы кадра, остальные не трогались и равны front.
+func (c *Canvas) DiffAndSyncTiles(idx []int) []output.DirtyTile {
+	ts := output.TileSize
+	n := c.tilesX * c.tilesY
+	var tiles []output.DirtyTile
+	total := 0
+	for _, i := range idx {
+		if i < 0 || i >= n {
+			continue
+		}
+		px, py := (i%c.tilesX)*ts, (i/c.tilesX)*ts
+		pw, ph := min(ts, c.W-px), min(ts, c.H-py)
+		if pw <= 0 || ph <= 0 || c.tilesEqual(px, py, pw, ph) {
+			continue
+		}
+		tiles = append(tiles, output.DirtyTile{X: px, Y: py, W: pw, H: ph})
+		total += pw * ph * 4
+	}
+	return c.extractTiles(tiles, total)
+}
+
+// CopyFrontToBack копирует область r из front в back: при чужих буферах
+// вывода (SetSurfaces) тайл, пропущенный хэш-диффом внутри области
+// перерисовки, иначе в back потребителя не попал бы.
+func (c *Canvas) CopyFrontToBack(r image.Rectangle) {
+	r = r.Intersect(c.back.Bounds()).Intersect(c.front.Bounds())
+	if r.Empty() {
+		return
+	}
+	n := r.Dx() * 4
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		s := c.front.PixOffset(r.Min.X, y)
+		d := c.back.PixOffset(r.Min.X, y)
+		copy(c.back.Pix[d:d+n], c.front.Pix[s:s+n])
+	}
+}
+
+func (c *Canvas) tilesEqual(x, y, w, h int) bool {
+	rowBytes := w * 4
+	for row := 0; row < h; row++ {
+		fOff := c.front.PixOffset(x, y+row)
+		bOff := c.back.PixOffset(x, y+row)
+		if !bytes.Equal(
+			c.front.Pix[fOff:fOff+rowBytes],
+			c.back.Pix[bOff:bOff+rowBytes],
+		) {
+			return false
+		}
+	}
+	return true
+}
+
+// appendTile дописывает пиксели тайла (x,y,w,h) из back-буфера в конец slab
+// и возвращает выросший слэб. См. diffTileRows: одна аллокация на воркера
+// вместо буфера на каждый тайл.
+func (c *Canvas) appendTile(slab []byte, x, y, w, h int) []byte {
+	rowBytes := w * 4
+	for row := 0; row < h; row++ {
+		src := c.back.PixOffset(x, y+row)
+		slab = append(slab, c.back.Pix[src:src+rowBytes]...)
+	}
+	return slab
+}
+
+func (c *Canvas) syncTile(x, y, w, h int) {
+	rowBytes := w * 4
+	for row := 0; row < h; row++ {
+		src := c.back.PixOffset(x, y+row)
+		dst := c.front.PixOffset(x, y+row)
+		copy(c.front.Pix[dst:dst+rowBytes], c.back.Pix[src:src+rowBytes])
+	}
+}
+
+// OcclusionEnabled реализует widget.OcclusionScope: вычитать ли перекрытое.
+func (c *Canvas) OcclusionEnabled() bool { return c.occlusionOn.Load() }

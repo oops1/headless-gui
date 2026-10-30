@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"image"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // withoutTile возвращает группы без плитки id и сами её данные.

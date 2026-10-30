@@ -20,8 +20,8 @@ import (
 	"image"
 	"math"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Presence возвращает присутствие панели: 0 — не показана, 1 — на месте, между —
@@ -61,8 +61,8 @@ func (f *Flyout) Settle() {
 	} else {
 		f.setPresence(0)
 	}
-	widget.InvalidateRect(was)
-	widget.InvalidateRect(f.paintedRegion())
+	f.InvalidateArea(was)
+	f.InvalidateArea(f.paintedRegion())
 }
 
 // visible — панель показана: открыта или ещё уезжает.
@@ -70,17 +70,19 @@ func (f *Flyout) visible() bool {
 	return f.IsOpen() || f.Presence() > 0
 }
 
-// animKey — имя анимации темы для этой панели.
-func (f *Flyout) animKey() theme.Key {
-	if f.AnimKey != "" {
-		return f.AnimKey
+// animKeys — анимации темы для этой панели: свой ключ, затем запасные. Тема,
+// не объявившая ни flyout.open, ни ключ панели, анимирует её по menu.open,
+// как раньше.
+func (f *Flyout) animKeys() []theme.Key {
+	if f.AnimKey != "" && f.AnimKey != theme.AnimFlyoutOpen && f.AnimKey != AnimMenuOpen {
+		return []theme.Key{f.AnimKey, theme.AnimFlyoutOpen, AnimMenuOpen}
 	}
-	return AnimMenuOpen
+	return []theme.Key{theme.AnimFlyoutOpen, AnimMenuOpen}
 }
 
 // animateTo ведёт присутствие к to (1 — открытие, 0 — закрытие).
 func (f *Flyout) animateTo(to float64) {
-	dur, curve := animation(f.tm, f.animKey())
+	dur, curve := animationFirst(f.tm, f.animKeys()...)
 	from := f.Presence()
 
 	f.amu.Lock()
@@ -104,7 +106,7 @@ func (f *Flyout) animateTo(to float64) {
 			v = 0
 		}
 		f.setPresence(v)
-		widget.InvalidateRect(f.paintedRegion())
+		f.InvalidateArea(f.paintedRegion())
 	})
 	f.amu.Lock()
 	f.anim = a

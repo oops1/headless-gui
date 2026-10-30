@@ -9,7 +9,7 @@
 // + Go Bold/Italic) и руны, покрытые ими, — системные fallback-шрифты не
 // задействуются, поэтому эталоны совпадают на всех ОС. Шейпинг сложных
 // скриптов в golden не входит (зависит от шрифтов системы) — он покрыт
-// юнит-тестами в shaper_test.go.
+// юнит-тестами в core/raster/shaper_test.go.
 package engine
 
 import (
@@ -22,8 +22,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // goldenCompare сравнивает кадр со снапшотом testdata/golden/<name>.png.
@@ -224,9 +224,9 @@ func TestGolden_WidgetsSampler(t *testing.T) {
 				root.AddChild(lbl)
 
 				widget.ApplyThemeTree(root, th)
-				c.blitBackground()
+				c.BlitBackground()
 				root.Draw(c)
-				goldenCompare(t, "widgets_"+themeSlug(themeName), c.back)
+				goldenCompare(t, "widgets_"+themeSlug(themeName), c.Back())
 			})
 		})
 	}
@@ -241,7 +241,7 @@ func TestGolden_WindowChrome(t *testing.T) {
 			withTheme(t, themeName, func(th *widget.Theme) {
 				eng := New(560, 230, 20)
 				c := eng.canvas
-				c.blitBackground()
+				c.BlitBackground()
 
 				mk := func(x int, active bool, title string) {
 					w := widget.NewWindow(title, 250, 190)
@@ -252,7 +252,7 @@ func TestGolden_WindowChrome(t *testing.T) {
 				}
 				mk(20, true, "Активное")
 				mk(290, false, "Неактивное")
-				goldenCompare(t, "window_"+themeSlug(themeName), c.back)
+				goldenCompare(t, "window_"+themeSlug(themeName), c.Back())
 			})
 		})
 	}
@@ -263,7 +263,7 @@ func TestGolden_AAShapes(t *testing.T) {
 	testreset.Globals(t)
 	eng := New(420, 240, 20)
 	c := eng.canvas
-	c.blitBackground()
+	c.BlitBackground()
 
 	accent := color.RGBA{R: 0, G: 120, B: 212, A: 255}
 	white := color.RGBA{R: 235, G: 235, B: 235, A: 255}
@@ -279,7 +279,7 @@ func TestGolden_AAShapes(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		c.DrawLineAA(290, 128+i*14, 404, 122+i*18, 1+float64(i), white)
 	}
-	goldenCompare(t, "aa_shapes", c.back)
+	goldenCompare(t, "aa_shapes", c.Back())
 }
 
 // TestGolden_HiDPI2x — та же кнопочная сцена при масштабе 2: текст должен
@@ -289,9 +289,9 @@ func TestGolden_HiDPI2x(t *testing.T) {
 	eng := New(220, 80, 20)
 	eng.SetScale(2)
 	c := eng.canvas
-	c.blitBackground()
+	c.BlitBackground()
 	c.FillRoundRect(12, 12, 130, 34, 8, color.RGBA{R: 0, G: 120, B: 212, A: 255})
 	c.DrawTextSize("Кнопка Button", 24, 22, 12, color.RGBA{R: 235, G: 235, B: 235, A: 255})
 	c.DrawRoundBorder(150, 12, 60, 34, 8, color.RGBA{R: 235, G: 235, B: 235, A: 255})
-	goldenCompare(t, "hidpi_2x", c.back)
+	goldenCompare(t, "hidpi_2x", c.Back())
 }

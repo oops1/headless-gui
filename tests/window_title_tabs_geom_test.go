@@ -6,8 +6,9 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // newTabbedWindow — окно с тремя вкладками, «+» и меню шеврона; геометрия
@@ -34,6 +35,7 @@ func newTabbedWindow(t *testing.T, width int) (*widget.Window, *widget.PopupMenu
 // TestTitleTabs_ExportedGeometry — прямоугольники вкладок, «×», «+» и «v»
 // видны снаружи и согласованы с хит-тестом.
 func TestTitleTabs_ExportedGeometry(t *testing.T) {
+	testreset.Globals(t)
 	w, _ := newTabbedWindow(t, 800)
 
 	prev := image.Rectangle{}
@@ -94,6 +96,7 @@ func TestTitleTabs_ExportedGeometry(t *testing.T) {
 // TestTitleTabs_CloseCrossSurvivesNarrowWindow — сценарий WinLine: на
 // минимальной ширине окна «×» активной вкладки ещё отрисован.
 func TestTitleTabs_CloseCrossSurvivesNarrowWindow(t *testing.T) {
+	testreset.Globals(t)
 	w, _ := newTabbedWindow(t, 420)
 	act := w.ActiveTitleTab()
 	if w.TitleTabCloseRect(act).Empty() {
@@ -104,6 +107,7 @@ func TestTitleTabs_CloseCrossSurvivesNarrowWindow(t *testing.T) {
 // TestTitleTabs_ChevronTogglesMenu — репро WinLine: повторный клик по
 // шеврону закрывает меню, а не открывает его заново.
 func TestTitleTabs_ChevronTogglesMenu(t *testing.T) {
+	testreset.Globals(t)
 	w, menu := newTabbedWindow(t, 800)
 	eng := engine.New(800, 300, 30)
 	eng.SetRoot(w)

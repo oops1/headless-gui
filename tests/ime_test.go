@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Набираемое (композиция) приходит от системы в окно, а показать его должно
@@ -45,6 +46,7 @@ func waitText(t *testing.T, tb *widget.TextBox, want string) {
 }
 
 func TestEngineIME_CompositionReachesFocused(t *testing.T) {
+	testreset.Globals(t)
 	eng, tb := imeScene(t)
 
 	eng.SendComposition("に", 1)
@@ -58,6 +60,7 @@ func TestEngineIME_CompositionReachesFocused(t *testing.T) {
 }
 
 func TestEngineIME_Cancel(t *testing.T) {
+	testreset.Globals(t)
 	eng, tb := imeScene(t)
 
 	eng.SendComposition("にほ", 2)
@@ -69,6 +72,7 @@ func TestEngineIME_Cancel(t *testing.T) {
 // Над кнопкой редактор метода ввода не нужен: там печатать некуда, и
 // держать его включённым значит показывать окно кандидатов впустую.
 func TestEngineIME_ActiveOnlyForText(t *testing.T) {
+	testreset.Globals(t)
 	eng, tb := imeScene(t)
 
 	if !eng.IMEActive() {
@@ -93,6 +97,7 @@ func TestEngineIME_ActiveOnlyForText(t *testing.T) {
 // Место каретки уходит прямо в системный вызов, а система считает в пикселях
 // экрана: на HiDPI логических координат ей мало.
 func TestEngineIME_CaretRectScaled(t *testing.T) {
+	testreset.Globals(t)
 	eng, tb := imeScene(t)
 	tb.SetCaretPosition(0)
 

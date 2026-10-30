@@ -5,7 +5,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Своя начинка штатной полосы заголовка и отступ содержимого — запрос GG-52 и
@@ -20,6 +21,7 @@ import (
 
 // Без штатной полосы содержимое занимает диалог целиком.
 func TestContentPadding_ChromelessReachesEdges(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 400, 300)
 	d.SetBounds(image.Rect(100, 100, 500, 400))
 	d.SetChromeless(true)
@@ -32,6 +34,7 @@ func TestContentPadding_ChromelessReachesEdges(t *testing.T) {
 // Обычному диалогу отступы оставлены прежними: MessageBox расставляет кнопки
 // в расчёте на них.
 func TestContentPadding_DefaultUnchanged(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 400, 300)
 	d.SetBounds(image.Rect(0, 0, 400, 300))
 
@@ -47,6 +50,7 @@ func TestContentPadding_DefaultUnchanged(t *testing.T) {
 
 // Отступ задаётся явно и снимается отрицательным значением.
 func TestContentPadding_Explicit(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 400, 300)
 	d.SetBounds(image.Rect(0, 0, 400, 300))
 	th := d.TitleHeight
@@ -66,6 +70,7 @@ func TestContentPadding_Explicit(t *testing.T) {
 // Виджет содержимого переезжает вместе с изменением отступа: сам он о нём не
 // знает, а без перекладки рамка осталась бы на экране до ближайшего ресайза.
 func TestContentPadding_RelaysContent(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 400, 300)
 	d.SetBounds(image.Rect(0, 0, 400, 300))
 	panel := widget.NewPanel(color.RGBA{R: 30, G: 30, B: 40, A: 255})
@@ -91,6 +96,7 @@ func titleBarDialog(t *testing.T) (*widget.Dialog, *widget.TextInput) {
 
 // Виджет приложения стоит В полосе: правее подписи и левее ✕.
 func TestTitleBarContent_PlacedInTheBar(t *testing.T) {
+	testreset.Globals(t)
 	d, search := titleBarDialog(t)
 
 	r := search.Bounds()
@@ -113,6 +119,7 @@ func TestTitleBarContent_PlacedInTheBar(t *testing.T) {
 
 // Полоса тянется вместе с диалогом, и начинка тянется с ней.
 func TestTitleBarContent_FollowsResize(t *testing.T) {
+	testreset.Globals(t)
 	d, search := titleBarDialog(t)
 	before := search.Bounds()
 
@@ -131,6 +138,7 @@ func TestTitleBarContent_FollowsResize(t *testing.T) {
 // Нажатие на виджет в полосе не тащит диалог: иначе поле поиска нельзя было бы
 // ни выделить, ни прокрутить.
 func TestTitleBarContent_DoesNotDragDialog(t *testing.T) {
+	testreset.Globals(t)
 	d, search := titleBarDialog(t)
 	before := d.Bounds()
 
@@ -147,6 +155,7 @@ func TestTitleBarContent_DoesNotDragDialog(t *testing.T) {
 // Свободная часть полосы рядом с начинкой всё ещё тащит диалог: полоса
 // осталась полосой заголовка.
 func TestTitleBarContent_BarStillDrags(t *testing.T) {
+	testreset.Globals(t)
 	d, _ := titleBarDialog(t)
 	before := d.Bounds()
 
@@ -162,6 +171,7 @@ func TestTitleBarContent_BarStillDrags(t *testing.T) {
 
 // Без полосы заголовка начинке места нет.
 func TestTitleBarContent_NoneWhenChromeless(t *testing.T) {
+	testreset.Globals(t)
 	d, _ := titleBarDialog(t)
 	d.SetChromeless(true)
 
@@ -174,6 +184,7 @@ func TestTitleBarContent_NoneWhenChromeless(t *testing.T) {
 
 // Кнопка переключает состояние и уведомляет приложение.
 func TestNavButton_TogglesAndNotifies(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 600, 400)
 	d.SetBounds(image.Rect(0, 0, 600, 400))
 	d.SetNavButton(true)
@@ -211,6 +222,7 @@ func TestNavButton_TogglesAndNotifies(t *testing.T) {
 
 // Кнопка сдвигает подпись и начинку вправо: иначе она легла бы на заголовок.
 func TestNavButton_ShiftsTitleAndContent(t *testing.T) {
+	testreset.Globals(t)
 	d, search := titleBarDialog(t)
 	before := search.Bounds()
 
@@ -224,6 +236,7 @@ func TestNavButton_ShiftsTitleAndContent(t *testing.T) {
 
 // Своя иконка рисуется вместо встроенной.
 func TestNavButton_CustomIcon(t *testing.T) {
+	testreset.Globals(t)
 	scene := func(icon image.Image) *image.RGBA {
 		d := widget.NewDialog("Настройки", 300, 200)
 		d.SetNavButton(true)
@@ -249,6 +262,7 @@ func TestNavButton_CustomIcon(t *testing.T) {
 
 // Кнопки нет, пока её не попросили: у прежних диалогов заголовок не меняется.
 func TestNavButton_AbsentByDefault(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 300, 200)
 	if d.HasNavButton() {
 		t.Fatal("кнопка сворачивания появилась сама")
@@ -269,6 +283,7 @@ func TestNavButton_AbsentByDefault(t *testing.T) {
 // Начинку полосы окно не растягивает на клиентскую область, в отличие от
 // остальных детей.
 func TestWindowTitleBar_ContentNotStretched(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Настройки", 800, 600)
 	// Раскладка полосы зависит от ОС, а своей начинки в mac-полосе нет —
 	// задаём стиль явно, иначе тест проверял бы разное на разных платформах.
@@ -291,6 +306,7 @@ func TestWindowTitleBar_ContentNotStretched(t *testing.T) {
 
 // Нажатие на начинку не тащит окно.
 func TestWindowTitleBar_ContentDoesNotDrag(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Настройки", 800, 600)
 	w.TitleStyle = widget.WindowTitleWin
 	w.SetBounds(image.Rect(0, 0, 800, 600))
@@ -314,6 +330,7 @@ func TestWindowTitleBar_ContentDoesNotDrag(t *testing.T) {
 
 // Полоса заголовка окна по-прежнему тащит его.
 func TestWindowTitleBar_StillDrags(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Настройки", 800, 600)
 	// Стиль явно: в mac-раскладке точка нажатия попала бы в «светофор», и тест
 	// проверял бы захват кнопкой, а не перетаскивание за полосу.
@@ -331,6 +348,7 @@ func TestWindowTitleBar_StillDrags(t *testing.T) {
 
 // Кнопка сворачивания у окна: состояние и уведомление.
 func TestWindowNavButton_Toggles(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Настройки", 800, 600)
 	w.TitleStyle = widget.WindowTitleWin
 	w.SetBounds(image.Rect(0, 0, 800, 600))

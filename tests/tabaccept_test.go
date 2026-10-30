@@ -5,8 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Tab, забираемый виджетом, — пункт 2 замечаний difftool.
@@ -59,6 +60,7 @@ func pressTab(eng *engine.Engine, mod widget.KeyMod) {
 
 // Виджет, принимающий Tab, получает его сам, и фокус остаётся на нём.
 func TestTabAcceptor_TabGoesToWidget(t *testing.T) {
+	testreset.Globals(t)
 	eng, ed, next := tabScene(t, true)
 
 	pressTab(eng, 0)
@@ -73,6 +75,7 @@ func TestTabAcceptor_TabGoesToWidget(t *testing.T) {
 
 // Ctrl+Tab остаётся навигацией: иначе из редактора не выйти с клавиатуры.
 func TestTabAcceptor_CtrlTabNavigates(t *testing.T) {
+	testreset.Globals(t)
 	eng, ed, next := tabScene(t, true)
 
 	pressTab(eng, widget.ModCtrl)
@@ -88,6 +91,7 @@ func TestTabAcceptor_CtrlTabNavigates(t *testing.T) {
 // Виджет вправе не принимать Tab (метод, а не флаг): тогда — прежняя
 // навигация. Так же ведут себя все виджеты без интерфейса.
 func TestTabAcceptor_DeclinedTabNavigates(t *testing.T) {
+	testreset.Globals(t)
 	eng, ed, next := tabScene(t, false)
 
 	pressTab(eng, 0)

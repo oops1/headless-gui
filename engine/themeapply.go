@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"image/color"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // ApplyThemeProfile применяет к движку активную тему менеджера заново — после
@@ -37,6 +37,7 @@ func (e *Engine) ApplyThemeProfile(m *theme.Manager) error {
 	// своими анимациями — компоненты оболочки получают его через
 	// Manager.GetAnimation сами.
 	widget.SetReduceMotion(t.MotionReduced())
+	e.themeMgr.Store(m)
 	e.SetTheme(widget.Materialize(t))
 	return nil
 }

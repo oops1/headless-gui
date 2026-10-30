@@ -3,7 +3,8 @@ package tests
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // GG-58: RestoreLayout менял состояние панели напрямую и не звал
@@ -14,6 +15,7 @@ import (
 // TestDock_RestoreLayoutFiresStateChanged — возврат из плавающего состояния в
 // док через RestoreLayout сообщает о смене состояния.
 func TestDock_RestoreLayoutFiresStateChanged(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	p := newPane("a", "A")
 	m.AddPane(p, widget.DockLeft)
@@ -43,6 +45,7 @@ func TestDock_RestoreLayoutFiresStateChanged(t *testing.T) {
 // лишнего события не получает: обработчик сноса окна принял бы его за возврат
 // в док.
 func TestDock_RestoreLayoutNoFireWhenSame(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	p := newPane("a", "A")
 	m.AddPane(p, widget.DockLeft)
@@ -63,6 +66,7 @@ func TestDock_RestoreLayoutNoFireWhenSame(t *testing.T) {
 // мышью; у той, что плавала и до восстановления, окно уже есть — второй вызов
 // создал бы дубль.
 func TestDock_RestoreLayoutFloatsNatively(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	p := newPane("a", "A")
 	m.AddPane(p, widget.DockLeft)

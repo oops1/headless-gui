@@ -9,13 +9,15 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // ─── OnPaneAdded: вызывается в AddPane ──────────────────────────────────────
 
 func TestDockNative_OnPaneAddedFires(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 
 	var got []*widget.DockPane
@@ -34,6 +36,7 @@ func TestDockNative_OnPaneAddedFires(t *testing.T) {
 // ─── OnFloatNative: перехватывает Float вместо виджетного floating ──────────
 
 func TestDockNative_OnFloatNativeIntercepts(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)
@@ -63,6 +66,7 @@ func TestDockNative_OnFloatNativeIntercepts(t *testing.T) {
 
 // Без хука Float даёт обычный виджетный floating (фаза 1) — контроль фолбэка.
 func TestDockNative_NoHookWidgetFloating(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)
@@ -80,6 +84,7 @@ func TestDockNative_NoHookWidgetFloating(t *testing.T) {
 // ─── OnDragMove: титлбар двигает «окно», а не докает ────────────────────────
 
 func TestDockNative_OnDragMoveIntercepts(t *testing.T) {
+	testreset.Globals(t)
 	// Панель как корень собственного движка (имитация вторичного окна).
 	p := newPane("f", "Float")
 	p.SetBounds(image.Rect(0, 0, 300, 200))
@@ -117,6 +122,7 @@ func TestDockNative_OnDragMoveIntercepts(t *testing.T) {
 // ─── OnDragMove отключает виджетный ресайз краёв ────────────────────────────
 
 func TestDockNative_OnDragMoveDisablesEdgeResize(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)

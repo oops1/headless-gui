@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/desktop"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/desktop"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Снимки меню «Пуск» Windows 11 (GOLDEN_OUT=каталог): светлая и тёмная темы,

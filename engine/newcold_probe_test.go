@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // TestEngineNew_ColdReport — замер ПЕРВОГО engine.New процесса (холодный кэш

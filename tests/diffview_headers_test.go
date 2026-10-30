@@ -6,8 +6,9 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // GG-71: отметку «только чтение» в шапке стороны можно убрать. GG-72: шапки
@@ -44,6 +45,7 @@ func diffPaneTop(t *testing.T, dv *widget.DiffView) int {
 // Без шапок код начинается от верхнего края контрола, а область шапок не
 // рисуется вовсе.
 func TestDiffView_ShowHeaders(t *testing.T) {
+	testreset.Globals(t)
 	eng, dv := diffHeadersScene(t)
 	if !dv.ShowHeaders() {
 		t.Fatal("шапки по умолчанию скрыты")
@@ -69,6 +71,7 @@ func TestDiffView_ShowHeaders(t *testing.T) {
 // Отметка «только чтение» убирается из шапки, а сторона остаётся только для
 // чтения.
 func TestDiffView_ShowReadOnlyMark(t *testing.T) {
+	testreset.Globals(t)
 	eng, dv := diffHeadersScene(t)
 	if !dv.ShowReadOnlyMark() {
 		t.Fatal("отметка по умолчанию скрыта")
@@ -91,6 +94,7 @@ func TestDiffView_ShowReadOnlyMark(t *testing.T) {
 
 // Разметка: оба атрибута.
 func TestDiffView_HeadersXAML(t *testing.T) {
+	testreset.Globals(t)
 	_, reg, err := widget.LoadUIFromXAMLFS([]byte(`<Canvas Width="400" Height="300">
   <DiffView x:Name="d" ShowHeaders="False" ShowReadOnlyMark="False"/>
 </Canvas>`), fstest.MapFS{})

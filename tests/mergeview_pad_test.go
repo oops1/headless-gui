@@ -3,7 +3,8 @@ package tests
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // GG-83: пустой итог держит одну служебную пустую строку — каретке нужно где-то
@@ -14,6 +15,7 @@ import (
 // Путь ошибки: решение пустой стороной схлопывает итог до служебной строки,
 // следующее решение вставляет текст перед ней.
 func TestMergeView_PadLineDroppedAfterEmptySide(t *testing.T) {
+	testreset.Globals(t)
 	m := widget.NewMergeView("", "")
 	m.SetChunks([]widget.MergeChunk{{Conflict: true, Theirs: []string{"new", "file"}}})
 	m.SetResultEOL("\n", false, true)
@@ -35,6 +37,7 @@ func TestMergeView_PadLineDroppedAfterEmptySide(t *testing.T) {
 // Взять сторону целиком у нерешённого конфликта: маркеры заменяются текстом,
 // лишней строки не появляется.
 func TestMergeView_ResolveFromMarkers(t *testing.T) {
+	testreset.Globals(t)
 	m := widget.NewMergeView("", "")
 	m.SetChunks([]widget.MergeChunk{{Conflict: true, Theirs: []string{"new", "file"}}})
 	m.SetResultEOL("\n", false, true)
@@ -48,6 +51,7 @@ func TestMergeView_ResolveFromMarkers(t *testing.T) {
 
 // Пустой итог остаётся пустым файлом, а не одиноким переводом строки.
 func TestMergeView_EmptyResultStaysEmpty(t *testing.T) {
+	testreset.Globals(t)
 	m := widget.NewMergeView("", "")
 	m.SetChunks(nil)
 	m.SetResultEOL("\n", false, true)
@@ -60,6 +64,7 @@ func TestMergeView_EmptyResultStaysEmpty(t *testing.T) {
 // Возврат блока в нерешённое состояние возвращает маркеры и не теряет перевод
 // строки в конце.
 func TestMergeView_UnresolveKeepsFinalNewline(t *testing.T) {
+	testreset.Globals(t)
 	m := widget.NewMergeView("", "")
 	m.SetChunks([]widget.MergeChunk{{Conflict: true, Theirs: []string{"new"}}})
 	m.SetResultEOL("\n", false, true)
@@ -78,6 +83,7 @@ func TestMergeView_UnresolveKeepsFinalNewline(t *testing.T) {
 
 // Собственная пустая строка итога (она принадлежит блоку) остаётся на месте.
 func TestMergeView_NonEmptyResultKeepsOwnBlankLine(t *testing.T) {
+	testreset.Globals(t)
 	m := widget.NewMergeView("", "")
 	m.SetChunks([]widget.MergeChunk{{Ours: []string{"a", ""}, Base: []string{"a", ""}, Theirs: []string{"a", ""}}})
 	m.SetResultEOL("\n", false, true)

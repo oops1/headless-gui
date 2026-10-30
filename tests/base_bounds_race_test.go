@@ -8,10 +8,12 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 func TestBase_BoundsRace_InvalidateVsSetBounds(t *testing.T) {
+	testreset.Globals(t)
 	lbl := widget.NewWin10Label("pty")
 	var wg sync.WaitGroup
 	stop := make(chan struct{})

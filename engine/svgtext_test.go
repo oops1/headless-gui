@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	hgfonts "github.com/oops1/headless-gui/v3/assets/fonts"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget/svg"
+	hgfonts "github.com/oops1/headless-gui/v4/assets/fonts"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget/svg"
 )
 
 func svgTextEngine(t *testing.T) *Engine {
@@ -122,7 +122,7 @@ func TestSVGText_FontSizeScalesAndMatchesMeasure(t *testing.T) {
 	}
 	// Ширина согласована с замером движка тем же шрифтом (разница — лишь
 	// округление шагов глифов до пикселя в Measure).
-	fc := eng.canvas.svgFont(svg.FontSpec{Families: []string{"Open Sans"}})
+	fc := eng.canvas.FontForCSS([]string{"Open Sans"}, 0, false)
 	_, w, _ := br.Outline(svg.FontSpec{Families: []string{"Open Sans"}}, 100, "Hello")
 	if m := float64(fc.Measure("Hello", 75)); math.Abs(m-w) > 3 {
 		t.Errorf("ширина %.2f расходится с замером движка %.0f", w, m)

@@ -4,11 +4,13 @@ package tests
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // TestDropdown_HasSelection — issue #10.
 func TestDropdown_HasSelection(t *testing.T) {
+	testreset.Globals(t)
 	dd := widget.NewDropdown("a", "b", "c")
 	if dd.HasSelection() {
 		t.Error("новый Dropdown: HasSelection = true, ждали false")

@@ -13,95 +13,20 @@
 // приводится в то состояние, в котором окажется буфер потребителя после
 // копирования. Дальше дифф сравнивает уже с ним и оставляет только то, что
 // действительно отличается, — кайму, тень, изменившееся содержимое.
+
 package engine
 
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/output"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/output"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
-// applyMovesToFront выполняет переносы внутри переднего буфера.
-//
-// Координаты объявлений — ЛОГИЧЕСКИЕ (виджеты живут в них), буфер —
-// физический, поэтому каждая область масштабируется. Перенос, выходящий за
-// холст, обрезается по нему: копировать из-за края нечего.
-//
-// Возвращает применённые переносы в логических координатах — в кадр уходят
-// только они. Отброшенное объявление в кадре было бы ложью: потребитель
-// скопировал бы то, чего движок у себя не копировал.
-func (c *Canvas) applyMovesToFront(moves []widgetMove) []output.MoveRegion {
-	if len(moves) == 0 || c.front == nil {
-		return nil
-	}
-	out := make([]output.MoveRegion, 0, len(moves))
-	bounds := image.Rect(0, 0, c.W, c.H)
-	// taken — области, уже занятые применёнными переносами (и источники, и
-	// назначения) в физических координатах. См. проверку пересечения ниже.
-	taken := make([]image.Rectangle, 0, 2*len(moves))
-
-	for _, m := range moves {
-		dst := c.sRect(m.Rect).Intersect(bounds)
-		if dst.Empty() {
-			continue
-		}
-		// Источник сдвигается ровно на ту же величину, что и назначение:
-		// перенос не меняет размера, иначе это уже масштабирование.
-		delta := dst.Min.Sub(c.sRect(m.Rect).Min)
-		src := c.sRect(image.Rect(m.From.X, m.From.Y,
-			m.From.X+m.Rect.Dx(), m.From.Y+m.Rect.Dy())).Add(delta)
-		src = src.Intersect(bounds)
-		if src.Empty() || src.Dx() != dst.Dx() || src.Dy() != dst.Dy() {
-			// Обрезка развела источник и назначение — переносить нечего:
-			// пусть область уедет обычными тайлами.
-			continue
-		}
-		if src.Min == dst.Min {
-			continue
-		}
-		// Переносы, задевающие уже перенесённое, дальше не идут.
-		//
-		// Движок применяет их к своему буферу подряд, поэтому второй читает
-		// пиксели, которые первый уже переложил. Потребитель обязан повторить
-		// ровно тот же порядок — а он этого не обязан уметь: команда копии
-		// поверхности в RDP выполняется когда угодно относительно соседних, и
-		// локальный потребитель вправе применить их разом. Разошедшийся
-		// порядок даёт копию с неверным источником — прямоугольник чужого
-		// содержимого с резким швом.
-		//
-		// Поэтому в кадр уходят только непересекающиеся переносы: их можно
-		// применять в любом порядке и получить один и тот же результат.
-		// Остальное уезжает обычными тайлами — дороже, но верно.
-		if overlapsAny(taken, src) || overlapsAny(taken, dst) {
-			continue
-		}
-		blitWithin(c.front, src, dst.Min)
-		taken = append(taken, src, dst)
-		out = append(out, output.MoveRegion{From: m.From, Rect: m.Rect})
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-// overlapsAny сообщает, задевает ли r хоть одну из областей.
-func overlapsAny(rects []image.Rectangle, r image.Rectangle) bool {
-	for _, o := range rects {
-		if r.Overlaps(o) {
-			return true
-		}
-	}
-	return false
-}
-
 // widgetMove — объявление переноса в логических координатах (копия
-// widget.MoveNotice, чтобы engine не зависел от его формы).
-type widgetMove struct {
-	From image.Point
-	Rect image.Rectangle
-}
+// widget.MoveNotice, чтобы engine не зависел от его формы). Те же поля, что у
+// переноса кадра: холст применяет объявления к переднему буферу как есть.
+type widgetMove = output.MoveRegion
 
 // noteMove принимает объявление от дерева виджетов. Регистрируется в New.
 //
@@ -137,7 +62,8 @@ func (e *Engine) noteMove(n widget.MoveNotice) {
 	} else {
 		// Границы холста в логических координатах — тех же, в которых живут
 		// виджеты и приходит объявление.
-		screen := image.Rect(0, 0, canvas.logicalW, canvas.logicalH)
+		lw, lh := canvas.LogicalSize()
+		screen := image.Rect(0, 0, lw, lh)
 		src := image.Rect(n.From.X, n.From.Y, n.From.X+n.Rect.Dx(), n.From.Y+n.Rect.Dy())
 		if !n.Rect.Overlaps(screen) && !src.Overlaps(screen) {
 			return
@@ -169,15 +95,23 @@ const maxPendingMoves = 64
 // одной проверки — большая перестройка. Цена невелика: поиск идёт только на
 // объявленный перенос (шаг перетаскивания, десятки раз в секунду), а дерево
 // экрана — сотни узлов.
+//
+// Глубина ограничена, как у остальных обходов (tooDeep): приёмник переносов
+// общий на процесс, и цикл в Children() дерева любого движка иначе валил
+// переполнением стека перетаскивание окна в другом.
 func widgetInTree(node, target widget.Widget) bool {
-	if node == nil {
+	return widgetInTreeAt(node, target, 0)
+}
+
+func widgetInTreeAt(node, target widget.Widget, depth int) bool {
+	if node == nil || tooDeep(depth) {
 		return false
 	}
 	if node == target {
 		return true
 	}
 	for _, child := range node.Children() {
-		if widgetInTree(child, target) {
+		if widgetInTreeAt(child, target, depth+1) {
 			return true
 		}
 	}
@@ -191,28 +125,4 @@ func (e *Engine) takeMoves() []widgetMove {
 	e.pendingMoves = nil
 	e.moveMu.Unlock()
 	return out
-}
-
-// blitWithin копирует прямоугольник внутри одного изображения.
-//
-// Строки идут в порядке, зависящем от направления сдвига: при перекрытии
-// областей копирование сверху вниз затёрло бы ещё не прочитанные строки —
-// та же осторожность, что у memmove.
-func blitWithin(img *image.RGBA, src image.Rectangle, dstMin image.Point) {
-	w := src.Dx() * 4
-	if w <= 0 {
-		return
-	}
-	rows := src.Dy()
-	down := dstMin.Y > src.Min.Y
-
-	for i := 0; i < rows; i++ {
-		y := i
-		if down {
-			y = rows - 1 - i // сверху вниз: идём с конца, чтобы не затереть
-		}
-		so := img.PixOffset(src.Min.X, src.Min.Y+y)
-		do := img.PixOffset(dstMin.X, dstMin.Y+y)
-		copy(img.Pix[do:do+w], img.Pix[so:so+w])
-	}
 }

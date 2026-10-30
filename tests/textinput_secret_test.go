@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Байтовый доступ к паролю — запрос GG-36.
@@ -22,6 +23,7 @@ func typeInto(ti *widget.TextInput, s string) {
 }
 
 func TestTakeSecret_ReturnsBytesAndClearsField(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewPasswordInput("пароль")
 	typeInto(ti, "тайна42")
 
@@ -46,6 +48,7 @@ func TestTakeSecret_ReturnsBytesAndClearsField(t *testing.T) {
 // Срез принадлежит вызывающему: зануление его не ломает виджет и не трогает
 // ничего чужого.
 func TestTakeSecret_CallerOwnsTheBytes(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewPasswordInput("пароль")
 	typeInto(ti, "abc")
 
@@ -65,6 +68,7 @@ func TestTakeSecret_CallerOwnsTheBytes(t *testing.T) {
 // Работает и на обычном поле: режим пароля прячет символы на экране, а к
 // способу чтения отношения не имеет.
 func TestTakeSecret_WorksOnPlainInput(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	typeInto(ti, "открытым текстом")
 
@@ -75,6 +79,7 @@ func TestTakeSecret_WorksOnPlainInput(t *testing.T) {
 
 // WipeSecret стирает, ничего не возвращая, — на отмене диалога.
 func TestWipeSecret_ClearsPlainInputToo(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	typeInto(ti, "секрет")
 

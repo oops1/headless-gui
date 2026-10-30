@@ -5,8 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Панель инструментов — запрос GG-17.
@@ -31,6 +32,7 @@ func toolBarWith(width int, texts ...string) (*widget.ToolBar, []*widget.Button)
 
 // Кнопки стоят слева направо и не налезают друг на друга.
 func TestToolBar_LaysOutLeftToRight(t *testing.T) {
+	testreset.Globals(t)
 	tb, btns := toolBarWith(600, "Обновить", "Отправить", "Получить")
 	_ = tb
 
@@ -49,6 +51,7 @@ func TestToolBar_LaysOutLeftToRight(t *testing.T) {
 // Ширина кнопки считается по её подписи, а не круглым числом: панель из
 // коротких кнопок не должна разъезжаться.
 func TestToolBar_ButtonWidthFollowsText(t *testing.T) {
+	testreset.Globals(t)
 	_, short := toolBarWith(600, "OK")
 	_, long := toolBarWith(600, "Очень длинная подпись кнопки")
 
@@ -60,6 +63,7 @@ func TestToolBar_ButtonWidthFollowsText(t *testing.T) {
 
 // Разделитель занимает своё место и рисуется чертой.
 func TestToolBar_SeparatorTakesPlace(t *testing.T) {
+	testreset.Globals(t)
 	tb := widget.NewToolBar()
 	a := widget.NewButton("Слева")
 	b := widget.NewButton("Справа")
@@ -76,6 +80,7 @@ func TestToolBar_SeparatorTakesPlace(t *testing.T) {
 
 // Не поместившиеся кнопки прячутся, а не обрезаются.
 func TestToolBar_OverflowHidesTail(t *testing.T) {
+	testreset.Globals(t)
 	tb, btns := toolBarWith(160, "Первая", "Вторая", "Третья", "Четвёртая")
 
 	if tb.OverflowCount() == 0 {
@@ -101,6 +106,7 @@ func TestToolBar_OverflowHidesTail(t *testing.T) {
 
 // Широкая панель ничего не прячет.
 func TestToolBar_NoOverflowWhenItFits(t *testing.T) {
+	testreset.Globals(t)
 	tb, btns := toolBarWith(900, "Раз", "Два", "Три")
 
 	if tb.OverflowCount() != 0 {
@@ -115,6 +121,7 @@ func TestToolBar_NoOverflowWhenItFits(t *testing.T) {
 
 // Щелчок по шеврону открывает меню, а пункт в нём выполняет действие кнопки.
 func TestToolBar_OverflowMenuRunsHiddenButton(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{R: 24, G: 28, B: 36, A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 400, 120))
@@ -162,6 +169,7 @@ func TestToolBar_OverflowMenuRunsHiddenButton(t *testing.T) {
 
 // Режим «только иконки» прячет подписи и возвращает их обратно.
 func TestToolBar_IconsOnlyIsReversible(t *testing.T) {
+	testreset.Globals(t)
 	tb := widget.NewToolBar()
 	btn := widget.NewButton("Обновить")
 	btn.Icon = image.NewRGBA(image.Rect(0, 0, 16, 16))
@@ -189,6 +197,7 @@ func TestToolBar_IconsOnlyIsReversible(t *testing.T) {
 
 // Кнопке без иконки прятать подпись не во что — режим её не трогает.
 func TestToolBar_IconsOnlyKeepsTextlessButtons(t *testing.T) {
+	testreset.Globals(t)
 	tb := widget.NewToolBar()
 	btn := widget.NewButton("Без иконки")
 	tb.AddChild(btn)
@@ -202,6 +211,7 @@ func TestToolBar_IconsOnlyKeepsTextlessButtons(t *testing.T) {
 
 // Разметка: <ToolBar> собирается панелью, <Separator/> — разделителем.
 func TestToolBar_FromXAML(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Window Width="600" Height="100">
 	  <Canvas>
 	    <ToolBarTray Left="0" Top="0" Width="600" Height="40">

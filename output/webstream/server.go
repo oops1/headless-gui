@@ -18,8 +18,8 @@ import (
 
 	_ "embed"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 //go:embed viewer.html

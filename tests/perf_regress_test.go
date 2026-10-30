@@ -10,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // moveRecorder — виджет, считающий полученные OnMouseMove.
@@ -29,6 +30,7 @@ func (m *moveRecorder) OnMouseMove(x, y int) {
 // виджетам: тем, где курсор сейчас, и тем, откуда он ушёл (снять hover).
 // Виджет в стороне событий не получает — раньше move рассылался всем подряд.
 func TestMouseMoveTargeted(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(400, 300, 30)
 
 	root := widget.NewPanel(color.RGBA{A: 255})
@@ -77,6 +79,7 @@ func (o *overlayRecorder) DrawOverlay(widget.DrawContext) {}
 // контекстное меню) получает движения даже вне своих bounds: список рисуется
 // за их пределами, и hover по пунктам живёт именно там.
 func TestMouseMoveOverlayAlwaysDelivered(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(400, 300, 30)
 
 	root := widget.NewPanel(color.RGBA{A: 255})
@@ -105,6 +108,7 @@ func TestMouseMoveOverlayAlwaysDelivered(t *testing.T) {
 // TestMouseMoveCaptureOutruns — захват мыши доставляет движения капчеру даже
 // далеко за его границами (drag ползунка, сплиттера, окна).
 func TestMouseMoveCaptureOutruns(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(400, 300, 30)
 
 	root := widget.NewPanel(color.RGBA{A: 255})
@@ -139,6 +143,7 @@ func (c *countCtx) MeasureText(text string, sizePt float64) int {
 // TestLabelWrapCached — перенос многострочного текста считается один раз, а
 // не на каждом Draw; смена текста или ширины пересчитывает заново.
 func TestLabelWrapCached(t *testing.T) {
+	testreset.Globals(t)
 	l := widget.NewLabel(strings.Repeat("слово ", 60), color.RGBA{R: 255, G: 255, B: 255, A: 255})
 	l.WrapText = true
 	l.SetBounds(image.Rect(0, 0, 200, 400))

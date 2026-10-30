@@ -6,7 +6,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/theme"
 )
 
 // Кнопки заголовка widget.Window (не классического): цвет значков и подсветка
@@ -76,6 +77,7 @@ func capRatio(a, b color.RGBA) float64 {
 // Светлый акцентный заголовок (жёлто-оранжевый, как у WinLine): значки тёмные и
 // читаются; тёмный — значки светлые, прежнего серого 180.
 func TestWindowCaptionGlyphs_FollowTitleBackground(t *testing.T) {
+	testreset.Globals(t)
 	orange := color.RGBA{R: 255, G: 185, B: 0, A: 255}
 	dark := color.RGBA{R: 32, G: 32, B: 32, A: 255}
 	black, white := color.RGBA{A: 255}, color.RGBA{R: 255, G: 255, B: 255, A: 255}
@@ -121,6 +123,7 @@ func TestWindowCaptionGlyphs_FollowTitleBackground(t *testing.T) {
 // Светлый заголовок темы (Windows 11): значки тёмные в активном окне и, приглушённые
 // вместе с заголовком, тёмно-серые в неактивном — и читаются в обоих.
 func TestWindowCaptionGlyphs_LightThemeActiveAndInactive(t *testing.T) {
+	testreset.Globals(t)
 	var inks [2]color.RGBA
 	for i, active := range []bool{true, false} {
 		s := capWindow(t, capProfile(t, theme.ProfileWindows11, nil))
@@ -143,6 +146,7 @@ func TestWindowCaptionGlyphs_LightThemeActiveAndInactive(t *testing.T) {
 // Подсветка кнопки под указателем: на светлом заголовке — затемнение, на
 // тёмном — осветление, на 10–20 %; «закрыть» под указателем — красная, значок белый.
 func TestWindowCaptionHover_FollowsTitleBrightness(t *testing.T) {
+	testreset.Globals(t)
 	orange := color.RGBA{R: 255, G: 185, B: 0, A: 255}
 	dark := color.RGBA{R: 32, G: 32, B: 32, A: 255}
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}

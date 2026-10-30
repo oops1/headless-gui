@@ -11,9 +11,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
-	"github.com/oops1/headless-gui/v3/widget/svg"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
+	"github.com/oops1/headless-gui/v4/widget/svg"
 )
 
 // ComponentTrayIcon — имя компонента обобщённого значка трея в стилях темы.
@@ -93,7 +93,7 @@ func (t *TrayIcon) SetImageSource(src func(size int) image.Image) {
 // SetSVG задаёт значок SVG-данными. При ошибке разбора прежний значок
 // сохраняется, ошибка возвращается.
 func (t *TrayIcon) SetSVG(data []byte) error {
-	doc, err := svg.Parse(data)
+	doc, err := svg.ParseWith(data, svg.ParseOptions{Text: widget.TextRasterizerFor(t)})
 	if err != nil {
 		return err
 	}

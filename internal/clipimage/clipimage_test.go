@@ -8,7 +8,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/dib"
+	"github.com/oops1/headless-gui/v4/internal/dib"
 )
 
 func picture() *image.NRGBA {

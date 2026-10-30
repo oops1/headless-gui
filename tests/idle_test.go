@@ -6,10 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/desktop"
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/desktop"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Неподвижный рабочий стол не готовит кадров.
@@ -21,6 +22,7 @@ import (
 // тайлов. Кадр, которому нечего делать, стоил дороже кадра с изменением;
 // заказчик намерил этим 110% ядра на неподвижном столе 1080p.
 func TestIdle_DesktopWithClockRendersNothing(t *testing.T) {
+	testreset.Globals(t)
 	m := theme.NewManager()
 	if err := theme.RegisterBuiltinProfiles(m); err != nil {
 		t.Fatal(err)
@@ -68,6 +70,7 @@ func TestIdle_DesktopWithClockRendersNothing(t *testing.T) {
 // damage. Тик, двигающий виджет через сеттеры (как это делают все анимации
 // движка), damage заявляет сам, и кадры идут как шли, только частичные.
 func TestIdle_AnimationThatInvalidatesStillRenders(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{R: 20, G: 24, B: 30, A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 400, 300))
@@ -104,6 +107,7 @@ func TestIdle_AnimationThatInvalidatesStillRenders(t *testing.T) {
 // причём полный: damage при этом пуст, а пустой damage уводит кадр по полному
 // пути. Отрисовка по запросу теряла смысл, стоило поставить курсор в текст.
 func TestIdle_FocusedEditorDoesNotRenderEveryTick(t *testing.T) {
+	testreset.Globals(t)
 	for _, tc := range []struct {
 		name  string
 		build func() widget.Widget

@@ -13,8 +13,8 @@ import (
 	"image"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // ComponentTrayLabel — имя компонента для стилей темы.
@@ -82,7 +82,7 @@ func (l *TrayLabel) PreferredSize(avail image.Point) image.Point {
 		return image.Point{}
 	}
 
-	w := widget.MeasureUIText(text, fontSizeOf(s)) + 2*int(s.PadX)
+	w := widget.MeasureTextFor(l, text, fontSizeOf(s)) + 2*int(s.PadX)
 	if min := l.minWidth(); w < min {
 		w = min
 	}

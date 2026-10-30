@@ -12,8 +12,8 @@ import (
 	"image/color"
 	"strconv"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Размеры значков и бегунка, которые не меняют вид панели, а лишь подбирают
@@ -540,7 +540,7 @@ func (pn *qsPanel) drawDetails(ctx widget.DrawContext, l *qsLayout, u qsUI) {
 		}
 		prev := ctx.Clip()
 		ctx.SetClip(l.body.Intersect(prev))
-		c.Draw(ctx)
+		widget.DrawTraced(c, ctx)
 		ctx.SetClip(prev)
 	}
 	if u.ring && u.focus.kind == qzBack {

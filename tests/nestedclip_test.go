@@ -5,8 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Отсечение не вкладывалось: виджет, ограничивший область рисования своей
@@ -47,6 +48,7 @@ func (o *overflowing) Draw(ctx widget.DrawContext) {
 }
 
 func TestNestedClip_ChildDoesNotEscapeParent(t *testing.T) {
+	testreset.Globals(t)
 	red := color.RGBA{R: 255, A: 255}
 	green := color.RGBA{G: 200, A: 255}
 
@@ -88,6 +90,7 @@ func TestNestedClip_ChildDoesNotEscapeParent(t *testing.T) {
 // PushClip сужает область ПЕРЕСЕЧЕНИЕМ с текущей и возвращает её обратно, а
 // не снимает отсечение вовсе.
 func TestPushClip_IntersectsAndRestores(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{A: 255})
 	root.SetBounds(image.Rect(0, 0, 100, 100))
 

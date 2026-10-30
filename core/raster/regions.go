@@ -1,0 +1,328 @@
+// regions.go — накопление признака содержимого по тайлам.
+//
+// Растеризатор знает, чем он залил каждый участок: сплошным цветом, блитом
+// изображения, глифами. Здесь это знание запоминается по тайлам и уходит
+// наружу вместе с кадром — потребителю больше не нужно восстанавливать его
+// вторым проходом кодека.
+//
+// Стоимость — одно присваивание в уже существующих циклах отрисовки.
+
+package raster
+
+import (
+	"image"
+	"image/color"
+
+	"github.com/oops1/headless-gui/v4/output"
+)
+
+// tileMark — признак одного тайла за текущий кадр.
+type tileMark struct {
+	kind  output.RegionKind
+	color color.RGBA
+	// touched — тайл в этом кадре трогали. Нетронутый тайл не попадает в
+	// выдачу вовсе: его содержимое не менялось, и говорить о нём нечего.
+	touched bool
+	// video — номер окна программы при kind == RegionVideo (video.go).
+	video uint32
+}
+
+// initTileMarks заводит таблицу признаков под размер холста.
+func (c *Canvas) initTileMarks() {
+	n := c.tilesX * c.tilesY
+	if n <= 0 {
+		c.marks = nil
+		return
+	}
+	if cap(c.marks) >= n {
+		c.marks = c.marks[:n]
+	} else {
+		c.marks = make([]tileMark, n)
+	}
+	c.ResetTileMarks(image.Rect(0, 0, c.W, c.H))
+	// Таблицы одного буфера кадра (singlebuf.go) — под ту же сетку; память
+	// прежних переиспользуется (заготовка попапов меняет сетку часто).
+	if len(c.touched) != n {
+		c.touched = resizeBools(c.touched, n)
+		c.changed = resizeBools(c.changed, n)
+		c.flushMark = resizeBools(c.flushMark, n)
+	}
+}
+
+// resizeBools — срез длины n из нулей, по возможности на прежней памяти.
+func resizeBools(b []bool, n int) []bool {
+	if cap(b) < n {
+		return make([]bool, n)
+	}
+	b = b[:n]
+	clear(b)
+	return b
+}
+
+// ResetTileMarks сбрасывает признаки тайлов, пересекающих r.
+//
+// В начале кадра сбрасываются тайлы внутри damage: за их содержимое отвечает
+// этот кадр, а прошлые сведения к нему отношения не имеют. Тайлы вне damage
+// сохраняют признак с того кадра, когда их рисовали.
+func (c *Canvas) ResetTileMarks(r image.Rectangle) {
+	if len(c.marks) == 0 {
+		return
+	}
+	tx0, ty0, tx1, ty1, ok := c.tileRange(r)
+	if !ok {
+		return
+	}
+	for ty := ty0; ty <= ty1; ty++ {
+		row := ty * c.tilesX
+		for tx := tx0; tx <= tx1; tx++ {
+			c.marks[row+tx] = tileMark{}
+		}
+	}
+}
+
+// tileRange переводит прямоугольник ФИЗИЧЕСКИХ пикселей в диапазон тайлов.
+func (c *Canvas) tileRange(r image.Rectangle) (tx0, ty0, tx1, ty1 int, ok bool) {
+	r = r.Intersect(image.Rect(0, 0, c.W, c.H))
+	if r.Empty() || c.tilesX == 0 {
+		return 0, 0, 0, 0, false
+	}
+	ts := output.TileSize
+	tx0, ty0 = r.Min.X/ts, r.Min.Y/ts
+	tx1, ty1 = (r.Max.X-1)/ts, (r.Max.Y-1)/ts
+	if tx1 >= c.tilesX {
+		tx1 = c.tilesX - 1
+	}
+	if ty1 >= c.tilesY {
+		ty1 = c.tilesY - 1
+	}
+	return tx0, ty0, tx1, ty1, true
+}
+
+// markSolid помечает область сплошной заливкой цвета col.
+//
+// Тайл, накрытый заливкой ЦЕЛИКОМ, становится сплошным: о нём теперь известно
+// всё. Задетый частично — смешанным: рядом с заливкой в нём осталось что-то
+// ещё, и обещать потребителю один цвет нельзя.
+func (c *Canvas) markSolid(r image.Rectangle, col color.RGBA, opaque bool) {
+	c.markTiles(r, output.RegionSolid, col, opaque)
+}
+
+// MarkImage помечает область блитом изображения. Картинка считается
+// перекрывающей: даже с альфой это «здесь картинка», а не «неизвестно что».
+func (c *Canvas) MarkImage(r image.Rectangle) {
+	c.markTiles(r, output.RegionImage, color.RGBA{}, true)
+}
+
+// markText помечает область глифами.
+func (c *Canvas) markText(r image.Rectangle) {
+	// Глифы кладутся поверх фона и тайл целиком не закрывают.
+	c.markTiles(r, output.RegionText, color.RGBA{}, false)
+}
+
+// markKind помечает область тем, чем её рисует текущий вызывающий.
+//
+// Маски альфы и цветные глифы — общий путь для трёх разных вещей: букв,
+// сглаженных дуг скруглённых заливок и размытого силуэта тени. Раньше все
+// три уходили наружу как «текст», и потребитель применял к серому размытию
+// текстовый кодек. Теперь вид объявляет вызывающий, а по умолчанию —
+// честное «не знаю».
+func (c *Canvas) markKind(r image.Rectangle) {
+	kind := c.maskKind
+	if kind == output.RegionText {
+		c.markText(r)
+		return
+	}
+	c.markTiles(r, kind, color.RGBA{}, false)
+}
+
+// withMaskKind выполняет f, объявляя, чем рисуют маски внутри неё.
+//
+// Возврат к прежнему значению, а не к «не знаю»: вызовы вкладываются —
+// текстовый прогон внутри фигуры остаётся текстом только внутри себя.
+func (c *Canvas) withMaskKind(kind output.RegionKind, f func()) {
+	prev := c.maskKind
+	c.maskKind = kind
+	f()
+	c.maskKind = prev
+}
+
+// markTiles — накопление признака: новый примитив поверх того, что уже было.
+//
+// Правила выведены из физики отрисовки, а не из порядка вызовов:
+//
+//   - полная НЕПРОЗРАЧНАЯ заливка стирает всё, что было под ней, и делает
+//     тайл сплошным — сколько бы всего там ни рисовали раньше;
+//   - заливка — слабый признак: это фон. Текст или картинка поверх фона дают
+//     текст или картинку, а не «смешано»: потребителю важно именно то, что
+//     сверху, а что под текстом лежал фон, он и так знает;
+//   - текст поверх картинки (и наоборот) — честное «не знаю»;
+//   - частичная заливка на чистом тайле — тоже «не знаю»: рядом осталось
+//     то, что лежало раньше.
+func (c *Canvas) markTiles(r image.Rectangle, kind output.RegionKind, col color.RGBA, opaque bool) {
+	if c.hasBase {
+		// Признак ставится тому, что кадр нарисует: за базовым клипом
+		// (повреждение частичного кадра, тайл последовательного пути по
+		// тайлам) заливка не ляжет, и её признак не должен затирать соседей.
+		r = r.Intersect(c.baseClip)
+		if r.Empty() {
+			return
+		}
+	}
+	if c.isWindow {
+		// Окно (window.go): один признак — центрального тайла кадра, правила те
+		// же, что для тайла сетки.
+		if r.Overlaps(c.center) {
+			full := c.center.In(r)
+			if full && c.round.active && c.round.clipsTile(c.center) {
+				full = false
+			}
+			c.centerMark.apply(kind, col, opaque, full)
+		}
+		return
+	}
+	if len(c.marks) == 0 {
+		return
+	}
+	r = r.Intersect(image.Rect(0, 0, c.W, c.H))
+	if r.Empty() {
+		return
+	}
+	tx0, ty0, tx1, ty1, ok := c.tileRange(r)
+	if !ok {
+		return
+	}
+	ts := output.TileSize
+
+	// canBeFull — способен ли r накрыть хоть один тайл диапазона целиком.
+	//
+	// Линейный (и через drawGradientScaled — радиальный) градиент кладёт
+	// заливку ПОСТРОЧНО: на область высотой 400 точек это 400 отдельных
+	// вызовов markSolid, каждый — прямоугольник высотой в 1 физический
+	// пиксель. Тайл 64×64 такая полоса не накроет НИКОГДА — full ниже
+	// заведомо ложен для любого тайла диапазона. Строить под это Rect
+	// тайла, четыре сравнения и (при активном скруглённом клипе) ещё и
+	// clipsTile — работа впустую, повторённая 400 раз ради одного и того
+	// же ответа «нет». Проверяем это ОДИН раз на весь вызов (не на тайл) и,
+	// если full нигде не достижим, доходим до switch напрямую.
+	//
+	// Крайний (правый/нижний) тайл может быть меньше TileSize, если размер
+	// холста не кратен 64, — учитываем и это: иначе на таком холсте тонкая
+	// полоса, совпавшая по стороне с обрезанным тайлом, была бы ошибочно
+	// признана неспособной его накрыть.
+	minW, minH := ts, ts
+	if tx1 == c.tilesX-1 {
+		if rem := c.W - tx1*ts; rem < minW {
+			minW = rem
+		}
+	}
+	if ty1 == c.tilesY-1 {
+		if rem := c.H - ty1*ts; rem < minH {
+			minH = rem
+		}
+	}
+	canBeFull := r.Dx() >= minW && r.Dy() >= minH
+
+	for ty := ty0; ty <= ty1; ty++ {
+		row := ty * c.tilesX
+		for tx := tx0; tx <= tx1; tx++ {
+			m := &c.marks[row+tx]
+
+			var full bool
+			if canBeFull {
+				tile := image.Rect(tx*ts, ty*ts, min(tx*ts+ts, c.W), min(ty*ts+ts, c.H))
+				full = r.Min.X <= tile.Min.X && r.Min.Y <= tile.Min.Y &&
+					r.Max.X >= tile.Max.X && r.Max.Y >= tile.Max.Y
+
+				// Скруглённый клип режет углы: примитив накрывает прямоугольник
+				// тайла, но пиксели за дугой остаются прежними. Обещать
+				// потребителю сплошной цвет тут нельзя — он зальёт квадратом то,
+				// что на деле скруглено. Смысл есть, только когда full и так
+				// истинен — иначе решать нечего.
+				if full && c.round.active && c.round.clipsTile(tile) {
+					full = false
+				}
+			}
+			m.apply(kind, col, opaque, full)
+		}
+	}
+}
+
+// apply накладывает примитив вида kind на признак тайла: full — примитив
+// накрыл тайл целиком.
+func (m *tileMark) apply(kind output.RegionKind, col color.RGBA, opaque, full bool) {
+	// Перекрытие: примитив накрыл тайл целиком и ничего не пропускает.
+	if full && opaque {
+		m.touched, m.kind, m.color = true, kind, col
+		return
+	}
+	if !m.touched {
+		m.touched = true
+		if kind == output.RegionSolid {
+			// Заливка, не накрывшая тайл целиком: часть площади —
+			// прежнее содержимое.
+			m.kind = output.RegionMixed
+		} else {
+			m.kind, m.color = kind, col
+		}
+		return
+	}
+
+	switch {
+	case m.kind == kind:
+		// Тот же вид второй раз: для заливки важен цвет, для
+		// остального вид не меняется. Смешанный тайл цвета не несёт —
+		// иначе признак, удержанный с прошлого кадра (хэш-дифф), отличался
+		// бы от поставленного заново только прежним цветом.
+		if kind == output.RegionSolid && m.color != col {
+			m.kind, m.color = output.RegionMixed, color.RGBA{}
+		}
+	case m.kind == output.RegionSolid:
+		// Фон был, поверх легло содержимое — оно и есть признак.
+		m.kind, m.color = kind, col
+	case kind == output.RegionSolid:
+		// Заливка легла поверх картинки или текста, не закрыв тайл
+		// целиком: часть площади — содержимое, часть — заливка.
+		// Обещать потребителю что-то одно нельзя.
+		m.kind, m.color = output.RegionMixed, color.RGBA{}
+	default:
+		m.kind, m.color = output.RegionMixed, color.RGBA{}
+	}
+}
+
+// RegionsFor собирает признаки тайлов, попавших в кадр.
+//
+// Порядок совпадает с порядком тайлов: потребителю удобно идти по обоим
+// спискам разом.
+func (c *Canvas) RegionsFor(tiles []output.DirtyTile) []output.Region {
+	if len(c.marks) == 0 || len(tiles) == 0 {
+		return nil
+	}
+	ts := output.TileSize
+	out := make([]output.Region, 0, len(tiles))
+	for _, t := range tiles {
+		tx, ty := t.X/ts, t.Y/ts
+		if tx >= c.tilesX || ty >= c.tilesY {
+			continue
+		}
+		m := c.marks[ty*c.tilesX+tx]
+		if !m.touched {
+			// Тайл изменился, но растеризатор его не помечал — значит
+			// рисовало что-то, о чём мы признака не ведём. Честное «не знаю».
+			out = append(out, output.Region{
+				Rect: image.Rect(t.X, t.Y, t.X+t.W, t.Y+t.H),
+				Kind: output.RegionMixed,
+			})
+			continue
+		}
+		r := output.Region{
+			Rect:  image.Rect(t.X, t.Y, t.X+t.W, t.Y+t.H),
+			Kind:  m.kind,
+			Color: m.color,
+		}
+		if m.kind == output.RegionVideo {
+			r.VideoID = m.video
+		}
+		out = append(out, r)
+	}
+	return out
+}

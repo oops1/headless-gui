@@ -6,8 +6,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/core/overlay"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // popupCacheEngine — движок с открытым меню, активным sink и счётчиком вызовов.
@@ -118,9 +119,7 @@ func TestPopupCache_ClearedOnClose(t *testing.T) {
 	defer e.Stop()
 	e.renderFrame()
 
-	e.popupMu.Lock()
-	n := len(e.popupCache)
-	e.popupMu.Unlock()
+	n := e.ov.CachedPopups()
 	if n != 1 {
 		t.Fatalf("в кэше %d записей, ожидалась 1", n)
 	}
@@ -128,9 +127,7 @@ func TestPopupCache_ClearedOnClose(t *testing.T) {
 	dd.SetOpen(false)
 	e.renderFrame()
 
-	e.popupMu.Lock()
-	n = len(e.popupCache)
-	e.popupMu.Unlock()
+	n = e.ov.CachedPopups()
 	if n != 0 {
 		t.Fatalf("после закрытия в кэше осталось %d записей", n)
 	}
@@ -144,16 +141,15 @@ func TestPopupCache_PixelIdentity(t *testing.T) {
 	e.renderFrame()
 
 	r := dd.OverlayBounds()
-	want := e.canvas.renderOverlay(dd, r) // свежий канвас
+	want := overlay.RenderOverlay(e.canvas, dd, r) // свежий канвас
 
-	e.popupMu.Lock()
-	ent := e.popupCache[widgetID(dd)]
-	e.popupMu.Unlock()
-	if ent == nil || ent.img == nil {
+	if e.ov.CachedImage(overlay.WidgetID(dd)) == nil {
 		t.Fatal("попап не попал в кэш")
 	}
-	// Повторный рендер в переиспользованный канвас.
-	got := renderOverlayInto(ent.overlayCanvas(e.canvas, r), dd, r)
+	// Повторный рендер в переиспользованную заготовку арены.
+	e.frameMu.Lock()
+	got := overlay.RenderOverlayInto(e.ov.Arena().CanvasFor(e.canvas, r), dd, r)
+	e.frameMu.Unlock()
 
 	if got.Rect != want.Rect {
 		t.Fatalf("размер %v != %v", got.Rect, want.Rect)

@@ -3,7 +3,8 @@ package tests
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // clipboard_keys_test.go — «старошкольные» клавиши буфера обмена и удаление
@@ -30,6 +31,7 @@ func tiSelect(ti *widget.TextInput, n int) {
 // ─── TextInput ───────────────────────────────────────────────────────────────
 
 func TestTextInput_CtrlInsertCopies(t *testing.T) {
+	testreset.Globals(t)
 	widget.UseMemoryClipboard()
 	ti := widget.NewTextInput("")
 	ti.SetText("hello world")
@@ -44,6 +46,7 @@ func TestTextInput_CtrlInsertCopies(t *testing.T) {
 }
 
 func TestTextInput_ShiftInsertPastes(t *testing.T) {
+	testreset.Globals(t)
 	widget.UseMemoryClipboard()
 	widget.ClipboardSetText("XY")
 	ti := widget.NewTextInput("")
@@ -55,6 +58,7 @@ func TestTextInput_ShiftInsertPastes(t *testing.T) {
 }
 
 func TestTextInput_ShiftDeleteCuts(t *testing.T) {
+	testreset.Globals(t)
 	widget.UseMemoryClipboard()
 	ti := widget.NewTextInput("")
 	ti.SetText("hello world")
@@ -69,6 +73,7 @@ func TestTextInput_ShiftDeleteCuts(t *testing.T) {
 }
 
 func TestTextInput_CtrlDeleteWordForward(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	ti.SetText("foo bar")
 	tiKey(ti, widget.KeyHome, 0)
@@ -79,6 +84,7 @@ func TestTextInput_CtrlDeleteWordForward(t *testing.T) {
 }
 
 func TestTextInput_CtrlBackspaceWordBack(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	ti.SetText("foo bar") // каретка в конце
 	tiKey(ti, widget.KeyBackspace, widget.ModCtrl)
@@ -88,6 +94,7 @@ func TestTextInput_CtrlBackspaceWordBack(t *testing.T) {
 }
 
 func TestTextInput_PasswordCtrlInsertBlocked(t *testing.T) {
+	testreset.Globals(t)
 	widget.UseMemoryClipboard()
 	widget.ClipboardSetText("prev")
 	ti := widget.NewPasswordInput("")
@@ -110,6 +117,7 @@ func tbSelect(tb *widget.TextBox, n int) {
 }
 
 func TestTextBox_CtrlInsertCopies(t *testing.T) {
+	testreset.Globals(t)
 	widget.UseMemoryClipboard()
 	tb := newTB(t, 300, 100)
 	tb.SetText("hello world")
@@ -124,6 +132,7 @@ func TestTextBox_CtrlInsertCopies(t *testing.T) {
 }
 
 func TestTextBox_ShiftInsertPastes(t *testing.T) {
+	testreset.Globals(t)
 	widget.UseMemoryClipboard()
 	widget.ClipboardSetText("XY")
 	tb := newTB(t, 300, 100)
@@ -135,6 +144,7 @@ func TestTextBox_ShiftInsertPastes(t *testing.T) {
 }
 
 func TestTextBox_ShiftDeleteCuts(t *testing.T) {
+	testreset.Globals(t)
 	widget.UseMemoryClipboard()
 	tb := newTB(t, 300, 100)
 	tb.SetText("hello world")
@@ -149,6 +159,7 @@ func TestTextBox_ShiftDeleteCuts(t *testing.T) {
 }
 
 func TestTextBox_CtrlDeleteWordForward(t *testing.T) {
+	testreset.Globals(t)
 	tb := newTB(t, 300, 100)
 	tb.SetText("foo bar")
 	tbKey(tb, widget.KeyHome, widget.ModCtrl)
@@ -159,6 +170,7 @@ func TestTextBox_CtrlDeleteWordForward(t *testing.T) {
 }
 
 func TestTextBox_CtrlBackspaceWordBack(t *testing.T) {
+	testreset.Globals(t)
 	tb := newTB(t, 300, 100)
 	tb.SetText("foo bar") // каретка в конце
 	tbKey(tb, widget.KeyBackspace, widget.ModCtrl)
@@ -168,6 +180,7 @@ func TestTextBox_CtrlBackspaceWordBack(t *testing.T) {
 }
 
 func TestTextBox_ReadOnlyBlocksPasteAndCut(t *testing.T) {
+	testreset.Globals(t)
 	widget.UseMemoryClipboard()
 	widget.ClipboardSetText("X")
 	tb := newTB(t, 300, 100)

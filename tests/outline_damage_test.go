@@ -4,7 +4,8 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Перетаскивание контура заявляет полосы, а не их объединение.
@@ -42,6 +43,7 @@ func dragOutlineOneStep(t *testing.T, style widget.OutlineDragStyle) []image.Rec
 }
 
 func TestOutlineDrag_ClaimsStripsNotUnion(t *testing.T) {
+	testreset.Globals(t)
 	rects := dragOutlineOneStep(t, widget.OutlineDragBorder)
 	if len(rects) == 0 {
 		t.Fatal("шаг перетаскивания не заявил ни одной области — контур не двигался")
@@ -72,6 +74,7 @@ func TestOutlineDrag_ClaimsStripsNotUnion(t *testing.T) {
 // Залитый контур — другое дело: под заливкой меняется каждый пиксель, и
 // дробить её на полосы значило бы соврать потребителю.
 func TestOutlineDrag_FilledClaimsWholeRect(t *testing.T) {
+	testreset.Globals(t)
 	rects := dragOutlineOneStep(t, widget.OutlineDragFilled)
 	if len(rects) == 0 {
 		t.Fatal("шаг перетаскивания не заявил ни одной области")

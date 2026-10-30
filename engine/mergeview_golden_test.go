@@ -4,8 +4,8 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Эталонные кадры контрола слияния MergeView: три стороны сверху, итог снизу,
@@ -86,9 +86,9 @@ func mergeGoldenScene(t *testing.T, th *widget.Theme, prep func(m *widget.MergeV
 	widget.ApplyThemeTree(root, th)
 	prep(m)
 
-	c.blitBackground()
+	c.BlitBackground()
 	root.Draw(c)
-	return c.back
+	return c.Back()
 }
 
 func TestGolden_MergeView(t *testing.T) {

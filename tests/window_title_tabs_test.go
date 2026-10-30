@@ -8,7 +8,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 func newTabPanel() *widget.Panel {
@@ -20,6 +21,7 @@ func newTabPanel() *widget.Panel {
 // TestWindowTitleTabs_ContentSwap — активная вкладка держит Content в
 // клиентской области; переключение меняет ребёнка окна.
 func TestWindowTitleTabs_ContentSwap(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("term", 600, 400)
 	a, b := newTabPanel(), newTabPanel()
 
@@ -54,6 +56,7 @@ func TestWindowTitleTabs_ContentSwap(t *testing.T) {
 // TestWindowTitleTabs_Close — закрытие активной вкладки активирует соседнюю,
 // закрытие последней вызывает OnClose.
 func TestWindowTitleTabs_Close(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("term", 600, 400)
 	a, b := newTabPanel(), newTabPanel()
 	w.AddTitleTab("first", a)
@@ -91,6 +94,7 @@ func TestWindowTitleTabs_Close(t *testing.T) {
 // TestWindowTitleTabs_XAML — декларация из XAML: TitleTabs, TabItem,
 // TitleTabsMenu; Title при вкладках не мешает, контент активной — ребёнок.
 func TestWindowTitleTabs_XAML(t *testing.T) {
+	testreset.Globals(t)
 	const xaml = `<Window Title="app" Width="600" Height="400" TitleTabs="True">
 		<TabItem Header="одна" ToolTip="первая вкладка">
 			<Panel Name="p1" Background="#202020"/>

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // GG-68: одна горутина для отложенной работы и ввода.
@@ -149,7 +149,7 @@ func TestPost_InputAndPostShareOneGoroutine(t *testing.T) {
 		if n != 200 {
 			t.Fatalf("выполнено %d из 200", n)
 		}
-		if loop := e.loopGID.Load(); gid != loop {
+		if loop := e.lp.GoroutineID(); gid != loop {
 			t.Fatalf("работа шла на горутине %d, а цикл — %d", gid, loop)
 		}
 	}

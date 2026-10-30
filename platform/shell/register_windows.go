@@ -1,0 +1,24 @@
+//go:build windows
+
+package shell
+
+import (
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/win32"
+)
+
+func init() {
+	native.RegisterShell(native.Shell{
+		OpenURL:     platformOpenURL,
+		OpenFile:    platformOpenFile,
+		RevealFile:  platformRevealFile,
+		Languages:   systemLanguages,
+		Theme:       detectSystemTheme,
+		Accent:      detectSystemAccent,
+		WatchTheme:  watchSystemTheme,
+		WatchAccent: watchSystemAccent,
+	})
+	// Смена темы приходит окну сообщением; обработчик всегда пропускает его
+	// дальше (handled=false).
+	win32.AddMessageHook(wmSettingChange, onSettingChange)
+}

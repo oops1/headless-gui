@@ -11,7 +11,7 @@ package desktop
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v4/theme"
 )
 
 // Ключи метрик меню «Пуск» Windows 11 (логические пиксели при 100 %).
@@ -319,7 +319,7 @@ func (m *StartMenu) linkRect(row image.Rectangle, label string) image.Rectangle 
 		return image.Rectangle{}
 	}
 	s := m.tpart("link", theme.StateNormal)
-	w := measureUI(label, fontPt(s)) + m.linkChevronW(fontPt(s)) + 2*m.linkPad()
+	w := measureUIFor(m, label, fontPt(s)) + m.linkChevronW(fontPt(s)) + 2*m.linkPad()
 	h := row.Dy()
 	return image.Rect(row.Max.X-w, row.Min.Y, row.Max.X, row.Min.Y+h)
 }
@@ -343,7 +343,7 @@ func (m *StartMenu) layoutFooter(g *gridGeo) {
 	s := m.tpart("footer.item", theme.StateNormal)
 	nameW := 0
 	if name != "" {
-		nameW = measureUI(name, fontPt(s))
+		nameW = measureUIFor(m, name, fontPt(s))
 	}
 	w := 8 + av + 12 + nameW + 16
 	if name == "" {

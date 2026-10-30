@@ -1,13 +1,13 @@
 package desktop_test
 
 import (
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 	"image"
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/desktop"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/desktop"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Плитки «только страница», обход Tab по столбцу страниц и вертикальный сдвиг

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // Уведомления прежней модели (без AppID и AppName) показываются карточками без

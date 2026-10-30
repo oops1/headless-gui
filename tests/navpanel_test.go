@@ -5,7 +5,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Боковая навигация во всю высоту окна и её свёрнутый режим.
@@ -40,6 +41,7 @@ func navDialog(t *testing.T) (*widget.Dialog, *widget.NavPanel) {
 // Панель занимает колонку от ВЕРХНЕГО края окна до нижнего — вместе с полосой
 // заголовка. Ради этого всё и делалось: цвет панели доходит до края.
 func TestNavPanel_ColumnReachesTopEdge(t *testing.T) {
+	testreset.Globals(t)
 	d, nav := navDialog(t)
 
 	r := nav.Bounds()
@@ -57,6 +59,7 @@ func TestNavPanel_ColumnReachesTopEdge(t *testing.T) {
 
 // Содержимое начинается за панелью, а не под ней.
 func TestNavPanel_ContentStartsAfterColumn(t *testing.T) {
+	testreset.Globals(t)
 	d, nav := navDialog(t)
 
 	if got, want := d.ContentBounds().Min.X, nav.Bounds().Max.X; got != want {
@@ -66,6 +69,7 @@ func TestNavPanel_ContentStartsAfterColumn(t *testing.T) {
 
 // Свёрнутая панель — полоска с иконками: ширина уходит, пункты остаются.
 func TestNavPanel_CollapsedKeepsItems(t *testing.T) {
+	testreset.Globals(t)
 	d, nav := navDialog(t)
 	wideContent := d.ContentBounds().Dx()
 
@@ -89,6 +93,7 @@ func TestNavPanel_CollapsedKeepsItems(t *testing.T) {
 
 // Свёрнутая полоска рисует иконки, а не пустоту.
 func TestNavPanel_CollapsedDrawsIcons(t *testing.T) {
+	testreset.Globals(t)
 	scene := func(withIcons bool) *image.RGBA {
 		d := widget.NewDialog("Настройки", 300, 220)
 		d.SetContentPadding(0)
@@ -116,6 +121,7 @@ func TestNavPanel_CollapsedDrawsIcons(t *testing.T) {
 
 // Подпись заголовка остаётся видна поверх поднятой панели.
 func TestNavPanel_TitleStaysVisible(t *testing.T) {
+	testreset.Globals(t)
 	scene := func(title string) *image.RGBA {
 		d := widget.NewDialog(title, 300, 220)
 		d.SetContentPadding(0)
@@ -137,6 +143,7 @@ func TestNavPanel_TitleStaysVisible(t *testing.T) {
 // Кнопка «≡» в полосе сворачивает именно эту панель — без единой строки в
 // приложении.
 func TestNavPanel_NavButtonCollapses(t *testing.T) {
+	testreset.Globals(t)
 	d, nav := navDialog(t)
 	d.SetNavButton(true)
 
@@ -152,6 +159,7 @@ func TestNavPanel_NavButtonCollapses(t *testing.T) {
 
 // Клик выбирает пункт и уведомляет приложение.
 func TestNavPanel_SelectOnClick(t *testing.T) {
+	testreset.Globals(t)
 	_, nav := navDialog(t)
 
 	var got []int
@@ -172,6 +180,7 @@ func TestNavPanel_SelectOnClick(t *testing.T) {
 // SetSelected обработчик НЕ зовёт: он сообщает о выборе пользователя, а не о
 // состоянии, выставленном программой.
 func TestNavPanel_SetSelectedIsSilent(t *testing.T) {
+	testreset.Globals(t)
 	_, nav := navDialog(t)
 	called := 0
 	nav.OnSelect = func(int) { called++ }
@@ -188,6 +197,7 @@ func TestNavPanel_SetSelectedIsSilent(t *testing.T) {
 // Пункты начинаются НИЖЕ подписи заголовка: панель поднята под верх, и первый
 // пункт иначе оказался бы под ней.
 func TestNavPanel_ItemsStartBelowCaption(t *testing.T) {
+	testreset.Globals(t)
 	d, nav := navDialog(t)
 
 	if got, want := nav.ItemRect(0).Min.Y, d.Bounds().Min.Y+d.TitleHeight; got < want {
@@ -198,6 +208,7 @@ func TestNavPanel_ItemsStartBelowCaption(t *testing.T) {
 // Панель шире половины окна ужимается: занявшая всё окно, она оставила бы
 // содержимое без места.
 func TestNavPanel_WidthClampedToHalf(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 300, 200)
 	d.SetBounds(image.Rect(0, 0, 300, 200))
 	nav := widget.NewNavPanel()
@@ -213,6 +224,7 @@ func TestNavPanel_WidthClampedToHalf(t *testing.T) {
 // Окно: клиентская область отступает вправо от панели, остальные дети
 // раскладываются уже по ней.
 func TestWindowNavPanel_ClientAreaShifts(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Настройки", 800, 600)
 	// Стиль явно: в mac-раскладке колонка начинается НИЖЕ полосы (там кнопки
 	// окна), и тест проверял бы разную геометрию на разных платформах.
@@ -240,6 +252,7 @@ func TestWindowNavPanel_ClientAreaShifts(t *testing.T) {
 // Начинка полосы (поиск) не заезжает на колонку панели: у панели свой цвет и
 // свои пункты, и поле поверх неё выглядит чужим.
 func TestNavPanel_TitleBarContentStartsAfterColumn(t *testing.T) {
+	testreset.Globals(t)
 	d, nav := navDialog(t)
 	search := widget.NewTextInput("Поиск...")
 	d.SetTitleBarContent(search)
@@ -262,6 +275,7 @@ func TestNavPanel_TitleBarContentStartsAfterColumn(t *testing.T) {
 // Скругление окна не срезается панелью: она заливает свою колонку
 // прямоугольником, а корпус диалога скруглён.
 func TestNavPanel_KeepsRoundedCorners(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 300, 220)
 	d.CornerRadius = 8
 	d.SetContentPadding(0)
@@ -283,6 +297,7 @@ func TestNavPanel_KeepsRoundedCorners(t *testing.T) {
 // В mac-раскладке колонка начинается ПОД полосой: в её левом верхнем углу
 // стоят кнопки окна, и панель, поднятая под верх, накрыла бы их.
 func TestWindowNavPanel_MacStartsBelowTitleBar(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Настройки", 800, 600)
 	w.TitleStyle = widget.WindowTitleMac
 	w.SetBounds(image.Rect(0, 0, 800, 600))

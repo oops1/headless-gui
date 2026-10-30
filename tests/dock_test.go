@@ -6,8 +6,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // dockPanelColor — нейтральный цвет для панелей-заглушек содержимого.
@@ -29,6 +30,7 @@ func newPane(id, title string) *widget.DockPane {
 // ─── Раскладка сторон + центра ──────────────────────────────────────────────
 
 func TestDock_LayoutSidesAndCenter(t *testing.T) {
+	testreset.Globals(t)
 	m, center := newDockMgr(400, 300)
 
 	pL := newPane("l", "Left")
@@ -60,6 +62,7 @@ func TestDock_LayoutSidesAndCenter(t *testing.T) {
 // ─── Ресайз кромкой с MinSize ───────────────────────────────────────────────
 
 func TestDock_GutterResizeWithMin(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)
@@ -90,6 +93,7 @@ func TestDock_GutterResizeWithMin(t *testing.T) {
 // ─── Drag панели на направляющую → смена стороны ────────────────────────────
 
 func TestDock_DragToGuideChangesSide(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)
@@ -118,6 +122,7 @@ func TestDock_DragToGuideChangesSide(t *testing.T) {
 // ─── Drop мимо → floating, drag floating, возврат доком ─────────────────────
 
 func TestDock_DropFloatingThenRedock(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)
@@ -156,6 +161,7 @@ func TestDock_DropFloatingThenRedock(t *testing.T) {
 // ─── Стопка из двух панелей: переключение табов ─────────────────────────────
 
 func TestDock_StackTabSwitch(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pA := newPane("a", "A")
 	pB := newPane("b", "B")
@@ -182,6 +188,7 @@ func TestDock_StackTabSwitch(t *testing.T) {
 // ─── Pin/Unpin + выезд по клику на ярлык ────────────────────────────────────
 
 func TestDock_UnpinFlyoutDismiss(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)
@@ -226,6 +233,7 @@ func TestDock_UnpinFlyoutDismiss(t *testing.T) {
 // ─── Close / Show ───────────────────────────────────────────────────────────
 
 func TestDock_CloseShow(t *testing.T) {
+	testreset.Globals(t)
 	m, center := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)
@@ -251,6 +259,7 @@ func TestDock_CloseShow(t *testing.T) {
 // ─── Save / Restore (в т.ч. незнакомый id) ──────────────────────────────────
 
 func TestDock_SaveRestore(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pA := newPane("a", "A")
 	pB := newPane("b", "B")
@@ -300,6 +309,7 @@ func TestDock_SaveRestore(t *testing.T) {
 // ─── Ресайз DockManager сохраняет размеры сторон ────────────────────────────
 
 func TestDock_ManagerResizePreservesSideSize(t *testing.T) {
+	testreset.Globals(t)
 	m, center := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)

@@ -4,8 +4,9 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // newTestEngine создаёт движок 400×300 без запуска рендер-горутины.
@@ -16,6 +17,7 @@ func newTestEngine() *engine.Engine {
 // ─── CanvasSize ──────────────────────────────────────────────────────────────
 
 func TestEngine_CanvasSize(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(800, 600, 30)
 	w, h := eng.CanvasSize()
 	if w != 800 || h != 600 {
@@ -24,6 +26,7 @@ func TestEngine_CanvasSize(t *testing.T) {
 }
 
 func TestEngine_SetResolution(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	eng.SetResolution(1920, 1080)
 	w, h := eng.CanvasSize()
@@ -35,6 +38,7 @@ func TestEngine_SetResolution(t *testing.T) {
 // ─── SetRoot ─────────────────────────────────────────────────────────────────
 
 func TestEngine_SetRoot_BoundsSetToCanvas(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(300, 200, 20)
 	root := widget.NewPanel(widget.DarkTheme().PanelBG)
 	eng.SetRoot(root)
@@ -48,6 +52,7 @@ func TestEngine_SetRoot_BoundsSetToCanvas(t *testing.T) {
 }
 
 func TestEngine_SetRoot_InjectsCaptureManager(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	panel := widget.NewWin10Panel()
 	panel.Drag.Enabled = true
@@ -70,6 +75,7 @@ func TestEngine_SetRoot_InjectsCaptureManager(t *testing.T) {
 // ─── SetFocus ────────────────────────────────────────────────────────────────
 
 func TestEngine_SetFocus(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	btn := widget.NewButton("B")
 
@@ -80,6 +86,7 @@ func TestEngine_SetFocus(t *testing.T) {
 }
 
 func TestEngine_SetFocus_TransfersFocus(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	btn1 := widget.NewButton("B1")
 	btn2 := widget.NewButton("B2")
@@ -99,6 +106,7 @@ func TestEngine_SetFocus_TransfersFocus(t *testing.T) {
 }
 
 func TestEngine_SetFocus_Nil_ClearsAll(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	btn := widget.NewButton("B")
 	eng.SetFocus(btn)
@@ -111,6 +119,7 @@ func TestEngine_SetFocus_Nil_ClearsAll(t *testing.T) {
 // ─── Mouse Capture ───────────────────────────────────────────────────────────
 
 func TestEngine_SetCapture_ReleaseCapture(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	btn := widget.NewButton("B")
 	btn.SetBounds(image.Rect(0, 0, 100, 30))
@@ -139,6 +148,7 @@ func TestEngine_SetCapture_ReleaseCapture(t *testing.T) {
 // ─── SendMouseMove ───────────────────────────────────────────────────────────
 
 func TestEngine_SendMouseMove_Broadcast(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 
 	btn1 := widget.NewButton("B1")
@@ -172,6 +182,7 @@ func TestEngine_SendMouseMove_Broadcast(t *testing.T) {
 }
 
 func TestEngine_SendMouseMove_CaptureExclusive(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 
 	btn1 := widget.NewButton("B1")
@@ -198,6 +209,7 @@ func TestEngine_SendMouseMove_CaptureExclusive(t *testing.T) {
 // ─── SendMouseButton + hit-testing ───────────────────────────────────────────
 
 func TestEngine_SendMouseButton_HitTest(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 
 	btn := widget.NewButton("Click me")
@@ -226,6 +238,7 @@ func TestEngine_SendMouseButton_HitTest(t *testing.T) {
 }
 
 func TestEngine_SendMouseButton_Miss(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 
 	btn := widget.NewButton("B")
@@ -247,6 +260,7 @@ func TestEngine_SendMouseButton_Miss(t *testing.T) {
 }
 
 func TestEngine_SendMouseButton_FocusOnClick(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 
 	btn := widget.NewButton("B")
@@ -265,6 +279,7 @@ func TestEngine_SendMouseButton_FocusOnClick(t *testing.T) {
 }
 
 func TestEngine_SendMouseButton_FocusCleared_OnNonFocusableClick(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 
 	btn := widget.NewButton("B")
@@ -287,6 +302,7 @@ func TestEngine_SendMouseButton_FocusCleared_OnNonFocusableClick(t *testing.T) {
 // ─── Event Bubbling ──────────────────────────────────────────────────────────
 
 func TestEngine_EventBubbling_ParentReceivesIfChildDoesNot(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 
 	// Создаём панель (MouseClickHandler) с меткой (не MouseClickHandler) поверх
@@ -311,6 +327,7 @@ func TestEngine_EventBubbling_ParentReceivesIfChildDoesNot(t *testing.T) {
 }
 
 func TestEngine_EventBubbling_DeepHierarchy(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 
 	// Глубокая иерархия: root → panel → subpanel → button
@@ -343,6 +360,7 @@ func TestEngine_EventBubbling_DeepHierarchy(t *testing.T) {
 // ─── Tab Navigation ───────────────────────────────────────────────────────────
 
 func TestEngine_TabNavigation_ForwardCycle(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 
 	btn1 := widget.NewButton("B1")
@@ -390,6 +408,7 @@ func TestEngine_TabNavigation_ForwardCycle(t *testing.T) {
 }
 
 func TestEngine_TabNavigation_BackwardCycle(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 
 	btn1 := widget.NewButton("B1")
@@ -419,6 +438,7 @@ func TestEngine_TabNavigation_BackwardCycle(t *testing.T) {
 }
 
 func TestEngine_TabNavigation_NoFocusables(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	// Панель без Focusable — Tab не должен паниковать
 	root := widget.NewPanel(widget.DarkTheme().PanelBG)
@@ -432,6 +452,7 @@ func TestEngine_TabNavigation_NoFocusables(t *testing.T) {
 // ─── SendKeyEvent → фокусированный виджет ────────────────────────────────────
 
 func TestEngine_SendKeyEvent_DeliverToFocused(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	cb := widget.NewCheckBox("C")
 	eng.SetFocus(cb)
@@ -445,6 +466,7 @@ func TestEngine_SendKeyEvent_DeliverToFocused(t *testing.T) {
 }
 
 func TestEngine_SendKeyEvent_NoFocused(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	// Без фокуса — не должен паниковать
 	ev := widget.KeyEvent{Code: widget.KeySpace, Pressed: true}
@@ -454,6 +476,7 @@ func TestEngine_SendKeyEvent_NoFocused(t *testing.T) {
 // ─── Start / Stop ────────────────────────────────────────────────────────────
 
 func TestEngine_StartStop(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	root := widget.NewPanel(widget.DarkTheme().PanelBG)
 	eng.SetRoot(root)
@@ -468,6 +491,7 @@ func TestEngine_StartStop(t *testing.T) {
 }
 
 func TestEngine_Frames_NonBlocking(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	root := widget.NewPanel(widget.DarkTheme().PanelBG)
 	eng.SetRoot(root)
@@ -487,6 +511,7 @@ func TestEngine_Frames_NonBlocking(t *testing.T) {
 // ─── CollectFocusables ───────────────────────────────────────────────────────
 
 func TestCollectFocusables_Empty(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(widget.DarkTheme().PanelBG)
 	result := widget.CollectFocusables(root)
 	if len(result) != 0 {
@@ -495,6 +520,7 @@ func TestCollectFocusables_Empty(t *testing.T) {
 }
 
 func TestCollectFocusables_DFSOrder(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(widget.DarkTheme().PanelBG)
 
 	btn1 := widget.NewButton("B1")
@@ -521,6 +547,7 @@ func TestCollectFocusables_DFSOrder(t *testing.T) {
 }
 
 func TestCollectFocusables_Nested(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(widget.DarkTheme().PanelBG)
 	inner := widget.NewPanel(widget.DarkTheme().PanelBG)
 	btn1 := widget.NewButton("B1")
@@ -549,6 +576,7 @@ func TestCollectFocusables_Nested(t *testing.T) {
 }
 
 func TestCollectFocusables_MixedWidgets(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(widget.DarkTheme().PanelBG)
 
 	btn := widget.NewButton("B")
@@ -570,6 +598,7 @@ func TestCollectFocusables_MixedWidgets(t *testing.T) {
 // ─── SetTheme ────────────────────────────────────────────────────────────────
 
 func TestEngine_SetTheme(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 
 	btn := widget.NewButton("B")

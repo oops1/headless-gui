@@ -30,8 +30,8 @@ headless-gui/
 import (
     "image"
     "image/color"
-    "github.com/oops1/headless-gui/v3/engine"
-    "github.com/oops1/headless-gui/v3/widget"
+    "github.com/oops1/headless-gui/v4/engine"
+    "github.com/oops1/headless-gui/v4/widget"
 )
 
 eng := engine.New(1920, 1080, 30)   // width, height, FPS
@@ -1110,7 +1110,7 @@ whole group starts. Highlighting is drawn from `TreeViewItem.IsSelected`.
 Data Binding with HierarchicalDataTemplate:
 
 ```go
-import "github.com/oops1/headless-gui/v3/widget/treeview"
+import "github.com/oops1/headless-gui/v4/widget/treeview"
 
 tmpl := &treeview.HierarchicalDataTemplate{
     ItemsSourcePath: "Children",
@@ -1756,6 +1756,28 @@ A path from the markup is kept inside `fsys` under the same policy as `baseDir`
 on disk: an absolute path, or one escaping the root, is rejected. Fonts go into
 the binary the same way — `eng.RegisterFontFS` (see "Fonts").
 
+### Custom tags
+
+An application tag is registered with a builder function that receives the element's
+attributes:
+
+```go
+widget.RegisterXAMLWidget("Gauge", func(a widget.XAMLAttrs) (widget.Widget, error) {
+	g := NewGauge()
+	g.Max, _ = strconv.Atoi(a.Attr("Max"))
+	return g, nil
+})
+```
+
+Widget packages (and programs on `widget/xaml` without the facade) register tags in the
+`xaml.Default()` registry: `Register(builder, tags...)` for a simple builder — the
+loader applies bounds, Width/Height, common properties and the name itself and builds
+the element's children; `RegisterComplete` for a container builder that does all of
+that itself and builds its children with `Loader.BuildChild`. A builder receives the node `*xaml.Element` (`Attr`,
+`Name`, `Bounds`, `Children`, `Text`) and the `*xaml.Loader` (`BaseDir`, `Image`,
+`Offset`, `BuildChild`, `BuildPopupMenu`, `SetName`). Registry tags are checked before
+`RegisterXAMLWidget` tags.
+
 ### Coordinates
 
 Child element coordinates are **relative** (standard WPF Canvas behavior):
@@ -1827,7 +1849,7 @@ Common attributes: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `W
 Separate module with platform-native backends. CGO-free on all platforms (Windows: Win32 API, macOS: Cocoa via purego, Linux: X11 protocol).
 
 ```go
-import "github.com/oops1/headless-gui/v3/window"
+import "github.com/oops1/headless-gui/v4/window"
 
 eng := engine.New(1280, 720, 30)
 // ... build UI, eng.Start() ...
@@ -2127,6 +2149,16 @@ animation is not a reason for the engine to draw — damage is. A tick that
 moves the widget through setters (`SetBounds`, `SetValue`, and the rest)
 declares damage itself; a tick that writes a field directly must call
 `Invalidate()`, or the change reaches no frame at all.
+
+The rule does not forbid starting an animation from `Draw` — it forbids a
+counter that lives only while `Draw` is being called. `widget.Animate` from
+`Draw` is fine in two cases: lazily, on first appearance (the taskbar clock
+starts its one-second tick when it is first drawn), and in response to the
+change that caused this `Draw` (a colour transition on hover: the hover setter
+already declared the area, `Draw` noticed the state change and started the
+transition). In both cases the animation then ticks independently of drawing
+and declares its own area, and a widget that is not drawn needs no animation.
+`Engine.SetDrawContractCheck` does not report such a start as a violation.
 
 This is about idling. The engine used to prepare a frame on every tick while
 any animation was registered, and the taskbar's one-second clock kept a
@@ -2739,6 +2771,30 @@ dispatch are never blocked by rendering; structural operations (SetResolution,
 RegisterFont*, SetTheme) serialize with the frame via a dedicated internal
 mutex.
 
+#### Areas outside a widget's bounds (v4.0)
+
+A widget that draws outside its bounds (an overlay, a shadow, a glow) declares
+the changed area itself. Coordinates are in the widget's system.
+
+```go
+w.InvalidateArea(r)               // does not redraw neighbours under r
+w.MarkDirty()                     // state changed without a setter
+widget.InvalidateSubtree(w)       // the whole subtree, e.g. after a theme change of the area
+w.SetDirtyOnChildInvalidate(true) // draws from its children's state (focus frame over buttons)
+widget.InvalidateRect(r)          // unclaimed area: everything under it is redrawn
+```
+
+- `InvalidateArea` and `MarkDirty` cost less than `widget.InvalidateRect`, which
+  redraws everything under the area, neighbours included.
+- A container that draws children outside `Children()` (inactive tabs, tray icons)
+  implements `ExtraChildren() []widget.Widget`. Without it, the container's
+  `Invalidate` does not reach those children.
+- An image rewritten in place is shown only after `eng.InvalidateImageCache(img)`
+  (`nil` — the whole cache); from `Draw` use `widget.InvalidateImageCache(ctx, img)`.
+  A `BlitPixels` buffer is re-read in every frame where it is drawn; nothing else
+  is needed.
+
+
 ### HiDPI
 
 Widgets live in LOGICAL pixels (like WPF DIPs); frame buffers are physical
@@ -2763,6 +2819,10 @@ the compositor: the surface's fractional scale, or, without that extension,
 the integer scale of the output the window is shown on; it may change on the
 fly. On macOS, and on top of any detection, the scale is set by the
 `HEADLESS_GUI_SCALE=1.5` environment variable.
+
+`SetScale` keeps the logical size and grows the physical one. When the frame size
+is set from outside (a remote desktop client) and the UI should be larger, see
+"UI scale at a fixed frame size" (v4.0).
 
 ### Composition input (IME)
 
@@ -3464,9 +3524,10 @@ open in **their own OS windows** rather than being drawn inside the main window:
   a regular one) forms a stack of windows.
 - **Dropdowns and menus** open in a small window at the target point and are
   **not clipped** by the main window's edge.
-- Works natively on **Windows (Win32)** and **Linux (X11)**. On **Wayland,
-  macOS and headless** it falls back to the previous behavior: everything is
-  drawn into the canvas (functionally identical, just within the window).
+- Works natively on **Windows (Win32)** and **Linux (X11)**; menus and dropdowns on
+  **Wayland** are `xdg_popup` child popups (since v3.28). Modal dialogs on Wayland, and
+  everything on **macOS and headless**, use the old fallback: drawn into the canvas
+  (functionally identical, just within the window).
 
 ```go
 dlg := widget.NewDialog("Settings", 1000, 700) // may be larger than the window
@@ -3813,7 +3874,7 @@ win.Run()
 ```
 
 The units are those of the rest of the window API: `x`, `y` are screen coordinates
-of the top-left corner (as in `Monitor.Bounds` and `Native().GetPosition()`), `w`,
+of the top-left corner (as in `Monitor.Bounds` and `Window.Position()`), `w`,
 `h` are **logical** pixels (like `SetMinSize` and the engine canvas): the window
 multiplies them by the scale. The scale is taken from the monitor the rectangle
 falls on (Win32), so a saved "800x600" stays the same to the eye on a second
@@ -3823,7 +3884,7 @@ position still applies. Where the window ends up is the application's decision:
 monitor.
 
 The values are applied once. A call after `Run` changes nothing: a running window is
-moved the old way (`Native().SetPosition`), and `Window.SetSize` resizes it (see "Window size from the program" below). It works together
+moved by `Window.SetPosition` (see "Window style, owner and position after show"), and `Window.SetSize` resizes it (see "Window size from the program" below). It works together
 with `SetFullscreen` before `Run`: the window is created with these bounds first,
 and leaving full screen returns exactly them (and "maximized", if it was set).
 `IsMaximized` is `true` after a maximized start.
@@ -4037,11 +4098,66 @@ Before `Run()` the method always returns `nil`: there is no backend yet, so
 there is nothing to judge support by. The icon is remembered and applied when
 the window is created — the same way `SetTrayIcon` behaves.
 
-### Tray and notifications (Windows)
+### Window style, owner and position after show (v4.0)
+
+`window.Style` sets the look and behaviour of the OS window; the owner, the
+Z order and the position change on a shown window. Every operation answers
+honestly whether it was done: on X11 — whether the request was sent (the
+window manager decides).
+
+```go
+win.SetStyle(window.Style{Borderless: true, Tool: true}) // no OS frame, no taskbar button
+win.SetOwner(mainWin)  // always above mainWin, minimised with it; nil removes the owner
+win.Raise()            // to the top of the Z order without activation
+win.Lower()            // to the bottom
+win.SetPosition(x, y)  // top-left corner, physical screen coordinates
+x, y, ok := win.Position()
+```
+
+- `Borderless` — no resize zones, OS shadow or rounding; `Tool` — a tool window,
+  without a taskbar or Alt+Tab entry; `Owned` — the window has an owner (set by
+  `SetOwner`). `Style()` reports what is in effect.
+- Before `Run` the style and the owner are remembered and built into window
+  creation (`true` means "remembered"); the position is set by
+  `SetInitialBounds`. `SetPosition` and `Position` work on a shown normal window
+  only: a maximized, full-screen or minimised one answers `false`.
+- Closing the owner releases the window: it stays open, without an owner.
+- Windows: an "always on top" owner makes the window always on top too; Windows
+  does not let a background process raise a window above another process's active
+  window — `Raise` answers `false`. X11: everything is a request to the window
+  manager. Wayland: `Borderless` only (the protocol has no owner, Z order or
+  position for a window of another connection). macOS: `false`.
+
+### A facade without capabilities: `window/minimal` (v4.0)
+
+`window/minimal` is the same facade as `window` without the window capabilities:
+accessibility, tray and notifications, file drag and drop, shell services (opening
+links, system theme and accent, languages). There is one `Window` type and the API
+names are the same; switching a program means changing the import path:
+
+```go
+import window "github.com/oops1/headless-gui/v4/window/minimal"
+```
+
+Without a capability its methods answer as on a windowing system that cannot do it:
+`SetTrayIcon` after `Run` and `ShowBalloon` — `ErrTrayUnsupported`,
+`BeginDragFiles` — `false`, `OpenURL` after the link check — `ErrOpenUnsupported`,
+the theme is "unknown". `HideToTray` and `RestoreFromTray` are window operations
+and work. A capability can be wired one by one with a blank import of its package
+(`platform/a11y`, `platform/tray`, `platform/dnd`, `platform/shell`). If any package
+of the program imports `window`, the capabilities are wired for every window of the
+process — libraries should import `window/minimal`. The backend capability matrix
+is in `window/README.md`.
+
+### Tray and notifications (Windows, Linux)
 
 `window.Window` can drive the notification area. Methods may be called before
-`Run()` (state is applied when the window is created) or from UI handlers. On
-non-Windows platforms they are polite no-ops (return an error/nothing).
+`Run()` (state is applied when the window is created) or from UI handlers.
+Windows — Shell_NotifyIcon; Linux (X11 and Wayland) — StatusNotifierItem with a
+menu drawn by the panel (GNOME needs the AppIndicator extension) and
+`org.freedesktop.Notifications` notifications, without a tray icon. On macOS and in
+`window/minimal` they are polite no-ops (return an error/nothing). The icon is
+removed when the window closes.
 
 ```go
 win := window.New(eng, "My App")
@@ -4284,7 +4400,16 @@ ok := win.SetLockKeys(window.NumLock)
 - **Wayland.** The last `wl_keyboard.modifiers` (`mods_locked`); which bits are Caps and
   Num Lock comes from the compositor's keymap. Before the first `modifiers` and after the
   focus is lost `known == false`. Scroll Lock is usually not a modifier and is invisible;
-  so is Kana Lock. A client may not change the state: `SetLockKeys` is `false`.
+  so is Kana Lock. `SetLockKeys` (v3.44.1) works through `zwp_virtual_keyboard_manager_v1`
+  when the compositor advertises it: the window gets a virtual keyboard with the
+  compositor's keymap and is handed `modifiers` with the wanted bits in `mods_locked`; no
+  key is pressed, so the application receives no KeyDown/KeyUp. `true` — the next
+  `wl_keyboard.modifiers` showed what was asked (it waits at most 300 ms, so call it from
+  an application goroutine, not from a window event handler: from there the request goes
+  out but the answer is always `false`). `false` — no manager, the window has no keyboard
+  focus or the state is not known yet (no requests are made), Kana Lock or a Scroll Lock
+  without a modifier in the keymap was asked for (the rest is applied), or the compositor
+  did not apply the `modifiers` to the whole seat.
 - **macOS.** `known == false`, `SetLockKeys` is `false`.
 
 Inside `SetOnActivate(true)` the state may not have arrived yet on Wayland: the
@@ -4811,7 +4936,7 @@ With neither (or a context that cannot do Mica) the layer is a plain
 `BackdropSpec.Fallback`, the theme colour. The blurred wallpaper is computed
 once per "wallpaper + radius"; afterwards a layer is a row copy and does not
 depend on the previous frame, so a partial redraw equals a full one
-(`engine/mica.go`, unlike acrylic, which needs `backdropdamage.go`).
+(`core/raster/mica.go`, unlike acrylic, which needs `backdropdamage.go`).
 
 The Windows 11 profile stays solid by default (Mica is expensive over remote
 desktop when windows move: a large smooth area changes on every move). The
@@ -4855,7 +4980,9 @@ get zero or at most the metric `theme.KeyMotionReduceFunctionalMS`. A consumer
 classifies its own animation with `theme.RegisterAnimationKind(key,
 theme.AnimFunctional)`; widgets with their own durations wrap them in
 `widget.MotionDur(d)`. Timers (tooltip delays, the clock, the caret) are not
-touched.
+touched. The same mode for one engine instead of the whole process, plus two
+more — no motion and remote desktop — is set by `Engine.SetMotionProfile` (see
+"Engine motion profile", v4.0).
 
 **Different DPI on two monitors.** The engine has one scale per canvas:
 `Engine.SetScale(k)` grows the physical buffers, fonts and vector icons are
@@ -5444,35 +5571,558 @@ narrow interface — when the API changes, only that package needs editing.
 
 ---
 
+### Engine counters and the draw-contract check (v4.0, in progress)
+
+Two tools for those who tune the frame and look for the reason it is slow or why the
+window keeps holes in it.
+
+```go
+s := eng.Stats() // engine.Stats; safe from any goroutine, takes no locks
+// Numbers over an interval are the difference of two snapshots:
+// s.Frames, s.FramesSkipped, s.FramesLost, s.Tiles, s.Moves,
+// s.DrawNanos, s.DiffNanos, s.DeliverNanos, s.Posted, s.PostedRun, s.PostQueue
+
+eng.SetDrawContractCheck(true) // debugging: logs the widget that changes itself inside Draw
+```
+
+- Counters only grow from the engine's creation. `FramesLost` counts frames dropped
+  from the `Frames()` channel because the consumer was slow; a sink (`SetFrameSink`)
+  never loses a frame. `FramesSkipped` counts loop ticks that produced no frame
+  because nothing changed. `PostQueue` is how many functions from `Post` still wait.
+- On Windows the clock steps by about half a millisecond: a single frame can read as
+  zero, but sums over many frames are right.
+- Contract check: a widget that calls `Invalidate`, `InvalidateRect`, `SetBounds`,
+  `AddChild` or `RemoveChild` from inside `Draw` produces one log line per widget for
+  the engine's lifetime, with the widget type and its path from the root. Notifications
+  from other goroutines and starting an animation from `Draw` (see rule 2 of the draw
+  contract) are not violations.
+- `Stop` turns the check off: the trace is shared by the whole process.
+- If you write a container that walks its children with its own loop instead of
+  `DrawChildren`, call `widget.DrawTraced(child, ctx)` instead of `child.Draw(ctx)`, and
+  `widget.DrawOverlayTraced` for overlays. Without it the path in the log stops at the
+  container.
+
+### Failure policy (v4.0, in progress)
+
+A panic in a widget's or a consumer's code no longer kills the process. The engine
+catches it at its own boundary, marks the culprit and carries on. The decision and its
+reasons are in `docs/adr/0001-failure-policy.md`.
+
+```go
+eng.SetFailurePolicy(engine.FailureIsolate)   // default outside go test
+eng.SetFailurePolicy(engine.FailurePropagate) // old behaviour: the panic goes on
+
+eng.SetOnPanic(func(info engine.PanicInfo) {  // called for every caught panic
+    log.Printf("%s: %v\n%s", info.Where, info.Value, info.Stack)
+})
+
+n := eng.Stats().Panics // how many panics the engine has caught
+widget.ClearBroken(w)   // clear the mark from a widget that has been fixed
+```
+
+| Boundary | What is caught | What happens after the panic |
+|---|---|---|
+| Frame drawing | `Draw` of any widget, overlays, modal windows, popup windows | the frame is not delivered; the next frame is full; the culprit is marked |
+| `Post` queue | each function on its own | the other queued functions still run |
+| Timers `After`, `Every` | the timer's function | `Every` keeps firing |
+| Animation ticks | a tick of `Animate`/`AnimateOwned` | the other animations of the engine keep running; the failed one is removed |
+| Input | handlers of `SendKeyEvent`, `SendMouseMove`, `SendMouseButton`, `SendMouseWheelPixels`, `SendMouseWheelRaw`, `SendTouch`, `SendFilesDropped`, `SendPointerLeave`, `ActivateAccessible`, `AccessAction` | mouse capture is released and the press consumer is forgotten; focus does not change |
+| Frame consumer | `FrameSink.Present` | the frame counts as delivered and goes to the `Frames()` channel |
+
+**A broken widget.** A panic in `Draw` with the contract check off does not name the
+culprit at once. The engine turns on the trace of drawing widgets and asks for a full
+frame. A second panic names the widget, marks it broken (`widget.MarkBroken`) and
+turns the trace off again. If `SetDrawContractCheck(true)` is already on, the culprit is
+named from the first panic.
+
+A broken widget is no longer drawn. A grey rectangle with a red border and a diagonal
+cross takes its place, and its overlays are not drawn. `widget.IsBroken(w)` tests the
+mark, `widget.BrokenWidgets()` lists broken widgets, and `widget.ClearBroken(w)` brings
+a widget back.
+
+**Under `go test`** the default policy is `FailurePropagate`, so tests see panics as
+before. A test that checks isolation sets `FailureIsolate` explicitly.
+
+**What the policy does not do.** It does not interrupt a hung widget: Go cannot stop a
+goroutine. It does not close a modal window whose `Draw` failed: a placeholder takes its
+place, and the program closes the window itself (`CloseModal`). It does not undo changes
+a widget made before the panic. The operating-system window (the event pump in `window`)
+is not protected yet: that is stage 9 of the plan.
+
+### Scene and external surfaces (v4.0, in progress)
+
+A window of another program can be shown on the engine's screen next to the engine's own
+windows: in the same widget tree, in one Z order, with the same input. The decision is in
+`docs/adr/0002-scene.md`.
+
+```go
+surf := widget.NewExternalSurface()          // the program's buffer, no copy into the engine cache
+surf.SetBounds(image.Rect(20, 20, 420, 300))
+surf.SetBuffer(buf, true)                    // a *image.RGBA buffer, RGBA pixels
+surf.SetInput(widget.SurfaceInput{          // input of the program's window, in its coordinates
+    Move:   func(x, y int) { /* the pointer is over the window */ },
+    Leave:  func() { /* the pointer has left */ },
+    Button: func(e widget.MouseEvent) bool { return true },
+    Key:    func(e widget.KeyEvent) { /* a key while the window has focus; Tab too */ },
+    Focus:  func(on bool) {},
+})
+surf.SetOpaqueRegion([]image.Rectangle{...}) // opaque parts of the buffer, nil clears it
+surf.SetContentHint(widget.ContentVideo)     // ContentUnknown, ContentStatic, ContentVideo
+root.AddChild(surf)
+
+panel.RaiseChild(surf)                       // raise above the siblings; LowerChild, InsertChildAt
+```
+
+- **Input.** Event coordinates are in the program window's units. A left press over the
+  window captures the mouse until release, even if the pointer moves onto the taskbar. A
+  window with `Key` takes Tab for itself and sits outside the shell's Tab order. `SetInput`
+  with a zero structure removes the input. Without `SetInput` the surface behaves as before.
+- **Pointer.** Motion goes only to the topmost window under the pointer. If another widget
+  lies over the window at the pointer (for example the taskbar), the window receives `Leave`
+  and no motion.
+- **Video.** A surface counts as video when it updates at least `engine.VideoRate` times per
+  second (12 by default); it stops when it updates slower than half the rate for longer than
+  `engine.VideoHold` (5 s). `SetContentHint` overrides the rate. The thresholds are package
+  variables of `engine`; set them before `Start`.
+- **Frame with video.** `Frame.Videos` lists the windows showing video: the number
+  (`SurfaceID()`), the rectangle on the canvas, and `Cover` — what lies over it: windows
+  above in Z order, open menus, the dimming of a modal window. Tiles of the visible part of
+  a video window appear in `Frame.Regions` as `RegionVideo`, with the number in
+  `Region.VideoID`.
+- **Modal window.** While it is open, keys go only to the widget inside it. Focus outside the
+  dialog is kept and returns after the dialog closes.
+- **Shadow.** A window's shadow is built from a pre-blurred template: once per combination of
+  corner, radius and colour, with no blur on every frame. `Engine.SetShadowCache(false)`
+  returns to the direct blur, for comparison.
+- **Window move.** A move is announced together with the shadow margin, so the shadow of a
+  dragged window moves as a copy, not as tiles.
+
+- **Your own output buffers.** `Engine.SetSurfaces(bufs, stride, format)` takes two to
+  four consumer buffers of one size: the engine draws the frame straight into a free one
+  and names it in `Frame.Surface` (from one; 0 means the engine's own or the only buffer).
+  A buffer handed to the consumer comes back with `ReleaseSurface(n)`; with none free the
+  frame is skipped (`Stats.FramesSkipped`) and the damage is kept. Before a frame the
+  engine copies into the buffer what changed while the consumer held it. A resolution or
+  scale change drops the set — set it again.
+- **Frames without tile bytes.** A consumer that reads pixels from its own buffers does not
+  need tile copies in the frame: `Engine.SetFrameTileData(false)` leaves `Frame.Tiles` as
+  change locations only (`Data == nil`).
+- **B,G,R,A buffers.** `ExternalSurface.SetBGRA(true)` — a `wl_shm` or DIB buffer goes onto
+  a `FormatBGRX` canvas without swapping channels.
+
+**Not there yet.** A separate `ShadowCaster` interface (the window draws its own shadow);
+the `core/scene` package (stage 7). The WinLine session runs on the scene behind a switch;
+the old path is not removed yet. RemoteApp windows (RAIL) are not part of the scene.
+
+### UI scale at a fixed frame size (v4.0, in progress)
+
+`SetScale(k)` keeps the logical canvas size and grows the physical one: a 1280×800
+window at 1.5 is drawn at 1920×1200 — that is how HiDPI works for an OS window. A
+remote desktop client needs the opposite: the frame size is set by the connection,
+and the user wants a larger UI.
+
+```go
+eng := engine.New(1920, 1080, 60)
+eng.SetScaleWithin(1.5)          // frame 1920×1080, scene 1280×720 logical points
+eng.SetPhysicalResolution(2560, 1440) // the client changed resolution — same scale
+eng.ScaleWithin()                // true: "scale within the frame" mode
+```
+
+- **Logical size** is ⌈W/k⌉×⌈H/k⌉, rounded up so the scene covers the whole frame.
+  `CanvasSize()` returns it, `PhysicalSize()` returns the frame size.
+- **The mode sticks.** `SetScale` in it also keeps the physical size;
+  `SetPhysicalResolution` changes the frame without touching the scale and turns the mode
+  on by itself; a plain `SetResolution` (logical size) leaves the mode.
+- **Everything else is as with `SetScale`.** Events arrive in physical pixels and are
+  divided by the scale, damage and frames are physical, `ExternalSurface` places its buffer
+  1:1. `SetSurfaces` buffers are sized to the physical size and must be set again after a
+  scale change.
+
+### Engine motion profile (v4.0, in progress)
+
+"Reduced motion" (`theme.FlagMotionReduce`) is a theme setting, which means it applies to
+the whole process. The motion profile belongs to one engine: a remote session and the
+local screen of one process live with different ones, and what decides is where the frame
+goes.
+
+```go
+eng.SetMotionProfile(engine.MotionRemote) // MotionFull, MotionReduced, MotionOff, MotionRemote
+eng.MotionProfile()
+```
+
+- **`MotionReduced`** — like the theme flag, but for this engine: decorative animations
+  are instant, functional ones are shortened.
+- **`MotionOff`** — no motion: functional animations are instant too, and a non-looping
+  animation, however it was started, is finished on its next step. Looping ones (activity
+  indicators) and timers keep running.
+- **`MotionRemote`** — durations as declared, but no more than `engine.RemoteMotionSteps`
+  (3) intermediate states: every animation frame goes over the network.
+- **The theme flag and the profile combine:** motion is reduced if either wants it. A
+  component that decides on its own asks `theme.Manager.ReducesMotion()`; `MotionReduced()`
+  is the theme flag only.
+- **How the engine knows its profile.** By goroutine: the loop, `Post`, animation ticks,
+  and — while any engine's profile is not `MotionFull` — a foreign goroutine while the
+  engine works on it (input, `RenderOnce`, `RenderFrameNow`). `widget.MotionDur`,
+  `Manager.GetAnimation` and `widget.CurrentMotionProfile()` see it.
+- **Clock animations.** An animation whose tick measures time rather than drives a
+  transition (scroll physics, blinking) is marked `a.Clock = true`: the profile neither
+  quantizes it nor finishes it early.
+- **Secondary windows** (modal dialog, floating panel) get the parent's profile when they
+  are created.
+
+For WinLine: the remote session is `MotionRemote`, a client without menu animations is
+`MotionOff`, the local screen is `MotionFull`.
+
+### Menu and popup transitions (v4.0, in progress)
+
+Menus, dropdown lists, colour pickers and date-picker calendars appear and disappear with a
+fade and a slide from their anchor. One call turns it on; duration and curve come from the
+theme applied with `ApplyThemeProfile` or `SetThemeProfile`.
+
+```go
+eng.ApplyThemeProfile(tm)          // a theme with menu.open, menu.close tokens
+eng.SetOverlayTransitions(true)    // off by default
+```
+
+- **How it works.** The engine snapshots the overlay area (with room for the shadow) before
+  and after `DrawOverlay` and blends the snapshots by progress. While nothing lies over the
+  transition (top layer, no overlap with the tooltip or other overlays), steps redraw
+  neither the tree nor `DrawOverlay`; otherwise a step redraws the area layer by layer. The
+  last frame is the overlay drawn directly, byte for byte. If the tree under the menu
+  changes mid-transition, the snapshots are refreshed.
+- **Disappearing.** The widget turns the overlay off at once, but on screen it still fades
+  out: in its own place in the drawing order, it no longer gets input, and video under it
+  does not land on top. Reopening mid-fade continues from the current value.
+- **The slide** is the metric `theme.KeyMenuOpenOffset` (`menu.open.offset`, 8 points in
+  Windows 11): a menu below its anchor slides in from above, one above it from below
+  (`widget.OverlayAnchorer`; `PopupMenu` reports its `Show` point).
+- **Motion profile.** `MotionReduced` and `MotionOff` — no transitions, `MotionRemote` —
+  three steps.
+- **OS popup windows** (`SetPopupSink`) transition by window opacity and position:
+  `PopupFrame.Transition` carries `Opacity`, `Offset` and `Closing`, and a host that
+  declares `Engine.SetPopupFade(true)` keeps the window of a disappearing menu until the
+  transition ends. `window.Window` and the dialog and panel hosts declare it themselves.
+  Win32 — whole-window opacity (a layered window); X11 with a compositor — a copy of the
+  frame with a multiplier; X11 without a compositor and Wayland — no transition: the window
+  appears and disappears at once.
+- **Your own overlay** only needs `OverlayBounds` (`widget.OverlayBoundsProvider`): without
+  it the overlay is drawn at once, with no transition. One that animates itself
+  (`desktop.Flyout`) opts out with `widget.SelfAnimatedOverlay`; a shadow reaching further
+  than usual past `OverlayBounds` is reported by `widget.OverlayMarginer`.
+- **Submenus** fade in by themselves (`PopupMenu.SubMenuFade` from the `submenu.open`
+  token): to the engine a cascade is one overlay.
+
+Motion and soft shadow tokens of the built-in profiles (shadows under the `shadow.soft`
+flag):
+
+| key | Windows 11 | Windows 10 | macOS | Windows 2000 |
+|---|---|---|---|---|
+| `menu.open` | 200 ms out-back | 150 ms out-cubic | 180 ms out-cubic | 0 |
+| `menu.close` | 120 ms | 100 ms | 150 ms | 0 |
+| `submenu.open` | 150 ms | 120 ms | 120 ms | 0 |
+| `start.open` | 250 ms | 200 ms | 200 ms | 0 |
+| `flyout.open` | 200 ms | 150 ms | 180 ms | 0 |
+| menu and panel shadow | blur 20, offset 8 | 8 and 4 | 16 and 6 | flat, no tokens |
+| window and dialog shadow | 32 and 12 | 16 and 6 | 28 and 10 | — |
+
+Closing and panel curves are out-cubic. An undeclared key takes a fallback: `menu.close` —
+`menu.open`; the Start menu — `start.open`, `flyout.open`, then `menu.open`; other panels —
+`flyout.open`, then `menu.open` (`theme.Manager.GetAnimationFirst`). All keys are
+decorative: "reduced motion" zeroes them.
+
+**Not there yet.** Popup window transitions on Wayland (a popup has one buffer, and a
+dropped frame would leave it half-transparent) and an X11 check on a test machine; a
+separate engine-level transition for submenus; tooltip and modal transitions by the same
+mechanism.
+
+### Shared glyph cache of the process (v4.0, in progress)
+
+When several engines run in one process — one per monitor, hosted dialogs, a second
+desktop — each glyph is rasterised once per process, not once per engine. Nothing has to be
+called; the memory limit is one call:
+
+```go
+engine.SetGlyphCacheBudget(128 << 20) // bytes; 0 or less means the default, 64 MB
+```
+
+- Rasters are shared per font and size. Masks differ by DPI, subpixel text mode and text
+  quality level: two engines with the same settings get one mask, with different settings
+  each gets its own.
+- When the limit is exceeded, whole sizes of the least recently used fonts are evicted until
+  the cache is at half the limit. An evicted glyph is rasterised again the same way: the
+  frame does not change because of eviction.
+- `Stop` of an engine does not touch the shared cache: the rasters stay for the other engines
+  of the process.
+- The same font is parsed once per process: its contents are compared, not its address. The
+  first registration keeps the font bytes; registering the same bytes again does not keep a
+  second copy.
+- For several engines sharing a font, register the files with `RegisterFontDir`: its files
+  are read through the process file cache. `RegisterFontFile` and `RegisterFontFS` read the
+  file again on every call.
+- Rasterising a glyph that misses the shared cache costs about 15–25 % more than it did with a
+  per-engine cache: the cache has two levels now. Hits cost the same as before.
+- More than 256 different fonts in one process is rare: beyond that, fonts that drop out of
+  the accounting keep working, but the memory limit no longer applies to them.
+
+
+### Command path, tiled raster and one frame buffer (v4.0, in progress)
+
+A frame is built in three steps: the tree records drawing commands, the commands
+are rasterised by 64×64 tiles in a worker pool, and only the changed tiles go to
+the consumer. Everything is on by default; the switches are for comparison and
+diagnostics.
+
+```go
+eng.SetCommandPath(false)  // the previous path: each widget's Draw straight into the canvas
+eng.SetTiledRaster(false)  // the command list straight into the canvas on one goroutine
+eng.SetHashDiff(false)     // rasterise and diff every selected tile, no skipping
+eng.SetSingleBuffer(false) // two copies of the frame instead of one
+```
+
+- The picture is the same on every path: tests compare frames byte for byte.
+- A tile whose commands did not change since it was last drawn is neither
+  rasterised nor compared. A frame with no changes draws no tile at all. The tile
+  hash covers images (see `InvalidateImageCache`) and blurred backdrops;
+  direct widgets (`ExternalSurface`) are drawn every frame.
+- A frame without a declared damage (`RenderOnce`, rendering every tick) re-records
+  the whole tree, because the application may have changed something it did not
+  report. This recording is the main cost of an unchanged frame: on a scene of 21k
+  commands it takes several milliseconds even when nothing changed.
+- A partial frame from `InvalidateRect` costs about twice the direct path: an
+  unclaimed damage re-records the whole tree under the area. If that matters,
+  switch back to the direct path with `SetCommandPath(false)`.
+- Small frames (up to 4 tiles) and a single processor (`GOMAXPROCS = 1`) are
+  rasterised without the pool.
+- A consumer that receives frames into its own buffer (`SetSurface`,
+  `SetSurfaces`) gets a full output buffer: it contains the tiles the hash diff
+  skipped as well.
+- Overlays, modal windows and the tooltip are recorded as commands. The exception
+  is transitions (`SetOverlayTransitions(true)`): while a menu under a transition
+  is open, it and everything above it is drawn after the rasterisation on every
+  frame. Without transitions there is no such cost.
+- `Stats` counters: `Recorded` and `Retained` — commands recorded and taken from
+  retained lists; `TiledFrames`, `BlurHits`, `BlurMisses` — tile frames and blur
+  cache hits; `TilesSkipped` — tiles the hash diff did not touch; `BufferBytes` —
+  bytes of the frame buffers (about W·H·4 with one buffer).
+
+
+### Tree owner, measuring services and the popup arena (v4.0, in progress)
+
+A widget tree belongs to the engine it was handed to: `SetRoot`, and
+`ShowModal` (a modal dialog inside the canvas). A widget change wakes only that
+engine, not every engine of the process: two windows, each with its own engine,
+do not redraw each other.
+
+```go
+eng.SetRoot(root)  // the root and its children belong to eng
+eng.ShowModal(dlg) // a modal dialog inside the canvas belongs to eng too
+eng.Stop()         // ownership is released; animations of its loop finish without OnDone
+```
+
+- A subtree handed to another engine moves to it; the previous root is
+  detached.
+- A tree not yet handed to an engine notifies every engine, as before. A widget
+  not yet inserted into a tree also notifies every engine: insert it into the
+  tree first, then configure it.
+- `widget.InvalidateRect` still wakes every engine: it is an unclaimed area
+  with no addressee. Declare your own areas with `InvalidateArea`.
+- The root layout uses the fonts of its engine: windows with different DPI get
+  their own scale.
+
+Owner services that widgets of the tree use:
+
+- `widget.MeasureTextFor(w, text, pt)`, `MeasureTextFontFor`,
+  `MeasureRunePositionsFor` and `FontMetricsFor` measure with the fonts, DPI
+  and scale of the engine of the tree of widget `w`. Measure your own widgets
+  with them rather than `MeasureUIText`, or a window with another DPI gets
+  foreign widths. Outside a tree (before `SetRoot`) they answer with the most
+  recently created engine, as `MeasureUIText` does.
+- A menu that is not a child of the tree (a custom context menu) is attached to
+  a host widget: `menu.SetHost(w)`. The menu then measures its labels and
+  reports changes to the host's engine.
+- An animation of a widget (`widget.AnimateOwned(w, …)`) is stepped by the loop
+  of the engine of its tree. An engine that is not running and produces frames
+  only through `RenderOnce` does not step its animations: a running loop picks
+  them up, if there is one.
+- `<text>` in an SVG icon of a tree is drawn with the fonts of the tree's engine
+  if the icon is already in the tree. An icon parsed before insertion is drawn
+  with the global fonts.
+
+The popup arena. Open menus and lists in OS windows (`SetPopupSink`) are drawn
+into one shared canvas of the engine, not into a separate canvas per menu. The
+popup memory is the largest open popup plus the images of all open ones.
+`Stats().PopupBytes` reports it; with no popups open it is zero.
+
+
+## Live tiles of the Start menu (v4.0, in progress)
+
+A Windows 10 tile can show live content: a clock, mail, weather. A source
+implements `desktop.TileSource`, and the tile receives it in the `Live` field:
+
+```go
+clock := desktop.NewFakeTileSource(desktop.TileContent{Title: "15:09"}) // in an application: your own source
+menu.Post = eng.Post // updates from the source's goroutine go to the engine's thread
+menu.SetTileGroups([]desktop.TileGroup{{ID: "work", Tiles: []desktop.Tile{{
+    ID: "clock", Size: desktop.TileMedium,
+    Content: desktop.TileContent{Title: "Clock"},                // until the first state
+    Live:    desktop.LiveTile{Source: clock},                    // Queue and Period are optional
+}}}})
+```
+
+- A source hands states to the function passed to `Subscribe` and returns an
+  unsubscribe function. It usually sends the current state at once, on subscription.
+- A subscription lives only while the menu with tiles is open: a closed menu
+  does not call the source and does not wake frames.
+- The state queue keeps the last `Queue` states (default 5) and cycles through
+  them every `Period` (default 6 s). A new state is shown at once.
+- The transition between states is set by the theme token `tile.cycle`
+  (Windows 10: 300 ms, `out-cubic`). The transition style is the metric
+  `tile.cycle.kind`: 0 is a slide, 1 is a flip. The transition is composed of
+  two raster images, so a transition frame redraws only the tile.
+- The transition is instant under reduced motion, the `MotionOff` and
+  `MotionRemote` profiles, a zero duration, and a layout without tiles. A repeat
+  of the same content and the first state of a new subscription start no
+  transition.
+- For demonstrations and tests there is `desktop.NewFakeTileSource(initial…)`
+  with `Set` and `Current`.
+
+The model is described in `docs/adr/0010-live-tiles.md`.
+
 ## Module Structure
 
 ```
-go.mod:  module github.com/oops1/headless-gui/v3
-  require golang.org/x/image
-
-go.mod:  module github.com/oops1/headless-gui/v3/window
-  require github.com/oops1/headless-gui/v3 => ../
-  require github.com/ebitengine/purego, golang.org/x/sys
+go.mod:  module github.com/oops1/headless-gui/v4
+  require github.com/ebitengine/purego, github.com/go-text/typesetting,
+          golang.org/x/image, golang.org/x/sys
 ```
 
-Consumer application imports the main module:
+There is one module: the native window (`window`, `window/minimal`), the
+platform (`platform/...`) and the engine are its packages. A consumer
+application requires it as a whole:
 
 ```
-require github.com/oops1/headless-gui/v3 v0.x.x
+require github.com/oops1/headless-gui/v4 v4.0.0
 ```
 
-If native window is needed:
-
-```
-require github.com/oops1/headless-gui/v3/window v0.x.x
-```
+Moving from v3: replace `github.com/oops1/headless-gui/v3` with
+`github.com/oops1/headless-gui/v4` in imports (since 4.0.0 the module path ends
+with `/v4`, as Go requires for major version 4).
 
 For local development use `replace`:
 
 ```
-replace github.com/oops1/headless-gui/v3 => ../GuiEngine
-replace github.com/oops1/headless-gui/v3/window => ../GuiEngine/window
+replace github.com/oops1/headless-gui/v4 => ../headless-gui
 ```
+
+### Engine packages `core/` (v4.0, in progress)
+
+Raster, text, the drawing context, input, the frame loop and overlays moved out of `engine`
+into separate packages. An application does not need to import them: the old names are kept.
+
+```
+core/draw          DrawContext and its optional capabilities (from module packages: only core/geom)
+core/geom          geometry, image filters
+core/text          fonts, glyph cache, shaping, text quality level (no widget, no engine)
+core/raster        the engine's canvas Canvas: tiles, diff, shadows, blur, Mica, text (no widget, no engine)
+core/input         the engine's input: mouse, keyboard, touch, focus, capture, IME, cursor (widgets, no engine)
+core/loop          the frame loop: goroutine, pacing, damage, Post, timers (no widget, no engine)
+core/overlay       host popups, modals outside the canvas, tooltip (widgets, no engine)
+internal/workpool  the process worker pool, shared by raster and the engine
+internal/lockcheck static check of the lock order (tests only)
+```
+
+`widget` imports `core/draw`; `engine` imports `core/raster`, `core/input`, `core/loop` and
+`core/overlay`. `core/input` and `core/overlay` see widgets but not `engine`: the engine hands
+itself to them through `Host` interfaces (the root, modal windows, scale, invalidation, the
+`Post` queue and more). `core/loop` sees neither widgets nor the engine.
+
+The old names are aliases: `engine.Canvas`, `engine.FontCache`, `engine.TextQuality`,
+`engine.LCDOrder`, `engine.PixelFormat`, `engine.FormatRGBA`, `engine.FormatBGRX`,
+`engine.MaxCanvasSide`, `engine.BlurRGBA`, `engine.OpaqueBands` and others; `widget.DrawContext`
+is an alias of `draw.DrawContext`; `engine.Timer`, `engine.Pacing`, `engine.FrameSink` are
+aliases of the loop types; `engine.PopupFrame`, `engine.PopupTransition`, `engine.ModalHost`
+are aliases of the overlay types. Application and widget code does not change. `engine.Canvas`
+has more exported methods now — the ones the engine uses to work with its own canvas (`Back`,
+`SetPixelFormat`, `DefaultFont` and others). An application does not need them.
+
+Lock order (ADR-0011): the engine's `frameMu` is the only lock under which other locks are
+taken; every other lock is a leaf: nothing else is taken under it, not even `frameMu`, and no
+widget or application code is called under it. `internal/lockcheck` checks the lock order in the
+tests of `engine`, `core/input`, `core/loop` and `core/overlay`: a call through a field into
+another package counts as taking that package's locks if, by that package's model, the method
+takes a lock or passes the call on. Calls through interfaces and function literals are not seen
+by the check; for them the rule rests on review. New code in these packages must keep the rule:
+a short leaf section with no calls out.
+
+### Widget packages `widget/*` (v4.0, in progress)
+
+`widget` is split into packages (ADR-0012). Programs need no changes: `widget` keeps the
+same API, but it is now a facade: for every name of the packages below it holds a type
+alias, a function wrapper with the same documentation, a constant or a variable.
+
+```
+widget/base          core: Widget, Base, DrawContext, events, themes, layouts,
+                     controls, accessibility, the portable part of the clipboard
+widget/xaml          markup loading: parser, properties, data binding, resources
+                     and styles, templates, the tag registry
+widget/text          TextInput (and the password field), TextBox, IME composition
+widget/richtext      RichText
+widget/chrome        Window
+widget/dock          DockPanel, DockManager, DockPane; Border in markup
+widget/dialog        Dialog, MessageBox, input, progress, the file dialog
+platform/clipboard   the system clipboard per OS (Windows, macOS, Linux)
+widget               the facade over all of them; the JSON loader (LoadUIFromJSON)
+```
+
+Dependencies go one way: everything → `widget/base`; `text`, `richtext`, `chrome`,
+`dock` → `xaml` (only to register their tags); `dialog` → `text`;
+`platform/clipboard` → `base`; the facade → all. The core cannot import a package above
+it: that would be an import cycle, so the compiler keeps the order.
+
+A thin build skips the facade and imports only what it needs. Widget packages register
+their XAML tags explicitly (the facade does it itself on the first `LoadUIFromXAML*`);
+`platform/clipboard` installs the system clipboard:
+
+```go
+import (
+	"github.com/oops1/headless-gui/v4/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/text"
+	"github.com/oops1/headless-gui/v4/widget/xaml"
+
+	_ "github.com/oops1/headless-gui/v4/platform/clipboard"
+)
+
+func main() {
+	text.RegisterXAML(xaml.Default()) // <TextBox>, <TextInput>, <PasswordBox>
+	root, named, err := xaml.LoadUIFromXAML(data)
+	// ...
+	_ = base.CurrentTheme()
+}
+```
+
+A program that never loads XAML carries no parser in its binary (test
+`widget/noxaml_test.go`); a program on `widget/base` alone is ~3 % smaller than one on
+the facade (measurements in ADR-0012).
+
+What is visible from outside:
+
+- type names in reflection and stack traces follow the package the type lives in:
+  `*base.Button`, `*text.TextInput`, `*chrome.Window`;
+- facade variables (`Err*`, `Ease*`) are copies: `errors.Is` works, while assigning
+  `widget.EaseOutCubic = f` changes only the copy;
+- the core's branches on concrete types became capability interfaces — `TextEditor`,
+  `DefaultSizer`, `AccessDescriber`, `ChildLayouter`, `BackgroundColorer`: an application
+  type that embeds such a widget (`struct{ *widget.TextInput }`) now passes them too;
+- set your own clipboard provider with `SetClipboardProvider` at run time: in an `init`
+  of a package built on `widget/base` alone the system one may override it.
+
+For engine developers. The facade is generated by `internal/facadegen`
+(`go run ./internal/facadegen/cmd/facadegen`); the facade test checks freshness,
+completeness, type identity and a snapshot of the public API (`widget/testdata/api.txt`).
+Helper names that `base` exports only for sibling packages carry the directive
+`//facadegen:skip` and stay out of the facade. Internal tests of the subpackages reach
+the unexported state of `base` (text measurer, string tables, screen) through
+`internal/testhook`.
 
 ---
 

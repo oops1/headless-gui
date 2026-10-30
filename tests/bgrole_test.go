@@ -4,7 +4,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Роль фона у StackPanel и DockPanel — пункт 4 замечаний difftool.
@@ -19,6 +20,7 @@ var custom = color.RGBA{R: 0x2D, G: 0x2D, B: 0x30, A: 255}
 
 // Свой фон тема не трогает — прежнее поведение.
 func TestBackgroundRole_CustomSurvivesTheme(t *testing.T) {
+	testreset.Globals(t)
 	sp := widget.NewStackPanel(widget.OrientationHorizontal)
 	sp.Background = custom
 	sp.ApplyTheme(widget.ThemeByName("Win11 Light"))
@@ -36,6 +38,7 @@ func TestBackgroundRole_CustomSurvivesTheme(t *testing.T) {
 
 // Панель с ролью следует теме в обе стороны.
 func TestBackgroundRole_FollowsTheme(t *testing.T) {
+	testreset.Globals(t)
 	light, dark := widget.ThemeByName("Win11 Light"), widget.ThemeByName("Win11 Dark")
 
 	sp := widget.NewStackPanel(widget.OrientationHorizontal)
@@ -59,6 +62,7 @@ func TestBackgroundRole_FollowsTheme(t *testing.T) {
 
 // Роль, назначенная после применения темы, действует сразу, а не ждёт смены.
 func TestBackgroundRole_AppliesImmediately(t *testing.T) {
+	testreset.Globals(t)
 	sp := widget.NewStackPanel(widget.OrientationHorizontal)
 	sp.SetBackgroundRole(widget.BackgroundPanel)
 	if want := widget.CurrentTheme().PanelBG; sp.Background != want {
@@ -68,6 +72,7 @@ func TestBackgroundRole_AppliesImmediately(t *testing.T) {
 
 // В разметке роль задаётся как ссылка на поле темы.
 func TestBackgroundRole_FromXAML(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Window Width="400" Height="200"><Canvas>
 	  <StackPanel x:Name="bar" Background="{Theme PanelBG}"/>
 	  <DockPanel x:Name="body" Background="{Theme WindowBG}"/>

@@ -7,12 +7,14 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // TestXAML_CanvasInGrid_CenterAlignment — Canvas с явными Width/Height и
 // Center-alignment внутри Grid центрируется, а не растягивается (issue A).
 func TestXAML_CanvasInGrid_CenterAlignment(t *testing.T) {
+	testreset.Globals(t)
 	const xaml = `<Grid Name="root">
 		<Canvas Name="cv" Width="200" Height="100"
 			HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -32,6 +34,7 @@ func TestXAML_CanvasInGrid_CenterAlignment(t *testing.T) {
 
 // TestXAML_GridInGrid_CenterAlignment — то же для вложенного Grid (issue A).
 func TestXAML_GridInGrid_CenterAlignment(t *testing.T) {
+	testreset.Globals(t)
 	const xaml = `<Grid Name="root">
 		<Grid Name="inner" Width="300" Height="200"
 			HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -51,6 +54,7 @@ func TestXAML_GridInGrid_CenterAlignment(t *testing.T) {
 // TestXAML_CanvasAnchorOnly_NoGarbageSize — ребёнок только с
 // Canvas.Right/Bottom получает дефолтный размер, а не мусорный (issue D).
 func TestXAML_CanvasAnchorOnly_NoGarbageSize(t *testing.T) {
+	testreset.Globals(t)
 	const xaml = `<Canvas Width="400" Height="300">
 		<Panel Name="rb" Canvas.Right="10" Canvas.Bottom="10"/>
 		<Panel Name="both" Canvas.Left="16" Canvas.Top="40" Canvas.Right="16" Canvas.Bottom="40"/>

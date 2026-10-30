@@ -1,0 +1,228 @@
+// Package base — StackPanel: контейнер с автоматической раскладкой дочерних виджетов.
+//
+// В отличие от Panel (который не управляет позициями потомков), StackPanel
+// расставляет дочерние виджеты последовательно: по горизонтали или по вертикали.
+// Аналог WPF StackPanel.
+//
+// XAML:
+//
+//	<StackPanel Orientation="Horizontal" Background="#2D2D30" Spacing="4" Padding="5">
+//	    <Button Content="OK" Width="80" Height="28"/>
+//	    <Button Content="Cancel" Width="80" Height="28"/>
+//	</StackPanel>
+package base
+
+import (
+	"image"
+	"image/color"
+)
+
+// Orientation определяет направление раскладки.
+type Orientation int
+
+const (
+	// OrientationVertical — дочерние виджеты размещаются сверху вниз (по умолчанию).
+	OrientationVertical Orientation = iota
+	// OrientationHorizontal — дочерние виджеты размещаются слева направо.
+	OrientationHorizontal
+)
+
+// StackPanel — контейнер с автоматической последовательной раскладкой.
+type StackPanel struct {
+	Base
+	Orientation Orientation
+	Background  color.RGBA
+	UseAlpha    bool
+	// BackgroundRole — откуда фон берётся при смене темы (bgrole.go). По
+	// умолчанию BackgroundCustom: свой цвет тема не трогает.
+	BackgroundRole BackgroundRole
+	Spacing        int // расстояние между дочерними виджетами (px)
+	Padding        int // внутренний отступ (px)
+}
+
+// NewStackPanel создаёт StackPanel с заданным направлением.
+func NewStackPanel(orient Orientation) *StackPanel {
+	return &StackPanel{
+		Orientation: orient,
+		Background:  color.RGBA{},
+		Spacing:     0,
+		Padding:     0,
+	}
+}
+
+// SetBounds задаёт bounds и пересчитывает раскладку дочерних виджетов.
+func (sp *StackPanel) SetBounds(r image.Rectangle) {
+	sp.Base.SetBounds(r)
+	sp.layout()
+}
+
+// AddChild добавляет виджет и пересчитывает раскладку.
+func (sp *StackPanel) AddChild(w Widget) {
+	sp.Base.AddChild(w)
+	sp.layout()
+}
+
+// AddStretch добавляет распорку — она заберёт место, оставшееся от прочих
+// элементов по оси раскладки (GG-84).
+func (sp *StackPanel) AddStretch() *Stretch {
+	s := NewStretch()
+	sp.AddChild(s)
+	return s
+}
+
+// stretchSizes раздаёт распоркам остаток места по оси раскладки: индекс
+// ребёнка → его размер. nil, если распорок нет.
+func (sp *StackPanel) stretchSizes(b image.Rectangle) map[int]int {
+	idx, weights := stretchIn(sp.children)
+	if len(idx) == 0 {
+		return nil
+	}
+	horizontal := sp.Orientation == OrientationHorizontal
+	used := 0
+	for _, child := range sp.children {
+		m := marginOf(child)
+		if _, ok := child.(*Stretch); ok {
+			// Сама распорка места не просит — только свои отступы.
+			if horizontal {
+				used += m.Left + m.Right
+			} else {
+				used += m.Top + m.Bottom
+			}
+			continue
+		}
+		cw, ch := layoutSizeOf(child)
+		if horizontal {
+			if cw <= 0 {
+				cw = 80
+			}
+			used += cw + m.Left + m.Right
+		} else {
+			if ch <= 0 {
+				ch = 30
+			}
+			used += ch + m.Top + m.Bottom
+		}
+	}
+	total := b.Dy()
+	if horizontal {
+		total = b.Dx()
+	}
+	free := total - 2*sp.Padding - used
+	if n := len(sp.children); n > 1 {
+		free -= sp.Spacing * (n - 1)
+	}
+	parts := spreadStretch(free, weights)
+	out := make(map[int]int, len(idx))
+	for k, i := range idx {
+		out[i] = parts[k]
+	}
+	return out
+}
+
+// layout расставляет дочерние виджеты последовательно.
+//
+// Для каждого ребёнка берётся его текущий Dx/Dy как желаемый размер.
+// Если размер равен 0 — используется размер по умолчанию.
+// Направление, противоположное Orientation, растягивается до размера панели.
+func (sp *StackPanel) layout() {
+	b := sp.Bounds()
+	if b.Empty() {
+		return
+	}
+
+	pad := sp.Padding
+	offset := pad
+	// Распорки забирают место, оставшееся от прочих элементов (GG-84).
+	stretch := sp.stretchSizes(b)
+
+	for i, child := range sp.children {
+		// Размер спрашиваем у ребёнка, если он умеет отвечать (DesiredSizer):
+		// свёрнутый Expander просит высоту одного заголовка, и без вопроса
+		// он занимал бы в столбике место, которого ему больше не нужно.
+		// Остальные, как и раньше, дают свои текущие границы.
+		cw, ch := layoutSizeOf(child)
+
+		// Margin — внешний отступ ребёнка (WPF Thickness).
+		m := marginOf(child)
+
+		if sp.Orientation == OrientationHorizontal {
+			if s, ok := stretch[i]; ok {
+				cw = s
+			} else if cw <= 0 {
+				cw = 80 // default width
+			}
+			if ch <= 0 {
+				ch = b.Dy() - 2*pad - m.Top - m.Bottom
+			}
+			if ch <= 0 {
+				ch = 30
+			}
+
+			offset += m.Left
+			cy := b.Min.Y + (b.Dy()-ch)/2
+			child.SetBounds(image.Rect(
+				b.Min.X+offset,
+				cy,
+				b.Min.X+offset+cw,
+				cy+ch,
+			))
+			offset += cw + m.Right + sp.Spacing
+
+		} else { // Vertical
+			if s, ok := stretch[i]; ok {
+				ch = s
+			} else if ch <= 0 {
+				ch = 30 // default height
+			}
+			if cw <= 0 {
+				cw = b.Dx() - 2*pad - m.Left - m.Right
+			}
+			if cw <= 0 {
+				cw = 80
+			}
+
+			offset += m.Top
+			cx := b.Min.X + pad + m.Left
+			child.SetBounds(image.Rect(
+				cx,
+				b.Min.Y+offset,
+				cx+cw,
+				b.Min.Y+offset+ch,
+			))
+			offset += ch + m.Bottom + sp.Spacing
+		}
+	}
+}
+
+// Draw рисует фон и дочерние виджеты.
+func (sp *StackPanel) Draw(ctx DrawContext) {
+	b := sp.Bounds()
+	if b.Empty() {
+		return
+	}
+
+	if sp.Background.A > 0 {
+		if sp.UseAlpha && sp.Background.A < 255 {
+			if ac, ok := ctx.(DrawContextAlpha); ok {
+				ac.FillRectAlpha(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), sp.Background)
+			} else {
+				ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), sp.Background)
+			}
+		} else {
+			ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), sp.Background)
+		}
+	}
+
+	sp.drawChildren(ctx)
+}
+
+// ApplyTheme обновляет фон StackPanel, если панели назначена роль фона.
+//
+// Без роли фон не трогается: у контейнера раскладки он обычно свой, и смена
+// темы молча стирала бы его (см. bgrole.go).
+func (sp *StackPanel) ApplyTheme(t *Theme) {
+	if c, ok := ThemeBackground(sp.BackgroundRole, t); ok {
+		sp.Background = c
+		sp.UseAlpha = c.A < 255
+	}
+}

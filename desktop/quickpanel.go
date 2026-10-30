@@ -30,9 +30,9 @@ import (
 	"image"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/internal/focusreq"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/focusreq"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 func init() {
@@ -706,6 +706,9 @@ func (pn *qsPanel) layoutFor(panel image.Rectangle, frame bool) (*qsLayout, []Qu
 		v.pos = qsDisplayOrder(len(list), pn.drag.idx, pn.drag.slot)
 	}
 	pn.mu.Unlock()
+	if q := pn.q; q != nil {
+		v.measure = func(text string, pt float64) int { return widget.MeasureTextFor(q, text, pt) }
+	}
 	if frame && v.paged && pn.pageAnim.Animating() {
 		v.slide, v.sliding = pn.pageAnim.Value(), true
 	}

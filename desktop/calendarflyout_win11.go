@@ -21,9 +21,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/focusreq"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/focusreq"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 func init() {
@@ -663,11 +663,11 @@ func (c *CalendarFlyout) w11Fonts() w11Fonts {
 	base := c.themeStyle(calendarPartDay, theme.StateNormal).Font
 	tm := c.Theme()
 	return w11Fonts{
-		date:    ncTextOf(themeFont(tm, ncFontHeading, base, true, 1.5)),
-		title:   ncTextOf(themeFont(tm, ncFontTitle, base, true, 1.1)),
-		body:    ncTextOf(base),
-		caption: ncTextOf(themeFont(tm, ncFontCaption, base, false, 0.9)),
-		heading: ncTextOf(themeFont(tm, ncFontHeading, base, true, 1.5)),
+		date:    ncTextOf(themeFont(tm, ncFontHeading, base, true, 1.5), c),
+		title:   ncTextOf(themeFont(tm, ncFontTitle, base, true, 1.1), c),
+		body:    ncTextOf(base, c),
+		caption: ncTextOf(themeFont(tm, ncFontCaption, base, false, 0.9), c),
+		heading: ncTextOf(themeFont(tm, ncFontHeading, base, true, 1.5), c),
 	}
 }
 

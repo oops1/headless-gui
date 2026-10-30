@@ -1,0 +1,478 @@
+// Package base — Canvas: контейнер с абсолютным позиционированием (аналог WPF Canvas).
+//
+// Canvas — это панель, которая размещает дочерние виджеты по абсолютным координатам,
+// заданным через attached-свойства Canvas.Left, Canvas.Top, Canvas.Right, Canvas.Bottom.
+//
+// В отличие от Grid, DockPanel, StackPanel — Canvas не управляет раскладкой автоматически.
+// Каждый дочерний элемент должен явно указать свою позицию и размер.
+//
+// По спецификации WPF:
+//   - Canvas.Left / Canvas.Top задают смещение от левого/верхнего края Canvas
+//   - Canvas.Right / Canvas.Bottom задают смещение от правого/нижнего края Canvas
+//   - Width / Height задают размер дочернего элемента
+//   - Если указаны Left и Right одновременно, Left имеет приоритет (ширина = Canvas.Width - Left - Right)
+//   - Если указаны Top и Bottom одновременно, Top имеет приоритет (высота = Canvas.Height - Top - Bottom)
+//   - Дочерние элементы по умолчанию НЕ обрезаются границами Canvas (ClipToBounds=false)
+//   - Canvas сам по себе не имеет размера по содержимому — его bounds задаётся родителем
+//   - ZIndex поддерживается порядком добавления: последний добавленный — поверх остальных
+//
+// XAML:
+//
+//	<Canvas Width="400" Height="300" Background="#1E1E1E">
+//	    <Button Canvas.Left="10" Canvas.Top="20" Width="100" Height="30" Content="OK"/>
+//	    <Label Canvas.Right="10" Canvas.Bottom="5" Width="80" Height="20" Text="Status"/>
+//	</Canvas>
+package base
+
+import (
+	"image"
+	"image/color"
+)
+
+// CanvasAttached — attached-свойства позиционирования внутри Canvas.
+// Значение -1 означает «не задано» (NaN в WPF).
+type CanvasAttached struct {
+	Left   int // Canvas.Left   — смещение от левого края Canvas (-1 = не задано)
+	Top    int // Canvas.Top    — смещение от верхнего края Canvas (-1 = не задано)
+	Right  int // Canvas.Right  — смещение от правого края Canvas (-1 = не задано)
+	Bottom int // Canvas.Bottom — смещение от нижнего края Canvas (-1 = не задано)
+}
+
+// canvasChildInfo хранит информацию о дочернем виджете Canvas:
+// attached properties + желаемый размер (Width/Height из XAML).
+// Желаемый размер сохраняется при добавлении и не теряется при layout пересчёте.
+type canvasChildInfo struct {
+	Props        CanvasAttached
+	DesiredW     int // желаемая ширина (из Width XAML атрибута или Bounds при добавлении)
+	DesiredH     int // желаемая высота (из Height XAML атрибута или Bounds при добавлении)
+}
+
+// Canvas — контейнер с абсолютным позиционированием дочерних элементов.
+//
+// Реализует паттерн WPF Canvas: дочерние виджеты размещаются по координатам,
+// заданным через Canvas.Left / Canvas.Top / Canvas.Right / Canvas.Bottom.
+type Canvas struct {
+	Base
+	Background   color.RGBA // фон Canvas (прозрачный по умолчанию)
+	UseAlpha     bool       // true = альфа-смешивание для полупрозрачного фона
+	ClipToBounds bool       // true = обрезать дочерние элементы границами Canvas (WPF default: false)
+
+	// childInfos хранит Canvas attached properties и желаемый размер для каждого дочернего виджета.
+	childInfos []canvasChildInfo
+
+	// InputBindings — горячие клавиши (WPF InputBindings), когда Canvas — корень.
+	InputBindings []InputBinding
+}
+
+// HandleInputBinding выполняет команду горячей клавиши (KeyBinding).
+// Возвращает true, если клавиша обработана.
+func (c *Canvas) HandleInputBinding(code KeyCode, mod KeyMod) bool {
+	cmd, param, ok := MatchInputBinding(c.InputBindings, code, mod)
+	if ok && cmd.CanExecute(param) {
+		cmd.Execute(param)
+		return true
+	}
+	return false
+}
+
+// NewCanvas создаёт пустой Canvas с прозрачным фоном.
+func NewCanvas() *Canvas {
+	return &Canvas{
+		Background: color.RGBA{},
+		UseAlpha:   true,
+	}
+}
+
+// AddChild добавляет дочерний виджет с пустыми attached-свойствами.
+// Размер берётся из текущих Bounds виджета.
+func (c *Canvas) AddChild(w Widget) {
+	wb := w.Bounds()
+	c.Base.AddChild(w)
+	c.childInfos = append(c.childInfos, canvasChildInfo{
+		Props:    CanvasAttached{Left: -1, Top: -1, Right: -1, Bottom: -1},
+		DesiredW: wb.Dx(),
+		DesiredH: wb.Dy(),
+	})
+}
+
+// AddChildAt добавляет виджет с заданными Canvas attached properties.
+// Желаемый размер (desiredW, desiredH) сохраняется и используется при каждом layout.
+func (c *Canvas) AddChildAt(w Widget, props CanvasAttached, desiredW, desiredH int) {
+	c.Base.AddChild(w)
+	c.childInfos = append(c.childInfos, canvasChildInfo{
+		Props:    props,
+		DesiredW: desiredW,
+		DesiredH: desiredH,
+	})
+	c.layoutChild(len(c.children) - 1)
+}
+
+// RemoveChild удаляет дочерний виджет вместе с его childInfo,
+// чтобы attached-свойства остальных детей не сместились по индексам.
+func (c *Canvas) RemoveChild(w Widget) bool {
+	for i, child := range c.children {
+		if child == w {
+			if i < len(c.childInfos) {
+				c.childInfos = append(c.childInfos[:i], c.childInfos[i+1:]...)
+			}
+			return c.Base.RemoveChild(w)
+		}
+	}
+	return false
+}
+
+// RaiseChild поднимает ребёнка над соседями вместе с его attached-свойствами
+// (zorder.go): без этого свойства остались бы на прежнем индексе и достались
+// бы соседу.
+func (c *Canvas) RaiseChild(w Widget) bool {
+	return c.moveCanvasChild(w, len(c.children)-1)
+}
+
+// LowerChild опускает ребёнка под соседей вместе с его attached-свойствами.
+func (c *Canvas) LowerChild(w Widget) bool {
+	return c.moveCanvasChild(w, 0)
+}
+
+// InsertChildAt добавляет ребёнка на позицию i с пустыми attached-свойствами
+// и размером из его текущих Bounds, как AddChild.
+func (c *Canvas) InsertChildAt(i int, w Widget) {
+	wb := w.Bounds()
+	i = clampChildIndex(i, len(c.children))
+	c.syncChildInfos()
+	c.childInfos = append(c.childInfos, canvasChildInfo{})
+	copy(c.childInfos[i+1:], c.childInfos[i:])
+	c.childInfos[i] = canvasChildInfo{
+		Props:    CanvasAttached{Left: -1, Top: -1, Right: -1, Bottom: -1},
+		DesiredW: wb.Dx(),
+		DesiredH: wb.Dy(),
+	}
+	c.Base.InsertChildAt(i, w)
+}
+
+func (c *Canvas) moveCanvasChild(w Widget, to int) bool {
+	from := c.ChildIndex(w)
+	if from < 0 {
+		return false
+	}
+	c.syncChildInfos()
+	moveInSlice(c.childInfos, from, to)
+	return c.Base.moveChildTo(w, to)
+}
+
+// syncChildInfos выравнивает длину childInfos по детям: ребёнок, добавленный
+// в обход Canvas.AddChild (через Base), свойств не имел, и перестановка по
+// индексам сдвинула бы чужие.
+func (c *Canvas) syncChildInfos() {
+	for len(c.childInfos) < len(c.children) {
+		wb := c.children[len(c.childInfos)].Bounds()
+		c.childInfos = append(c.childInfos, canvasChildInfo{
+			Props:    CanvasAttached{Left: -1, Top: -1, Right: -1, Bottom: -1},
+			DesiredW: wb.Dx(),
+			DesiredH: wb.Dy(),
+		})
+	}
+}
+
+// ClearChildren удаляет всех потомков и их childInfos.
+func (c *Canvas) ClearChildren() {
+	c.childInfos = nil
+	c.Base.ClearChildren()
+}
+
+// SetChildDesiredSize задаёт желаемый размер дочернего виджета и перекладывает его.
+func (c *Canvas) SetChildDesiredSize(idx, w, h int) {
+	if idx < 0 || idx >= len(c.childInfos) {
+		return
+	}
+	c.childInfos[idx].DesiredW = w
+	c.childInfos[idx].DesiredH = h
+	c.layoutChild(idx)
+}
+
+// SetChildCanvasProps задаёт Canvas attached properties для дочернего виджета по индексу.
+func (c *Canvas) SetChildCanvasProps(idx int, props CanvasAttached) {
+	if idx < 0 || idx >= len(c.childInfos) {
+		return
+	}
+	c.childInfos[idx].Props = props
+	c.layoutChild(idx)
+}
+
+// GetChildCanvasProps возвращает Canvas attached properties для дочернего виджета.
+func (c *Canvas) GetChildCanvasProps(idx int) CanvasAttached {
+	if idx < 0 || idx >= len(c.childInfos) {
+		return CanvasAttached{Left: -1, Top: -1, Right: -1, Bottom: -1}
+	}
+	return c.childInfos[idx].Props
+}
+
+// SetBounds задаёт bounds Canvas и пересчитывает позиции всех дочерних виджетов.
+func (c *Canvas) SetBounds(r image.Rectangle) {
+	c.Base.SetBounds(r)
+	c.layout()
+}
+
+// layout пересчитывает позиции всех дочерних виджетов по их Canvas attached properties.
+func (c *Canvas) layout() {
+	for i := range c.children {
+		c.layoutChild(i)
+	}
+}
+
+// layoutChild рассчитывает bounds одного дочернего виджета по Canvas attached properties.
+//
+// Алгоритм (по спецификации WPF):
+//  1. Если задан Left — x = Canvas.Min.X + Left
+//  2. Иначе если задан Right — x = Canvas.Max.X - Right - childWidth
+//  3. Иначе — x = Canvas.Min.X (элемент в левом верхнем углу)
+//  4. Аналогично для Y (Top / Bottom)
+//  5. Если задан Left и Right одновременно — Left приоритет, ширина = canvasWidth - Left - Right
+//  6. Аналогично для Top и Bottom
+func (c *Canvas) layoutChild(idx int) {
+	if idx < 0 || idx >= len(c.children) || idx >= len(c.childInfos) {
+		return
+	}
+
+	cb := c.Bounds()
+	if cb.Empty() {
+		return
+	}
+
+	child := c.children[idx]
+	info := c.childInfos[idx]
+	props := info.Props
+
+	// Желаемый размер ребёнка (сохранён при добавлении)
+	cw := info.DesiredW
+	ch := info.DesiredH
+
+	// Если размер не задан — используем дефолтный
+	if cw <= 0 {
+		cw = 80
+	}
+	if ch <= 0 {
+		ch = 30
+	}
+
+	canvasW := cb.Dx()
+	canvasH := cb.Dy()
+
+	// ── Горизонтальная позиция ──────────────────────────────────────────────
+
+	var x int
+	hasLeft := props.Left >= 0
+	hasRight := props.Right >= 0
+
+	switch {
+	case hasLeft && hasRight:
+		// Оба заданы: Left имеет приоритет, ширина вычисляется
+		x = cb.Min.X + props.Left
+		cw = canvasW - props.Left - props.Right
+		if cw < 0 {
+			cw = 0
+		}
+	case hasLeft:
+		x = cb.Min.X + props.Left
+	case hasRight:
+		x = cb.Min.X + canvasW - props.Right - cw
+	default:
+		x = cb.Min.X // по умолчанию — левый край
+	}
+
+	// ── Вертикальная позиция ────────────────────────────────────────────────
+
+	var y int
+	hasTop := props.Top >= 0
+	hasBottom := props.Bottom >= 0
+
+	switch {
+	case hasTop && hasBottom:
+		// Оба заданы: Top имеет приоритет, высота вычисляется
+		y = cb.Min.Y + props.Top
+		ch = canvasH - props.Top - props.Bottom
+		if ch < 0 {
+			ch = 0
+		}
+	case hasTop:
+		y = cb.Min.Y + props.Top
+	case hasBottom:
+		y = cb.Min.Y + canvasH - props.Bottom - ch
+	default:
+		y = cb.Min.Y // по умолчанию — верхний край
+	}
+
+	// ── Stretch (расширение headless-gui для адаптивной вёрстки, BUG-6) ──────
+	// Потомок с ЯВНЫМ HorizontalAlignment/VerticalAlignment="Stretch"
+	// заполняет Canvas по соответствующей оси (учитывая Left/Top/Right/Bottom
+	// как отступы). Это позволяет контенту растягиваться при resize окна без
+	// фиксированной ширины. Если заданы оба якоря (Left+Right / Top+Bottom),
+	// размер уже вычислен выше — stretch не требуется.
+	type alignInfo interface {
+		GetHAlign() HorizontalAlignment
+		GetVAlign() VerticalAlignment
+		HAlignExplicit() bool
+		VAlignExplicit() bool
+	}
+	if ai, ok := child.(alignInfo); ok {
+		if ai.HAlignExplicit() && ai.GetHAlign() == HAlignStretch && !(hasLeft && hasRight) {
+			leftInset := 0
+			if hasLeft {
+				leftInset = props.Left
+			}
+			rightInset := 0
+			if hasRight {
+				rightInset = props.Right
+			}
+			x = cb.Min.X + leftInset
+			cw = canvasW - leftInset - rightInset
+			if cw < 0 {
+				cw = 0
+			}
+		}
+		if ai.VAlignExplicit() && ai.GetVAlign() == VAlignStretch && !(hasTop && hasBottom) {
+			topInset := 0
+			if hasTop {
+				topInset = props.Top
+			}
+			bottomInset := 0
+			if hasBottom {
+				bottomInset = props.Bottom
+			}
+			y = cb.Min.Y + topInset
+			ch = canvasH - topInset - bottomInset
+			if ch < 0 {
+				ch = 0
+			}
+		}
+	}
+
+	// Margin — дополнительные отступы (WPF Margin работает и внутри Canvas)
+	type marginGetter interface {
+		GetMargin() Margin
+	}
+	if mg, ok := child.(marginGetter); ok {
+		m := mg.GetMargin()
+		x += m.Left
+		y += m.Top
+		cw -= m.Left + m.Right
+		ch -= m.Top + m.Bottom
+		if cw < 0 {
+			cw = 0
+		}
+		if ch < 0 {
+			ch = 0
+		}
+	}
+
+	oldBounds := child.Bounds()
+	newBounds := image.Rect(x, y, x+cw, y+ch)
+	child.SetBounds(newBounds)
+
+	// Если позиция виджета изменилась — рекурсивно сдвигаем всех потомков.
+	// Это необходимо для контейнеров (Panel и т.д.), чьи дочерние виджеты
+	// используют абсолютные координаты и не пересчитываются автоматически
+	// при вызове SetBounds на родителе.
+	dx := newBounds.Min.X - oldBounds.Min.X
+	dy := newBounds.Min.Y - oldBounds.Min.Y
+	// Контейнеры с собственным layout (TabControl, Grid, вложенный Canvas…)
+	// уже переложили потомков внутри child.SetBounds — повторный сдвиг
+	// задваивал смещение (контент вкладок «разъезжался» при перестановке).
+	// Сдвигаем и при «пустых» старых bounds: у двухъякорного ребёнка
+	// (Left+Right) ширина на этапе сборки неизвестна (Dx==0 → Empty), но
+	// Min согласован с координатами его детей — без сдвига дети навсегда
+	// отставали от контейнера (заголовок «двоился» под титлбаром).
+	if (dx != 0 || dy != 0) && !HasOwnLayout(child) {
+		ShiftDescendants(child, dx, dy)
+	}
+}
+
+// ShiftDescendants рекурсивно сдвигает bounds всех потомков виджета на (dx, dy).
+// Для виджетов с собственным layout (Canvas, Grid, DockPanel, TabControl,
+// StackPanel, VirtualizingItemsControl) вызов SetBounds уже перестраивает
+// дочерние позиции, поэтому рекурсия не нужна.
+//
+// Служебная: для подпакетов widget, в фасад не входит.
+//
+//facadegen:skip
+func ShiftDescendants(w Widget, dx, dy int) {
+	delta := image.Pt(dx, dy)
+	for _, child := range w.Children() {
+		child.SetBounds(child.Bounds().Add(delta))
+		if !HasOwnLayout(child) {
+			ShiftDescendants(child, dx, dy)
+		}
+	}
+}
+
+// HasOwnLayout возвращает true для контейнеров, которые сами пересчитывают
+// позиции дочерних виджетов при вызове SetBounds (через layout / layoutContent).
+//
+// VirtualizingItemsControl тоже здесь: его SetBounds вызывает updateVisible,
+// который заново раскладывает материализованные строки от новых bounds. Без
+// регистрации Canvas/TabControl/DockPane догоняли уже переложенные строки
+// вызовом ShiftDescendants и задваивали смещение родителя — при первом показе
+// вкладки список рисовался сдвинутым, а ближайшая перерисовка окна (скролл)
+// «чинила» его следующим updateVisible.
+func HasOwnLayout(w Widget) bool {
+	switch v := w.(type) {
+	// Dialog в этом списке с тех пор, как научился менять размер: его
+	// SetBounds сам двигает детей и переставляет кнопку ✕, и повторный сдвиг
+	// снаружи задваивал бы смещение при перетаскивании за заголовок.
+	// ToolBar и DockPane — по той же причине: их SetBounds зовёт layout /
+	// layoutContent, и повторный сдвиг снаружи уносил содержимое на дельту
+	// переезда контейнера. В витрине это было видно так: панель «только
+	// значки» оставалась пустой коробкой, а её кнопки рисовались поверх
+	// соседнего заголовка — на столько, на сколько вкладка сместилась в окне.
+	case *Canvas, *Grid, *TabControl, *StackPanel, *WrapPanel, *UniformGrid, *GroupBox, *Expander, *SplitPanel, *VirtualizingItemsControl, *Panel, *ToolBar:
+		return true
+	case ChildLayouter:
+		// Контейнеры вне ядра (окно — widget/chrome) отвечают сами.
+		return v.LaysOutChildren()
+	}
+	return false
+}
+
+// ChildLayouter — контейнер вне ядра, чей SetBounds сам перекладывает детей
+// (как контейнеры из списка HasOwnLayout): снаружи его детей не сдвигают.
+type ChildLayouter interface {
+	LaysOutChildren() bool
+}
+
+// Draw рисует фон Canvas и все дочерние виджеты.
+func (c *Canvas) Draw(ctx DrawContext) {
+	b := c.Bounds()
+
+	// Фон
+	if c.Background.A > 0 {
+		if c.UseAlpha && c.Background.A < 255 {
+			if ac, ok := ctx.(DrawContextAlpha); ok {
+				ac.FillRectAlpha(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), c.Background)
+			} else {
+				ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), c.Background)
+			}
+		} else {
+			ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), c.Background)
+		}
+	}
+
+	// Clipping (WPF Canvas по умолчанию ClipToBounds=false)
+	if c.ClipToBounds {
+		defer PushClip(ctx, b)()
+	}
+
+	c.drawChildren(ctx)
+}
+
+// ApplyTheme перекрашивает непрозрачный фон Canvas в WindowBG темы:
+// при смене темы «полотно» должно следовать за ней, как и контролы
+// (явные XAML-цвета заменяются — поведение SetTheme единое для всех виджетов).
+func (c *Canvas) ApplyTheme(t *Theme) {
+	if c.Background.A > 0 {
+		c.Background = t.WindowBG
+		c.UseAlpha = t.WindowBG.A < 255
+	}
+}
+
+// InputBindingList — привязки клавиш холста (поле InputBindings): по ним
+// загрузчик XAML связывает CommandPath с командами DataContext.
+func (c *Canvas) InputBindingList() []InputBinding { return c.InputBindings }

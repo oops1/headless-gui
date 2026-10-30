@@ -20,14 +20,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Имена анимаций темы, которыми пользуются компоненты рабочего стола.
 const (
 	// AnimMenuOpen — появление и исчезновение всплывающей панели (Flyout).
-	AnimMenuOpen theme.Key = "menu.open"
+	AnimMenuOpen = theme.AnimMenuOpen
 	// AnimWindowOpen — появление окна.
 	AnimWindowOpen theme.Key = "window.open"
 	// AnimHover — переход цвета при наведении и нажатии.
@@ -44,6 +44,19 @@ func animation(tm *theme.Manager, key theme.Key) (time.Duration, widget.Easing) 
 		return 0, nil
 	}
 	a := tm.GetAnimation(key)
+	if a.Duration <= 0 {
+		return 0, nil
+	}
+	return a.Duration, widget.EasingByName(a.Curve)
+}
+
+// animationFirst — animation первого ключа, объявленного темой (цепочка
+// запасных). Ни одного — мгновенно.
+func animationFirst(tm *theme.Manager, keys ...theme.Key) (time.Duration, widget.Easing) {
+	if tm == nil {
+		return 0, nil
+	}
+	a := tm.GetAnimationFirst(keys...)
 	if a.Duration <= 0 {
 		return 0, nil
 	}
@@ -181,6 +194,15 @@ func (m *motion) style(tm *theme.Manager, item bool, id any, r image.Rectangle, 
 		start()
 	}
 	return cur
+}
+
+// animating сообщает, идёт ли переход цвета ячейки id: картинка с её стилем
+// устареет в следующем кадре (кэш растра живой плитки её не хранит).
+func (m *motion) animating(id any) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := m.cells[id]
+	return c != nil && c.live
 }
 
 // current — стиль на текущий момент перехода.

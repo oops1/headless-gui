@@ -7,11 +7,13 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // TestPanel_SetBounds_MovesChildren — сдвиг Panel сдвигает детей (issue B).
 func TestPanel_SetBounds_MovesChildren(t *testing.T) {
+	testreset.Globals(t)
 	p := widget.NewPanel(color.RGBA{R: 30, G: 30, B: 30, A: 255})
 	p.ShowHeader = false
 	p.SetBounds(image.Rect(0, 0, 200, 100))

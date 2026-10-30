@@ -24,14 +24,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/cmd/internal/showcasedemo"
-	"github.com/oops1/headless-gui/v3/cmd/internal/showcasestrings"
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/printing"
-	"github.com/oops1/headless-gui/v3/widget"
-	dg "github.com/oops1/headless-gui/v3/widget/datagrid"
-	"github.com/oops1/headless-gui/v3/widget/treeview"
-	"github.com/oops1/headless-gui/v3/window"
+	"github.com/oops1/headless-gui/v4/cmd/internal/showcasedemo"
+	"github.com/oops1/headless-gui/v4/cmd/internal/showcasestrings"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/printing"
+	"github.com/oops1/headless-gui/v4/widget"
+	dg "github.com/oops1/headless-gui/v4/widget/datagrid"
+	"github.com/oops1/headless-gui/v4/widget/treeview"
+	"github.com/oops1/headless-gui/v4/window"
 )
 
 // ─── DataContext для вкладки «3.2.4» (новый функционал) ──────────────────────

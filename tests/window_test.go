@@ -5,13 +5,15 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // ─── Конструктор ────────────────────────────────────────────────────────────
 
 func TestNewWindow(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Test", 800, 600)
 	if w.Title != "Test" {
 		t.Fatalf("Title = %q, want %q", w.Title, "Test")
@@ -34,6 +36,7 @@ func TestNewWindow(t *testing.T) {
 // ─── ContentBounds ──────────────────────────────────────────────────────────
 
 func TestWindowContentBounds_SingleBorder(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Test", 800, 600)
 	w.Style = widget.WindowStyleSingleBorder
 	cb := w.ContentBounds()
@@ -45,6 +48,7 @@ func TestWindowContentBounds_SingleBorder(t *testing.T) {
 }
 
 func TestWindowContentBounds_None(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Test", 800, 600)
 	w.Style = widget.WindowStyleNone
 	cb := w.ContentBounds()
@@ -56,6 +60,7 @@ func TestWindowContentBounds_None(t *testing.T) {
 }
 
 func TestWindowContentBounds_ToolWindow(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Tool", 400, 300)
 	w.Style = widget.WindowStyleToolWindow
 	cb := w.ContentBounds()
@@ -67,6 +72,7 @@ func TestWindowContentBounds_ToolWindow(t *testing.T) {
 }
 
 func TestWindowContentBounds_CustomTitleBarHeight(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Custom", 800, 600)
 	w.TitleBarHeight = 48
 	cb := w.ContentBounds()
@@ -79,6 +85,7 @@ func TestWindowContentBounds_CustomTitleBarHeight(t *testing.T) {
 // ─── Кнопки заголовка ───────────────────────────────────────────────────────
 
 func TestWindowBtnCount(t *testing.T) {
+	testreset.Globals(t)
 	tests := []struct {
 		name   string
 		style  widget.WindowStyle
@@ -119,6 +126,7 @@ func TestWindowBtnCount(t *testing.T) {
 // 5px рамки + эффективную высоту заголовка (effTitleH=24, а не полные 32 —
 // в классике заголовок ниже под пропорции референса Win2000).
 func TestWindowContentBounds_Classic3D(t *testing.T) {
+	testreset.Globals(t)
 	widget.ApplyGlobalTheme(widget.ThemeByName("Win2000"))
 	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
 
@@ -135,6 +143,7 @@ func TestWindowContentBounds_Classic3D(t *testing.T) {
 // поэтому ApplyTheme обязан переложить детей. Без этого после переключения
 // на Win2000 контент до первого ресайза налезал на титлбар и рамку.
 func TestWindowApplyTheme_RelayoutsChildren(t *testing.T) {
+	testreset.Globals(t)
 	widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
 	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
 
@@ -166,6 +175,7 @@ func TestWindowApplyTheme_RelayoutsChildren(t *testing.T) {
 // TestWindowClassicButtons_InsideFrame — кнопки ─ □ × расположены внутри
 // рамки (не выходят за её правый/верхний край) и упорядочены слева направо.
 func TestWindowClassicButtons_InsideFrame(t *testing.T) {
+	testreset.Globals(t)
 	widget.ApplyGlobalTheme(widget.ThemeByName("Win2000"))
 	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
 
@@ -207,6 +217,7 @@ func TestWindowClassicButtons_InsideFrame(t *testing.T) {
 
 // TestWindowClassicCloseClick — полный клик по кресту в классике вызывает OnClose.
 func TestWindowClassicCloseClick(t *testing.T) {
+	testreset.Globals(t)
 	widget.ApplyGlobalTheme(widget.ThemeByName("Win2000"))
 	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
 
@@ -235,6 +246,7 @@ func pressRelease(w *widget.Window, x, y int) {
 }
 
 func TestWindowCloseClick(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Test", 800, 600)
 	closed := false
 	w.OnClose = func() { closed = true }
@@ -251,6 +263,7 @@ func TestWindowCloseClick(t *testing.T) {
 // TestWindowClose_PressOnly_NoCallback — на одном press колбэк НЕ вызывается
 // (release-семантика Windows).
 func TestWindowClose_PressOnly_NoCallback(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Test", 800, 600)
 	w.OnClose = func() { t.Fatal("OnClose should not fire on press alone") }
 
@@ -261,6 +274,7 @@ func TestWindowClose_PressOnly_NoCallback(t *testing.T) {
 // TestWindowClose_ReleaseOutside_Cancels — press на кнопке, release в стороне:
 // колбэк НЕ вызывается (действие отменено).
 func TestWindowClose_ReleaseOutside_Cancels(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Test", 800, 600)
 	w.OnClose = func() { t.Fatal("OnClose should not fire when released off the button") }
 
@@ -271,6 +285,7 @@ func TestWindowClose_ReleaseOutside_Cancels(t *testing.T) {
 }
 
 func TestWindowMinimizeClick(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Test", 800, 600)
 	w.Resize = widget.ResizeModeCanResize
 	minimized := false
@@ -289,6 +304,7 @@ func TestWindowMinimizeClick(t *testing.T) {
 }
 
 func TestWindowMaximizeClick(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Test", 800, 600)
 	w.Resize = widget.ResizeModeCanResize
 	maximized := false
@@ -308,6 +324,7 @@ func TestWindowMaximizeClick(t *testing.T) {
 
 // TestWindowMinimize_ReleaseOutside_Cancels — отмена уходом для кнопки ─.
 func TestWindowMinimize_ReleaseOutside_Cancels(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Test", 800, 600)
 	w.OnMinimize = func() { t.Fatal("OnMinimize should not fire when released off the button") }
 
@@ -318,6 +335,7 @@ func TestWindowMinimize_ReleaseOutside_Cancels(t *testing.T) {
 
 // TestWindowMaximize_ReleaseOutside_Cancels — отмена уходом для кнопки □.
 func TestWindowMaximize_ReleaseOutside_Cancels(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Test", 800, 600)
 	w.OnMaximize = func() { t.Fatal("OnMaximize should not fire when released off the button") }
 
@@ -327,6 +345,7 @@ func TestWindowMaximize_ReleaseOutside_Cancels(t *testing.T) {
 }
 
 func TestWindowClickOutsideButtons(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Test", 800, 600)
 	w.OnClose = func() { t.Fatal("OnClose should not be called") }
 	// Клик в центр клиентской области — не должен вызывать callback
@@ -336,6 +355,7 @@ func TestWindowClickOutsideButtons(t *testing.T) {
 // ─── macOS-стиль заголовка ──────────────────────────────────────────────────
 
 func TestWindowMacStyle_CloseClick(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Mac Test", 800, 600)
 	w.TitleStyle = widget.WindowTitleMac
 	closed := false
@@ -352,6 +372,7 @@ func TestWindowMacStyle_CloseClick(t *testing.T) {
 // ─── NoResize: только кнопка Close ──────────────────────────────────────────
 
 func TestWindowNoResize_OnlyClose(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Test", 800, 600)
 	w.Resize = widget.ResizeModeNoResize
 
@@ -372,6 +393,7 @@ func TestWindowNoResize_OnlyClose(t *testing.T) {
 // ─── XAML загрузка ──────────────────────────────────────────────────────────
 
 func TestXAMLWindow_Basic(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Window Title="My App" Width="800" Height="600" Name="main">
 		<Button Name="btn" Content="OK" Left="10" Top="10" Width="100" Height="30"/>
 	</Window>`
@@ -408,6 +430,7 @@ func TestXAMLWindow_Basic(t *testing.T) {
 }
 
 func TestXAMLWindow_WindowStyleNone(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Window Title="Borderless" Width="640" Height="480" WindowStyle="None"/>`
 	root, _, err := widget.LoadUIFromXAML([]byte(xaml))
 	if err != nil {
@@ -424,6 +447,7 @@ func TestXAMLWindow_WindowStyleNone(t *testing.T) {
 }
 
 func TestXAMLWindow_ToolWindow(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Window Title="Tool" Width="300" Height="200" WindowStyle="ToolWindow"/>`
 	root, _, err := widget.LoadUIFromXAML([]byte(xaml))
 	if err != nil {
@@ -436,6 +460,7 @@ func TestXAMLWindow_ToolWindow(t *testing.T) {
 }
 
 func TestXAMLWindow_MacStyle(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Window Title="Mac" Width="800" Height="600" TitleStyle="Mac"/>`
 	root, _, err := widget.LoadUIFromXAML([]byte(xaml))
 	if err != nil {
@@ -448,6 +473,7 @@ func TestXAMLWindow_MacStyle(t *testing.T) {
 }
 
 func TestXAMLWindow_ResizeMode(t *testing.T) {
+	testreset.Globals(t)
 	tests := []struct {
 		xml  string
 		want widget.ResizeMode
@@ -470,6 +496,7 @@ func TestXAMLWindow_ResizeMode(t *testing.T) {
 }
 
 func TestXAMLWindow_MainWindow(t *testing.T) {
+	testreset.Globals(t)
 	// По умолчанию — главное окно.
 	root, _, err := widget.LoadUIFromXAML([]byte(`<Window Width="100" Height="100"/>`))
 	if err != nil {
@@ -490,6 +517,7 @@ func TestXAMLWindow_MainWindow(t *testing.T) {
 }
 
 func TestXAMLWindow_CustomColors(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Window Title="Colors" Width="400" Height="300"
 		Background="#1E1E2E" BorderBrush="#FF5500"
 		TitleBackground="#0078D4" TitleForeground="#FFFFFF"
@@ -522,6 +550,7 @@ func TestXAMLWindow_CustomColors(t *testing.T) {
 // по Left/Top вместо grid/dock) тест обновлён под актуальный контракт:
 // корень типа *widget.Canvas.
 func TestXAMLCanvas_ReturnsCanvas(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Canvas Width="1920" Height="1024" Background="#1E1E2E"/>`
 	root, _, err := widget.LoadUIFromXAML([]byte(xaml))
 	if err != nil {
@@ -533,6 +562,7 @@ func TestXAMLCanvas_ReturnsCanvas(t *testing.T) {
 }
 
 func TestXAMLWindow_ReturnsWindow(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Window Title="App" Width="800" Height="600"/>`
 	root, _, err := widget.LoadUIFromXAML([]byte(xaml))
 	if err != nil {
@@ -547,6 +577,7 @@ func TestXAMLWindow_ReturnsWindow(t *testing.T) {
 // ─── Window как root в Engine ───────────────────────────────────────────────
 
 func TestEngineWithWindowRoot(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Engine Test", 800, 600)
 	btn := widget.NewButton("OK")
 	cb := w.ContentBounds()
@@ -568,6 +599,7 @@ func TestEngineWithWindowRoot(t *testing.T) {
 // ─── Draw: не паникует ──────────────────────────────────────────────────────
 
 func TestWindowDraw_NoPanic(t *testing.T) {
+	testreset.Globals(t)
 	tests := []struct {
 		name  string
 		style widget.WindowStyle
@@ -609,6 +641,7 @@ func TestWindowDraw_NoPanic(t *testing.T) {
 // ─── ApplyTheme ─────────────────────────────────────────────────────────────
 
 func TestWindowApplyTheme(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Theme", 800, 600)
 	light := widget.LightTheme()
 	w.ApplyTheme(light)
@@ -624,6 +657,7 @@ func TestWindowApplyTheme(t *testing.T) {
 // ─── Hover-состояние ────────────────────────────────────────────────────────
 
 func TestWindowMouseMove_Hover(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewWindow("Hover", 800, 600)
 
 	// Перемещаем курсор на кнопку закрытия
@@ -640,6 +674,7 @@ func TestWindowMouseMove_Hover(t *testing.T) {
 // ─── XAML: Window с Grid внутри ──────────────────────────────────────────────
 
 func TestXAMLWindow_WithGrid(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Window Title="Grid Window" Width="800" Height="600">
 		<Grid Name="mainGrid" Left="0" Top="0" Width="798" Height="567">
 			<Grid.RowDefinitions>

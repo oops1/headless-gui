@@ -5,8 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // iconTopRow рисует кнопку IconTop (иконка 24, подпись кегля pt, высота 54,
@@ -47,6 +48,7 @@ func iconTopRow(t *testing.T, pt float64) int {
 // умолчанию), а не уезжает вниз. Крупная подпись по-прежнему поднимает блок
 // (calc): её строка выше.
 func TestButtonIconTop_SmallFontKeepsPlace(t *testing.T) {
+	testreset.Globals(t)
 	def := widget.DefaultFontSize()
 	base := iconTopRow(t, def)
 	for _, pt := range []float64{7, 8, 9} {

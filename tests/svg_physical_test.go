@@ -5,8 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // renderSVGIconAt рисует SVG-иконку в bounds на холсте с масштабом k и
@@ -37,6 +38,7 @@ func renderSVGIconAt(t *testing.T, data string, k float64, bounds image.Rectangl
 // логическом размере и растягивался движком на масштаб — край превращался в
 // размытую ступеньку из промежуточных оттенков.
 func TestSVGIcon_HiDPIRasterizesInPhysicalSize(t *testing.T) {
+	testreset.Globals(t)
 	// Левая половина закрашена: в иконке 20×20 край на логической x=10, на
 	// масштабе 1.5 (30×30 физических пикселей) — на физической x=15.
 	const data = `<svg viewBox="0 0 24 24"><rect x="0" y="0" width="12" height="24" fill="#000"/></svg>`
@@ -59,6 +61,7 @@ func TestSVGIcon_HiDPIRasterizesInPhysicalSize(t *testing.T) {
 // На масштабе 1 путь тот же, что был: значок рисуется картинкой логического
 // размера, результат — резкий край.
 func TestSVGIcon_Scale1Unchanged(t *testing.T) {
+	testreset.Globals(t)
 	const data = `<svg viewBox="0 0 24 24"><rect x="0" y="0" width="12" height="24" fill="#000"/></svg>`
 	img := renderSVGIconAt(t, data, 1, image.Rect(10, 10, 30, 30))
 	for x := 10; x < 30; x++ {

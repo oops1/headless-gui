@@ -4,7 +4,8 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // LastChildFill — запрос GG-32.
@@ -35,6 +36,7 @@ func lastFillPanel(fill bool) (*widget.DockPanel, *widget.Panel, *widget.Panel) 
 }
 
 func TestDockPanel_LastChildFillOffHonoursDock(t *testing.T) {
+	testreset.Globals(t)
 	_, left, right := lastFillPanel(false)
 
 	if got := left.Bounds(); got.Dx() != 100 || got.Min.X != 0 {
@@ -47,6 +49,7 @@ func TestDockPanel_LastChildFillOffHonoursDock(t *testing.T) {
 
 // По умолчанию поведение прежнее: последний растягивается.
 func TestDockPanel_LastChildFillOnByDefault(t *testing.T) {
+	testreset.Globals(t)
 	dp := widget.NewDockPanel()
 	if !dp.LastChildFill {
 		t.Fatal("NewDockPanel выключил растяжение последнего ребёнка")
@@ -60,6 +63,7 @@ func TestDockPanel_LastChildFillOnByDefault(t *testing.T) {
 
 // Атрибут разметки.
 func TestDockPanel_LastChildFillFromXAML(t *testing.T) {
+	testreset.Globals(t)
 	xaml := `<Window Width="400" Height="60">
 	  <DockPanel x:Name="row" LastChildFill="False" Left="0" Top="0" Width="400" Height="30">
 	    <Button x:Name="a" DockPanel.Dock="Left" Width="100" Height="30" Content="A"/>

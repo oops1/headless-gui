@@ -13,9 +13,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // roundTrip прогоняет плоскую тему через профиль токенов и обратно.
@@ -36,6 +37,7 @@ func roundTrip(t *testing.T, src *widget.Theme) *widget.Theme {
 // TestBridge_RoundTripKeepsEveryPreset — все шесть готовых пресетов
 // переживают перевод в профиль и обратно без единого изменённого поля.
 func TestBridge_RoundTripKeepsEveryPreset(t *testing.T) {
+	testreset.Globals(t)
 	for _, name := range widget.ThemeNames() {
 		name := name
 		t.Run(name, func(t *testing.T) {
@@ -99,6 +101,7 @@ func diffStyle(t *testing.T, want, got widget.ThemeStyle) {
 // заполнены разными цветами, после round-trip обязана остаться собой.
 // Непокрытое поле обнулится и будет названо.
 func TestBridge_EveryColorFieldIsBound(t *testing.T) {
+	testreset.Globals(t)
 	src := &widget.Theme{Style: widget.ThemeStyle{Name: "Проба"}}
 	v := reflect.ValueOf(src).Elem()
 	typ := v.Type()
@@ -126,6 +129,7 @@ func TestBridge_EveryColorFieldIsBound(t *testing.T) {
 // TestBridge_StyleShapeSurvives — форма темы (радиусы, флаги вида, цвета
 // фаски) переживает перевод: она живёт в метриках и флагах, а не в цветах.
 func TestBridge_StyleShapeSurvives(t *testing.T) {
+	testreset.Globals(t)
 	src := widget.ThemeByName("Win2000")
 	if src == nil {
 		t.Fatal("пресет Win2000 не найден")
@@ -161,6 +165,7 @@ func TestBridge_StyleShapeSurvives(t *testing.T) {
 // ничего не объявляет, не паникует и не портит структуру: отсутствие
 // профиля не должно ронять приложение.
 func TestBridge_MaterializeSurvivesEmptyTheme(t *testing.T) {
+	testreset.Globals(t)
 	m := theme.NewManager()
 	empty := theme.NewProfile("Пустая")
 	if err := m.RegisterTheme(empty); err != nil {
@@ -185,6 +190,7 @@ func TestBridge_MaterializeSurvivesEmptyTheme(t *testing.T) {
 // адресуется теми же тройками, что и написанный вручную: значит, автор
 // темы может переопределить кнопку, не зная про плоскую структуру.
 func TestBridge_ProfileIsReadableByHand(t *testing.T) {
+	testreset.Globals(t)
 	base := widget.ProfileFromTheme(widget.ThemeByName("Win11 Dark"))
 
 	custom := theme.NewProfile("Своя")
@@ -221,6 +227,7 @@ func TestBridge_ProfileIsReadableByHand(t *testing.T) {
 // TestBridge_EngineSwitchesByProfile — движок переключает тему по имени
 // профиля: тот же путь применения, что и у SetTheme, но с наследованием.
 func TestBridge_EngineSwitchesByProfile(t *testing.T) {
+	testreset.Globals(t)
 	m := widget.DefaultThemeManager()
 	if len(m.ThemeNames()) != len(widget.ThemeNames()) {
 		t.Fatalf("в менеджере %d профилей, пресетов %d",

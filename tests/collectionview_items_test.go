@@ -4,8 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/widget"
-	"github.com/oops1/headless-gui/v3/widget/datagrid"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
+	"github.com/oops1/headless-gui/v4/widget/datagrid"
 )
 
 // VM с CollectionView в качестве источника ItemsControl.
@@ -25,6 +26,7 @@ const cvItemsXAML = `<Canvas xmlns="clr">
 </Canvas>`
 
 func TestCollectionView_ItemsControlLiveRebuild(t *testing.T) {
+	testreset.Globals(t)
 	view := widget.NewCollectionView(sampleOC())
 	vm := &cvVM{People: view}
 

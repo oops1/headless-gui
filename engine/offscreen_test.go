@@ -7,13 +7,13 @@ import (
 
 	"golang.org/x/image/font/gofont/gomono"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // byNameT — именованный шрифт холста по имени (nil, если его нет).
 func byNameT(c *Canvas, name string) *FontCache {
-	fc, _ := c.namedFonts.get(name)
+	fc, _ := c.NamedFonts().Get(name)
 	return fc
 }
 

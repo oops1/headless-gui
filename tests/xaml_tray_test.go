@@ -5,7 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // trayIconSVG — минимальная валидная иконка для проверки загрузки TrayIcon.
@@ -27,6 +28,7 @@ const trayXAML = `<Window Title="Моё приложение" Width="640" Height
 // поля widget.Window (иконка загружена, подсказка задана, меню разобрано и НЕ
 // стало ребёнком дерева окна).
 func TestXAMLTray_Declaration(t *testing.T) {
+	testreset.Globals(t)
 	dir := t.TempDir()
 	iconsDir := filepath.Join(dir, "icons")
 	if err := os.MkdirAll(iconsDir, 0o755); err != nil {
@@ -93,6 +95,7 @@ func TestXAMLTray_Declaration(t *testing.T) {
 // TestXAMLTray_TooltipDefaultsToTitle проверяет, что без TrayTooltip подсказка
 // по умолчанию равна Title окна.
 func TestXAMLTray_TooltipDefaultsToTitle(t *testing.T) {
+	testreset.Globals(t)
 	const xaml = `<Window Title="Заголовок" Width="320" Height="240"><Grid/></Window>`
 	root, _, err := widget.LoadUIFromXAML([]byte(xaml))
 	if err != nil {
@@ -114,6 +117,7 @@ func TestXAMLTray_TooltipDefaultsToTitle(t *testing.T) {
 // TestXAMLTray_BadIconIsSkipped проверяет, что несуществующая иконка не роняет
 // парсинг (log.Printf + пропуск), а поле остаётся nil.
 func TestXAMLTray_BadIconIsSkipped(t *testing.T) {
+	testreset.Globals(t)
 	const xaml = `<Window Title="X" Width="320" Height="240" TrayIcon="nope/missing.png"><Grid/></Window>`
 	root, _, err := widget.LoadUIFromXAMLWithBase([]byte(xaml), t.TempDir())
 	if err != nil {
@@ -128,6 +132,7 @@ func TestXAMLTray_BadIconIsSkipped(t *testing.T) {
 // TestXAMLDockManager_NativeFloating проверяет, что атрибут NativeFloating="True"
 // выставляет поле DockManager.NativeFloating (и его отсутствие — false).
 func TestXAMLDockManager_NativeFloating(t *testing.T) {
+	testreset.Globals(t)
 	const xamlOn = `<Canvas Width="400" Height="300">
 	  <DockManager Name="dm" Width="400" Height="300" NativeFloating="True">
 	    <DockPane Id="tools" Title="Инструменты" Side="Left" Size="120"/>

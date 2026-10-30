@@ -6,8 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Дети прокрутки обязаны вести себя так, будто стоят там, где их видно.
@@ -101,6 +102,7 @@ func sameInts(a, b []int) bool {
 
 // Без прокрутки всё по-старому: ориентир, что сцена собрана верно.
 func TestScrollViewCoords_ClickUnscrolled(t *testing.T) {
+	testreset.Globals(t)
 	env := newVScrollScene(t)
 	env.click(100, 15)
 	env.click(100, 55)
@@ -112,6 +114,7 @@ func TestScrollViewCoords_ClickUnscrolled(t *testing.T) {
 // Дефект из отчёта: после SetScrollY(200) на экране видны C и D. Щелчок в
 // (100,15) нажимал A — невидимую, прокрученную за верх.
 func TestScrollViewCoords_ClickVertical(t *testing.T) {
+	testreset.Globals(t)
 	env := newVScrollScene(t)
 	env.sv.SetScrollY(200)
 	env.eng.RenderOnce()
@@ -135,6 +138,7 @@ func TestScrollViewCoords_ClickVertical(t *testing.T) {
 // Ниже прокрутки лежит экранное место, куда несдвинутые координаты B попали
 // бы мимо прокрутки: щелчок вне прокрутки её содержимого не касается вовсе.
 func TestScrollViewCoords_ClickOutsideViewIgnoresContent(t *testing.T) {
+	testreset.Globals(t)
 	env := newVScrollScene(t)
 	env.sv.SetScrollY(200)
 	env.eng.RenderOnce()
@@ -149,6 +153,7 @@ func TestScrollViewCoords_ClickOutsideViewIgnoresContent(t *testing.T) {
 
 // Горизонтальная прокрутка: те же правила для scrollX.
 func TestScrollViewCoords_ClickHorizontal(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{R: 20, G: 20, B: 20, A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 600, 200))
@@ -191,6 +196,7 @@ func TestScrollViewCoords_ClickHorizontal(t *testing.T) {
 
 // Подсветка загорается у той кнопки, что под курсором.
 func TestScrollViewCoords_Hover(t *testing.T) {
+	testreset.Globals(t)
 	env := newVScrollScene(t)
 	env.sv.SetScrollY(200)
 	env.eng.RenderOnce()
@@ -217,6 +223,7 @@ func TestScrollViewCoords_Hover(t *testing.T) {
 // Курсор над невидимой частью содержимого (прокрутка кончилась выше него) не
 // должен подсвечивать то, что под ним лежит в координатах содержимого.
 func TestScrollViewCoords_HoverBelowViewIgnoresContent(t *testing.T) {
+	testreset.Globals(t)
 	env := newVScrollScene(t)
 	e := newSvKid("E", image.Rect(10, 300, 200, 330))
 	env.sv.AddChild(e.btn)
@@ -251,6 +258,7 @@ func firstDiff(a, b *image.RGBA) (image.Point, bool) {
 // пикселями: кадр, полученный частичной перерисовкой, обязан совпасть с кадром,
 // нарисованным целиком.
 func TestScrollViewCoords_InvalidateRedrawsScreenPlace(t *testing.T) {
+	testreset.Globals(t)
 	env := newVScrollScene(t)
 	env.eng.SetRenderOnDemand(true)
 	env.sv.SetScrollY(200)
@@ -290,6 +298,7 @@ func TestScrollViewCoords_InvalidateRedrawsScreenPlace(t *testing.T) {
 // Контекстное меню поля ввода внутри прокрутки открывается у курсора и
 // принимает щелчки по пунктам.
 func TestScrollViewCoords_TextBoxContextMenuAtCursor(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{R: 20, G: 20, B: 20, A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 300, 300))
@@ -357,6 +366,7 @@ func TestScrollViewCoords_TextBoxContextMenuAtCursor(t *testing.T) {
 
 // Каретка для редактора метода ввода (IME) — в экранных координатах.
 func TestScrollViewCoords_IMECaretRect(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{R: 20, G: 20, B: 20, A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 300, 300))
@@ -387,6 +397,7 @@ func TestScrollViewCoords_IMECaretRect(t *testing.T) {
 
 // Скринридер видит границы там, где элемент на экране.
 func TestScrollViewCoords_AccessibilityBounds(t *testing.T) {
+	testreset.Globals(t)
 	env := newVScrollScene(t)
 	env.sv.SetScrollY(200)
 	env.eng.RenderOnce()
@@ -416,6 +427,7 @@ func TestScrollViewCoords_AccessibilityBounds(t *testing.T) {
 // Перетаскивание с захватом мыши: выделение в поле внутри прокрутки идёт
 // от того же места, что и без прокрутки.
 func TestScrollViewCoords_CaptureDrag(t *testing.T) {
+	testreset.Globals(t)
 	selected := func(scrollY int) string {
 		root := widget.NewPanel(color.RGBA{R: 20, G: 20, B: 20, A: 255})
 		root.ShowHeader = false
@@ -453,6 +465,7 @@ func TestScrollViewCoords_CaptureDrag(t *testing.T) {
 // Выпадающий список внутри прокрутки: раскрывается под полем на экране и
 // принимает выбор пункта.
 func TestScrollViewCoords_DropdownList(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{R: 20, G: 20, B: 20, A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 300, 400))
@@ -540,6 +553,7 @@ func newNestedScene(t *testing.T) *nestedEnv {
 }
 
 func TestScrollViewCoords_NestedClick(t *testing.T) {
+	testreset.Globals(t)
 	env := newNestedScene(t)
 	click := func(x, y int) {
 		env.eng.SendMouseButton(x, y, widget.MouseLeft, true)
@@ -556,6 +570,7 @@ func TestScrollViewCoords_NestedClick(t *testing.T) {
 }
 
 func TestScrollViewCoords_NestedHover(t *testing.T) {
+	testreset.Globals(t)
 	env := newNestedScene(t)
 	env.eng.SendMouseMove(100, 45)
 	if !env.n3.btn.IsHovered() || env.n1.btn.IsHovered() || env.n2.btn.IsHovered() || env.n4.btn.IsHovered() {
@@ -570,6 +585,7 @@ func TestScrollViewCoords_NestedHover(t *testing.T) {
 
 // Колесо над внутренней прокруткой листает ЕЁ, а не внешнюю.
 func TestScrollViewCoords_NestedWheel(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 	env := newNestedScene(t)
@@ -590,6 +606,7 @@ func TestScrollViewCoords_NestedWheel(t *testing.T) {
 // Инвалидация во вложенной прокрутке: кадр из частичной перерисовки совпадает
 // с полным.
 func TestScrollViewCoords_NestedInvalidate(t *testing.T) {
+	testreset.Globals(t)
 	env := newNestedScene(t)
 	env.eng.SetRenderOnDemand(true)
 	env.eng.Invalidate()

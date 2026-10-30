@@ -4,8 +4,9 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
-	"github.com/oops1/headless-gui/v3/widget/datagrid"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
+	"github.com/oops1/headless-gui/v4/widget/datagrid"
 )
 
 // Подсказка на строку таблицы — запрос GG-27.
@@ -17,6 +18,7 @@ import (
 type tipRow struct{ Name, State string }
 
 func TestDataGridWidget_RowToolTip(t *testing.T) {
+	testreset.Globals(t)
 	w := widget.NewDataGridWidget()
 	w.Grid.RowHeight = 20
 	w.Grid.HeaderHeight = 20

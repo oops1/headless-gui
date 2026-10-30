@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
-	"github.com/oops1/headless-gui/v3/widget/datagrid"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
+	"github.com/oops1/headless-gui/v4/widget/datagrid"
 )
 
 type vicVM struct {
@@ -25,6 +26,7 @@ const vicXAML = `<Canvas xmlns="clr">
 </Canvas>`
 
 func TestVirtualizing_XAML(t *testing.T) {
+	testreset.Globals(t)
 	big := make([]interface{}, 5000)
 	for i := range big {
 		big[i] = &person{Name: fmt.Sprintf("P%d", i), Age: i % 99, City: "X"}

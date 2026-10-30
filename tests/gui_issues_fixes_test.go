@@ -6,9 +6,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
-	dgridPkg "github.com/oops1/headless-gui/v3/widget/datagrid"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
+	dgridPkg "github.com/oops1/headless-gui/v4/widget/datagrid"
 )
 
 var (
@@ -21,6 +22,7 @@ var (
 // TestGrid_StarZero_CollapsesColumn — A1: <ColumnDefinition Width="0*"/>
 // должен реально получить 0px, а не быть приведён к 1*.
 func TestGrid_StarZero_CollapsesColumn(t *testing.T) {
+	testreset.Globals(t)
 	g := widget.NewGrid()
 	g.ColDefs = []widget.GridDefinition{
 		{Mode: widget.GridSizeStar, Value: 0}, // свёрнут
@@ -59,6 +61,7 @@ func TestGrid_StarZero_CollapsesColumn(t *testing.T) {
 // TestGrid_StarNegative_StillDefaultsToOne проверяет, что отрицательное
 // значение Star по-прежнему трактуется как 1* (защита от мусора).
 func TestGrid_StarNegative_StillDefaultsToOne(t *testing.T) {
+	testreset.Globals(t)
 	g := widget.NewGrid()
 	g.ColDefs = []widget.GridDefinition{
 		{Mode: widget.GridSizeStar, Value: -5}, // мусор → 1*
@@ -87,6 +90,7 @@ func TestGrid_StarNegative_StillDefaultsToOne(t *testing.T) {
 // OnClick синхронно (без go-обёртки) — счётчик должен быть инкрементирован
 // ДО возврата OnKeyEvent.
 func TestButton_OnClick_KeyboardSynchronous(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("ok")
 	var counter int32
 	btn.OnClick = func() { atomic.AddInt32(&counter, 1) }
@@ -115,6 +119,7 @@ func TestButton_OnClick_KeyboardSynchronous(t *testing.T) {
 // TestButton_AddClickHandler_Multiple подтверждает, что несколько подписчиков
 // получают вызов в порядке регистрации, а OnClick (поле) идёт первым.
 func TestButton_AddClickHandler_Multiple(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("multi")
 	var order []string
 
@@ -131,6 +136,7 @@ func TestButton_AddClickHandler_Multiple(t *testing.T) {
 
 // TestButton_RemoveClickHandler — снятая подписка не вызывается.
 func TestButton_RemoveClickHandler(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("rm")
 	var keptCalls, removedCalls int32
 
@@ -157,6 +163,7 @@ func TestButton_RemoveClickHandler(t *testing.T) {
 // TestButton_ClearClickHandlers сбрасывает все добавленные обработчики,
 // но сохраняет поле OnClick.
 func TestButton_ClearClickHandlers(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("clr")
 	var fieldCalls, handlerCalls int32
 
@@ -179,6 +186,7 @@ func TestButton_ClearClickHandlers(t *testing.T) {
 // TestListView_AutoScrollToBottom_OnSetItems — при добавлении новых
 // элементов в режиме live-tail прокрутка должна оставаться у конца.
 func TestListView_AutoScrollToBottom_OnSetItems(t *testing.T) {
+	testreset.Globals(t)
 	lv := widget.NewListView()
 	lv.AutoScrollToBottom = true
 	lv.SetBounds(image.Rect(0, 0, 200, 100)) // ~3 элемента видно при ItemHeight=28
@@ -207,6 +215,7 @@ func TestListView_AutoScrollToBottom_OnSetItems(t *testing.T) {
 
 // TestListView_DefaultSetItemsResetsScroll — старое поведение по умолчанию.
 func TestListView_DefaultSetItemsResetsScroll(t *testing.T) {
+	testreset.Globals(t)
 	lv := widget.NewListView()
 	lv.SetBounds(image.Rect(0, 0, 200, 100))
 
@@ -231,6 +240,7 @@ func TestListView_DefaultSetItemsResetsScroll(t *testing.T) {
 // TestListView_PreserveScroll — при выставленном PreserveScrollOnSetItems
 // scrollY сохраняется (с учётом нового maxScroll).
 func TestListView_PreserveScroll(t *testing.T) {
+	testreset.Globals(t)
 	lv := widget.NewListView()
 	lv.PreserveScrollOnSetItems = true
 	lv.SetBounds(image.Rect(0, 0, 200, 100))
@@ -255,6 +265,7 @@ func TestListView_PreserveScroll(t *testing.T) {
 // ─── A9: Engine.SetRoot сохраняет bounds корня ────────────────────────────
 
 func TestEngine_SetRoot_PreservesNonEmptyBounds(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(1000, 800, 20)
 
 	root := widget.NewPanel(tcPanel)
@@ -269,6 +280,7 @@ func TestEngine_SetRoot_PreservesNonEmptyBounds(t *testing.T) {
 }
 
 func TestEngine_SetRoot_FillsCanvasIfEmpty(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(640, 480, 20)
 	root := widget.NewPanel(tcPanel) // bounds пустые → должен растянуться
 
@@ -280,6 +292,7 @@ func TestEngine_SetRoot_FillsCanvasIfEmpty(t *testing.T) {
 }
 
 func TestEngine_SetRootFullCanvas_AlwaysFills(t *testing.T) {
+	testreset.Globals(t)
 	eng := engine.New(640, 480, 20)
 	root := widget.NewPanel(tcPanel)
 	root.SetBounds(image.Rect(10, 10, 100, 100))
@@ -305,6 +318,7 @@ type rowItem struct {
 // даже если грид read-only (типичный сценарий — toggle breakpoint
 // в дизассемблере).
 func TestDataGrid_OnRowActivated_DoubleClick(t *testing.T) {
+	testreset.Globals(t)
 	dg := dgridPkg.New()
 	dg.IsReadOnly = true // read-only грид
 	dg.RowHeight = 20
@@ -354,6 +368,7 @@ func TestDataGrid_OnRowActivated_DoubleClick(t *testing.T) {
 //   - SetReadOnly(false) после true → explicit=true, value=false
 //   - ResetReadOnly() → explicit=false снова.
 func TestColumn_ReadOnly_Tristate(t *testing.T) {
+	testreset.Globals(t)
 	col := dgridPkg.NewTextColumn("h", "Path")
 
 	if col.IsReadOnlyExplicit() {

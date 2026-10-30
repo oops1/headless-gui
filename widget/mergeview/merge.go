@@ -14,7 +14,7 @@ package mergeview
 import (
 	"slices"
 
-	"github.com/oops1/headless-gui/v3/widget/diffview"
+	"github.com/oops1/headless-gui/v4/widget/diffview"
 )
 
 // Chunk — блок слияния: участок, на котором стороны либо согласны, либо нет.

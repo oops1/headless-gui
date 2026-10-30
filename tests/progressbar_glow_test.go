@@ -8,7 +8,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // alphaCtx — recCtx, считающий полупрозрачные заливки (из них состоит
@@ -59,6 +60,7 @@ func drawGlowBar(t *testing.T, themeName string, style widget.ProgressBarStyle, 
 // TestProgressGlow_ModernThemeGlows — в Win11 свечение рисуется, а штатный
 // стиль полосы обходится без полупрозрачных заливок.
 func TestProgressGlow_ModernThemeGlows(t *testing.T) {
+	testreset.Globals(t)
 	glow := drawGlowBar(t, "Win11 Dark", widget.ProgressStyleGlow, 0.5)
 	if glow.alphaFills == 0 {
 		t.Error("ProgressStyleGlow в Win11: свечение не нарисовано")
@@ -73,6 +75,7 @@ func TestProgressGlow_ModernThemeGlows(t *testing.T) {
 // TestProgressGlow_ClassicAndMacKeepTheirBar — Win2000 и Mac рисуют свою
 // каноническую полосу даже при запрошенном свечении.
 func TestProgressGlow_ClassicAndMacKeepTheirBar(t *testing.T) {
+	testreset.Globals(t)
 	for _, name := range []string{"Win2000", "Mac"} {
 		ctx := drawGlowBar(t, name, widget.ProgressStyleGlow, 0.5)
 		if ctx.alphaFills != 0 {
@@ -87,6 +90,7 @@ func TestProgressGlow_ClassicAndMacKeepTheirBar(t *testing.T) {
 
 // TestProgressGlow_HeadFollowsValue — голова свечения едет вслед за значением.
 func TestProgressGlow_HeadFollowsValue(t *testing.T) {
+	testreset.Globals(t)
 	near := drawGlowBar(t, "Win11 Dark", widget.ProgressStyleGlow, 0.2)
 	far := drawGlowBar(t, "Win11 Dark", widget.ProgressStyleGlow, 0.8)
 	if far.maxAlphaX <= near.maxAlphaX {
@@ -98,6 +102,7 @@ func TestProgressGlow_HeadFollowsValue(t *testing.T) {
 // TestProgressGlow_KeepsFramesComing — светящаяся полоса просит кадры:
 // в диалоге она не в фокусе, и без зациклённой анимации движок бы уснул.
 func TestProgressGlow_KeepsFramesComing(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	ctx := drawGlowBar(t, "Win11 Dark", widget.ProgressStyleGlow, 0.4)
 	_ = ctx

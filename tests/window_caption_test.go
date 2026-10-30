@@ -5,9 +5,10 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Заголовок классического окна Windows 2000 (замечания WinLine): градиент,
@@ -82,6 +83,7 @@ func capNear(a, b color.RGBA, tol int) bool {
 // Заголовок окна Windows 2000 рисуется градиентом: тёмно-синий слева, голубой
 // справа. Раньше профиль второй точки не объявлял, и заголовок был сплошным.
 func TestWindow2000_TitleGradientActive(t *testing.T) {
+	testreset.Globals(t)
 	s := capWindow(t, capProfile(t, theme.ProfileWindows2000, nil))
 	img := s.shot()
 	tb := s.win.CloseBtnRect() // правый край полосы — за кнопками, берём точку слева от них
@@ -98,6 +100,7 @@ func TestWindow2000_TitleGradientActive(t *testing.T) {
 
 // Неактивное окно — серый градиент.
 func TestWindow2000_TitleGradientInactive(t *testing.T) {
+	testreset.Globals(t)
 	s := capWindow(t, capProfile(t, theme.ProfileWindows2000, nil))
 	s.win.SetActive(false)
 	img := s.shot()
@@ -115,6 +118,7 @@ func TestWindow2000_TitleGradientInactive(t *testing.T) {
 // После SetAccent градиент идёт от акцента к его светлому оттенку, а не в
 // прежний голубой.
 func TestWindow2000_TitleGradientFollowsAccent(t *testing.T) {
+	testreset.Globals(t)
 	green := theme.RGB(16, 124, 16)
 	s := capWindow(t, capProfile(t, theme.ProfileWindows2000, &green))
 	img := s.shot()
@@ -133,6 +137,7 @@ func TestWindow2000_TitleGradientFollowsAccent(t *testing.T) {
 
 // Профиль Windows 2000: заголовок 18, кнопки 16×14, рамка 5.
 func TestWindow2000_CaptionMetricsApplied(t *testing.T) {
+	testreset.Globals(t)
 	s := capWindow(t, capProfile(t, theme.ProfileWindows2000, nil))
 	w := s.win
 	b := w.Bounds()
@@ -164,6 +169,7 @@ func TestWindow2000_CaptionMetricsApplied(t *testing.T) {
 
 // Попадание по кнопке 16×14 закрывает окно, а по зазору над ней — нет.
 func TestWindow2000_SmallCloseButtonHit(t *testing.T) {
+	testreset.Globals(t)
 	s := capWindow(t, capProfile(t, theme.ProfileWindows2000, nil))
 	closed := 0
 	s.win.OnClose = func() { closed++ }
@@ -181,6 +187,7 @@ func TestWindow2000_SmallCloseButtonHit(t *testing.T) {
 // Без метрик (пресет Win2000, тема без профиля) всё как прежде: заголовок 24,
 // квадратные кнопки 18×18. Другие темы не меняются.
 func TestWindow2000_NoMetricsKeepsOldGeometry(t *testing.T) {
+	testreset.Globals(t)
 	s := capWindow(t, widget.ThemeByName("Win2000"))
 	w := s.win
 	b := w.Bounds()
@@ -207,6 +214,7 @@ func TestWindow2000_NoMetricsKeepsOldGeometry(t *testing.T) {
 
 // Явный TitleBarHeight сильнее метрики темы.
 func TestWindow2000_ExplicitTitleBarHeightWins(t *testing.T) {
+	testreset.Globals(t)
 	s := capWindow(t, capProfile(t, theme.ProfileWindows2000, nil))
 	s.win.TitleBarHeight = 22
 	s.win.SetBounds(s.win.Bounds())
@@ -217,6 +225,7 @@ func TestWindow2000_ExplicitTitleBarHeightWins(t *testing.T) {
 
 // Метрики переживают круг профиль → плоская тема → профиль → плоская тема.
 func TestThemeBridge_CaptionMetricsRoundTrip(t *testing.T) {
+	testreset.Globals(t)
 	th := capProfile(t, theme.ProfileWindows2000, nil)
 	st := th.Style
 	if st.TitleBarHeight != 18 || st.CaptionButtonW != 16 || st.CaptionButtonH != 14 || st.CaptionIconSize != 16 {
@@ -244,6 +253,7 @@ func TestThemeBridge_CaptionMetricsRoundTrip(t *testing.T) {
 // Недоступный пункт меню из встроенного профиля читается: текст не
 // прозрачный. Без этого пункт «Восстановить» системного меню исчезал.
 func TestMaterialize_DisabledMenuItemVisible(t *testing.T) {
+	testreset.Globals(t)
 	for _, name := range []string{theme.ProfileWindows2000, theme.ProfileWindows10} {
 		th := capProfile(t, name, nil)
 		if th.Disabled.A == 0 && th.Style.Menu.Disabled.A == 0 {
@@ -268,6 +278,7 @@ var capRed = color.RGBA{R: 255, G: 0, B: 0, A: 255}
 
 // Значок стоит слева в заголовке: 16 px, отступ 2, по центру полосы 18 px.
 func TestWindowIcon_PlacedAndDrawn(t *testing.T) {
+	testreset.Globals(t)
 	s := capWindow(t, capProfile(t, theme.ProfileWindows2000, nil))
 	if !s.win.IconBounds().Empty() || s.win.HasIcon() {
 		t.Fatal("значок есть без SetIcon")
@@ -298,6 +309,7 @@ func TestWindowIcon_PlacedAndDrawn(t *testing.T) {
 
 // Подпись сдвигается за значок сама: начинка полосы стоит правее, чем без него.
 func TestWindowIcon_ShiftsTitle(t *testing.T) {
+	testreset.Globals(t)
 	s := capWindow(t, capProfile(t, theme.ProfileWindows2000, nil))
 	s.win.Title = "bash" // короткая подпись: начинке остаётся место в полосе
 	s.win.SetTitleBarContent(widget.NewTextInput(""))
@@ -312,6 +324,7 @@ func TestWindowIcon_ShiftsTitle(t *testing.T) {
 
 // В заголовке macOS слева стоят кнопки окна — значка там нет.
 func TestWindowIcon_NotInMacLayout(t *testing.T) {
+	testreset.Globals(t)
 	s := capWindow(t, capProfile(t, theme.ProfileMacOS, nil))
 	s.win.SetIcon(capIcon(capRed))
 	if r := s.win.IconBounds(); !r.Empty() {
@@ -321,6 +334,7 @@ func TestWindowIcon_NotInMacLayout(t *testing.T) {
 
 // SVG-значок рисуется и переживает ошибку разбора.
 func TestWindowIcon_SVG(t *testing.T) {
+	testreset.Globals(t)
 	s := capWindow(t, capProfile(t, theme.ProfileWindows2000, nil))
 	const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" fill="#ff0000"/></svg>`
 	if err := s.win.SetIconSVG([]byte(svg)); err != nil {
@@ -370,6 +384,7 @@ func capMenuTexts(m *widget.PopupMenu) []string {
 // Щелчок по значку открывает системное меню с подписями через Tr; без
 // колбэков окна пункты недоступны, но не пропадают.
 func TestSystemMenu_OpensWithLocalizedItems(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.SetLanguage(widget.Language())
 	capSysStrings()
 	widget.SetLanguage("EN")
@@ -409,6 +424,7 @@ func TestSystemMenu_OpensWithLocalizedItems(t *testing.T) {
 
 // Действия пунктов — на колбэки окна; состояние «развёрнуто» меняет доступность.
 func TestSystemMenu_ItemsRunWindowCallbacks(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.SetLanguage(widget.Language())
 	capSysStrings()
 	widget.SetLanguage("EN")
@@ -467,6 +483,7 @@ func TestSystemMenu_ItemsRunWindowCallbacks(t *testing.T) {
 
 // Пункт меню срабатывает по щелчку мышью.
 func TestSystemMenu_ClickOnItem(t *testing.T) {
+	testreset.Globals(t)
 	defer widget.SetLanguage(widget.Language())
 	capSysStrings()
 	widget.SetLanguage("EN")
@@ -491,6 +508,7 @@ func TestSystemMenu_ClickOnItem(t *testing.T) {
 
 // Повторное нажатие на значок закрывает меню и не открывает его заново.
 func TestSystemMenu_SecondPressClosesNotReopens(t *testing.T) {
+	testreset.Globals(t)
 	s := capWindow(t, capProfile(t, theme.ProfileWindows2000, nil))
 	s.win.SetIcon(capIcon(capRed))
 	r := s.win.IconBounds()
@@ -517,6 +535,7 @@ func TestSystemMenu_SecondPressClosesNotReopens(t *testing.T) {
 
 // Двойной щелчок по значку закрывает окно, как в Windows.
 func TestSystemMenu_DoubleClickCloses(t *testing.T) {
+	testreset.Globals(t)
 	s := capWindow(t, capProfile(t, theme.ProfileWindows2000, nil))
 	closed := 0
 	s.win.OnClose = func() { closed++ }
@@ -531,6 +550,7 @@ func TestSystemMenu_DoubleClickCloses(t *testing.T) {
 
 // Нажатие на значок не тащит окно; нажатие на подпись — тащит.
 func TestWindowIcon_PressDoesNotDragWindow(t *testing.T) {
+	testreset.Globals(t)
 	s := capWindow(t, capProfile(t, theme.ProfileWindows2000, nil))
 	dragged := 0
 	s.win.OnDragMove = func(dx, dy int) { dragged++ }
@@ -563,6 +583,7 @@ func TestWindowIcon_PressDoesNotDragWindow(t *testing.T) {
 // Свой список пунктов заменяет умолчание; пустой список убирает меню, и тогда
 // значок — просто картинка, за которую окно тащат.
 func TestSystemMenu_CustomAndDisabled(t *testing.T) {
+	testreset.Globals(t)
 	s := capWindow(t, capProfile(t, theme.ProfileWindows2000, nil))
 	s.win.SetIcon(capIcon(capRed))
 	hits := 0
@@ -629,6 +650,7 @@ func capTitleChild(t *testing.T) (*capScene, *capChild, image.Point) {
 // нажатия не получает: окно забирает его под перетаскивание. Это поведение
 // прежних приложений — оно не меняется.
 func TestTitleBar_ChildWithoutClaimLosesPress(t *testing.T) {
+	testreset.Globals(t)
 	s, c, pt := capTitleChild(t)
 	if !s.win.WantsCapture(widget.MouseEvent{X: pt.X, Y: pt.Y, Button: widget.MouseLeft, Pressed: true}) {
 		t.Fatal("окно не просит захват на нажатие по заголовку")
@@ -642,6 +664,7 @@ func TestTitleBar_ChildWithoutClaimLosesPress(t *testing.T) {
 // TitleBarPressOwner отдаёт нажатие ребёнку без захвата мыши и без
 // перетаскивания окна.
 func TestTitleBar_PressOwnerGetsPress(t *testing.T) {
+	testreset.Globals(t)
 	s, c, pt := capTitleChild(t)
 	c.owns = true
 	dragged := 0
@@ -667,6 +690,7 @@ func TestTitleBar_PressOwnerGetsPress(t *testing.T) {
 
 // SetTitleBarHitTest исключает из перетаскивания произвольные точки полосы.
 func TestTitleBar_HitTestExcludesPoint(t *testing.T) {
+	testreset.Globals(t)
 	s, c, pt := capTitleChild(t)
 	s.win.SetTitleBarHitTest(func(p image.Point) bool { return p.In(c.Bounds()) })
 	if s.win.WantsCapture(widget.MouseEvent{X: pt.X, Y: pt.Y, Button: widget.MouseLeft, Pressed: true}) {
@@ -687,6 +711,7 @@ func TestTitleBar_HitTestExcludesPoint(t *testing.T) {
 // Движок гасит меню нажатием вне его: DismissedByPress верно до начала
 // следующего нажатия, и Toggle повторно меню не открывает.
 func TestPopupMenu_DismissedByPressAndToggle(t *testing.T) {
+	testreset.Globals(t)
 	m := widget.NewPopupMenu()
 	m.AddItem("Один", nil)
 

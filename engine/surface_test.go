@@ -6,8 +6,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // pixelFormatScene строит одну и ту же сцену (заливка + изображение +
@@ -115,8 +115,8 @@ func TestPixelFormatBGRXMatchesRGBASwapped(t *testing.T) {
 	pixelFormatScene(bgrx)
 	bgrx.renderFrame()
 
-	want := rgba.canvas.front.Pix
-	got := bgrx.canvas.front.Pix
+	want := rgba.canvas.Front().Pix
+	got := bgrx.canvas.Front().Pix
 	if len(want) != len(got) {
 		t.Fatalf("разный размер буфера: rgba=%d bgrx=%d", len(want), len(got))
 	}
@@ -158,7 +158,7 @@ func TestPixelFormatBGRXBackgroundImage(t *testing.T) {
 	rgba := New(w, h, 30)
 	rgba.mu.Lock()
 	rgba.bgSrc = bg
-	rgba.canvas.setBackground(bg)
+	rgba.canvas.SetBackground(bg)
 	rgba.mu.Unlock()
 	rgba.SetRoot(widget.NewPanel(color.RGBA{}))
 	rgba.renderFrame()
@@ -166,7 +166,7 @@ func TestPixelFormatBGRXBackgroundImage(t *testing.T) {
 	bgrx := New(w, h, 30)
 	bgrx.mu.Lock()
 	bgrx.bgSrc = bg
-	bgrx.canvas.setBackground(bg)
+	bgrx.canvas.SetBackground(bg)
 	bgrx.mu.Unlock()
 	if err := bgrx.SetPixelFormat(FormatBGRX); err != nil { // должен перестроить уже установленный фон
 		t.Fatalf("SetPixelFormat: %v", err)
@@ -174,8 +174,8 @@ func TestPixelFormatBGRXBackgroundImage(t *testing.T) {
 	bgrx.SetRoot(widget.NewPanel(color.RGBA{}))
 	bgrx.renderFrame()
 
-	want := rgba.canvas.front.Pix
-	got := bgrx.canvas.front.Pix
+	want := rgba.canvas.Front().Pix
+	got := bgrx.canvas.Front().Pix
 	for i := 0; i+3 < len(want); i += 4 {
 		if got[i] != want[i+2] || got[i+1] != want[i+1] || got[i+2] != want[i] || got[i+3] != want[i+3] {
 			t.Fatalf("пиксель %d: фон не переставлен корректно (rgba=%v bgrx=%v)",
@@ -222,13 +222,13 @@ func TestSetSurfaceNilReverts(t *testing.T) {
 	if err := eng.SetSurface(buf, 64*4, FormatRGBA); err != nil {
 		t.Fatalf("SetSurface: %v", err)
 	}
-	if &eng.canvas.back.Pix[0] != &buf[0] {
+	if &eng.canvas.Back().Pix[0] != &buf[0] {
 		t.Fatal("back не переключился на переданную память")
 	}
 	if err := eng.SetSurface(nil, 0, 0); err != nil {
 		t.Fatalf("SetSurface(nil): %v", err)
 	}
-	if eng.canvas.back != eng.canvas.backOwn {
+	if !eng.canvas.UsingOwnBack() {
 		t.Fatal("после SetSurface(nil) back не вернулся к собственному буферу канваса")
 	}
 }
@@ -254,10 +254,10 @@ func TestSetSurfaceMatchesInternalBuffer(t *testing.T) {
 	pixelFormatScene(external)
 	external.renderFrame()
 
-	want := internal.canvas.front.Pix
+	want := internal.canvas.Front().Pix
 	// front канваса с чужим back — собственный внутренний буфер (см.
 	// SetSurface: front не переключается), после diff обязан совпасть.
-	if got := external.canvas.front.Pix; !bytes.Equal(want, got) {
+	if got := external.canvas.Front().Pix; !bytes.Equal(want, got) {
 		t.Fatal("рендер в чужую память разошёлся с рендером на внутреннем буфере (front)")
 	}
 	// А сама чужая память — то, ради чего SetSurface вообще есть — обязана

@@ -6,8 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // RichText на настоящем движке: снимок кадра проверяется пикселями, а события
@@ -56,6 +57,7 @@ func richInk(img *image.RGBA, r image.Rectangle) image.Rectangle {
 // Главный довод: мелкий и крупный ран стоят на ОДНОЙ базовой линии, а крупный
 // не обрезан сверху — строка выше базового кегля виджета.
 func TestRichTextRender_MixedSizesShareBaseline(t *testing.T) {
+	testreset.Globals(t)
 	const small, big = 10.0, 40.0
 	bounds := image.Rect(20, 20, 420, 220)
 	eng, rt := richEngine(t, bounds,
@@ -124,6 +126,7 @@ func TestRichTextRender_MixedSizesShareBaseline(t *testing.T) {
 // Подчёркивание: положение и толщина идут от метрик шрифта — у крупного
 // шрифта линия толще и лежит ниже базовой линии, но в пределах спуска.
 func TestRichTextRender_UnderlineScalesWithFont(t *testing.T) {
+	testreset.Globals(t)
 	bounds := image.Rect(20, 20, 500, 260)
 	eng, rt := richEngine(t, bounds,
 		widget.RichParagraph{Runs: []widget.RichRun{{Text: "WWWW", Size: 10, Underline: true}}},
@@ -178,6 +181,7 @@ func TestRichTextRender_UnderlineScalesWithFont(t *testing.T) {
 
 // Прокрутка через движок: колесо двигает текст, и в кадре видны другие строки.
 func TestRichTextRender_ScrollingShowsOtherLines(t *testing.T) {
+	testreset.Globals(t)
 	var paras []widget.RichParagraph
 	for i := 0; i < 80; i++ {
 		paras = append(paras, widget.RichParagraph{Runs: []widget.RichRun{{Text: "WWWWWWWW line"}}})
@@ -217,6 +221,7 @@ func richAbs(a, b int) int {
 // Ссылка, двойной щелчок и Ctrl+C — всё через движок: номер серии считает он,
 // фокус получает виджет по щелчку, клавиша идёт в сфокусированный виджет.
 func TestRichTextEngine_LinkDoubleClickAndCopy(t *testing.T) {
+	testreset.Globals(t)
 	bounds := image.Rect(20, 20, 420, 120)
 	eng, rt := richEngine(t, bounds, widget.RichParagraph{Runs: []widget.RichRun{
 		{Text: "see "},

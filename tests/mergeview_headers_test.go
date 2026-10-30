@@ -5,7 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // GG-61: у панели итога есть свои заголовок и примечание. GG-65: у шапки панели
@@ -22,6 +23,7 @@ func mergeHeadersView() *widget.MergeView {
 // GG-61: SetResultInfo доходит до шапки итога (видно скринридеру) и читается
 // обратно; пустой заголовок — прежний, из ключа merge.side.result.
 func TestMergeView_ResultInfo(t *testing.T) {
+	testreset.Globals(t)
 	mv := mergeHeadersView()
 
 	panes := mergePanes(widget.BuildAccessTree(mv, mv))
@@ -48,6 +50,7 @@ func TestMergeView_ResultInfo(t *testing.T) {
 
 // GG-65: подписи сторон читаются обратно.
 func TestMergeView_SidesGetter(t *testing.T) {
+	testreset.Globals(t)
 	mv := mergeHeadersView()
 	ours := widget.MergeSideInfo{Title: "main", Note: "config.go", Hint: "ваша ветка, HEAD"}
 	base := widget.MergeSideInfo{Title: "merge-base", Hint: "общий предок"}
@@ -64,6 +67,7 @@ func TestMergeView_SidesGetter(t *testing.T) {
 // уходит скринридеру описанием панели. У сторон и у итога шапки растут
 // независимо: пояснение у итога не сдвигает верхние панели.
 func TestMergeView_HintGrowsHeader(t *testing.T) {
+	testreset.Globals(t)
 	mv := mergeHeadersView()
 	plain := mergePanes(widget.BuildAccessTree(mv, mv))
 

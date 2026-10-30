@@ -5,8 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Виджет, лежащий МЕЖДУ двумя далёкими заявленными областями.
@@ -25,6 +26,7 @@ import (
 // живущий до ближайшего полного кадра. Именно это владелец и увидел в showcase
 // как мигание интерфейса.
 func TestPartialFrame_WidgetBetweenTwoDamageRects(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 640, 480
 
 	root := widget.NewPanel(color.RGBA{R: 24, G: 28, B: 36, A: 255})

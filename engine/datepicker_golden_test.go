@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Эталонные кадры поля даты: поле в фокусе с выбранной датой и открытый
@@ -41,10 +41,10 @@ func datePickerGoldenScene(t *testing.T, th *widget.Theme) *image.RGBA {
 	// Мышь над числом во второй строке сетки.
 	p.OnMouseMove(140, 181)
 
-	c.blitBackground()
+	c.BlitBackground()
 	root.Draw(c)
 	p.DrawOverlay(c)
-	return c.back
+	return c.Back()
 }
 
 func TestGolden_DatePicker(t *testing.T) {

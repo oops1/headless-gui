@@ -5,7 +5,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // GG-73: пустая область отсечения снимала отсечение вовсе. В полном кадре
@@ -43,21 +43,21 @@ func TestCanvas_EmptyClipDrawsNothing(t *testing.T) {
 	c.FillRect(0, 0, 120, 80, red)
 	c.DrawText("клип", 5, 5, red)
 	c.SetPixel(10, 10, red)
-	if n := countColor(c.back, red); n != 0 {
+	if n := countColor(c.Back(), red); n != 0 {
 		t.Fatalf("при пустом клипе нарисовано %d точек — отсечение снялось", n)
 	}
 
 	// Сужение пустого клипа тоже пустое — не «весь кадр».
 	c.SetClip(c.Clip().Intersect(image.Rect(0, 0, 50, 50)))
 	c.FillRect(0, 0, 120, 80, red)
-	if n := countColor(c.back, red); n != 0 {
+	if n := countColor(c.Back(), red); n != 0 {
 		t.Fatalf("сужение пустого клипа нарисовало %d точек", n)
 	}
 
 	// ClearClip возвращает рисование по всему холсту.
 	c.ClearClip()
 	c.FillRect(0, 0, 120, 80, red)
-	if n := countColor(c.back, red); n == 0 {
+	if n := countColor(c.Back(), red); n == 0 {
 		t.Fatal("после ClearClip рисование не вернулось")
 	}
 }
@@ -69,11 +69,11 @@ func TestCanvas_EmptyClipSameInPartialFrame(t *testing.T) {
 	c := clipCanvas(t)
 	red := color.RGBA{R: 255, A: 255}
 
-	c.setBaseClip(image.Rect(0, 0, 120, 80))
+	c.SetBaseClip(image.Rect(0, 0, 120, 80))
 	c.SetClip(image.Rect(200, 200, 260, 260))
 	c.FillRect(0, 0, 120, 80, red)
-	c.clearBaseClip()
-	if n := countColor(c.back, red); n != 0 {
+	c.ClearBaseClip()
+	if n := countColor(c.Back(), red); n != 0 {
 		t.Fatalf("частичный кадр: при пустом клипе нарисовано %d точек", n)
 	}
 }

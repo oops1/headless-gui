@@ -6,12 +6,14 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // TestCanvas_RemoveChild_KeepsChildInfosAligned — удаление среднего
 // ребёнка не должно смещать attached-свойства остальных.
 func TestCanvas_RemoveChild_KeepsChildInfosAligned(t *testing.T) {
+	testreset.Globals(t)
 	c := widget.NewCanvas()
 	c.SetBounds(image.Rect(0, 0, 400, 300))
 
@@ -43,6 +45,7 @@ func TestCanvas_RemoveChild_KeepsChildInfosAligned(t *testing.T) {
 
 // TestCanvas_RemoveChild_Missing — удаление чужого виджета ничего не ломает.
 func TestCanvas_RemoveChild_Missing(t *testing.T) {
+	testreset.Globals(t)
 	c := widget.NewCanvas()
 	c.SetBounds(image.Rect(0, 0, 100, 100))
 	b1 := widget.NewButton("1")
@@ -59,6 +62,7 @@ func TestCanvas_RemoveChild_Missing(t *testing.T) {
 // TestCanvas_ClearChildren_ResetsInfos — после очистки добавление
 // начинается с чистого childInfos.
 func TestCanvas_ClearChildren_ResetsInfos(t *testing.T) {
+	testreset.Globals(t)
 	c := widget.NewCanvas()
 	c.SetBounds(image.Rect(0, 0, 400, 300))
 	c.AddChildAt(widget.NewButton("1"), widget.CanvasAttached{Left: 10, Top: 10, Right: -1, Bottom: -1}, 50, 20)
@@ -83,6 +87,7 @@ func TestCanvas_ClearChildren_ResetsInfos(t *testing.T) {
 // TestCanvas_SetChildDesiredSize — смена желаемого размера без
 // удаления/повторного добавления ребёнка.
 func TestCanvas_SetChildDesiredSize(t *testing.T) {
+	testreset.Globals(t)
 	c := widget.NewCanvas()
 	c.SetBounds(image.Rect(0, 0, 400, 300))
 	b := widget.NewButton("1")

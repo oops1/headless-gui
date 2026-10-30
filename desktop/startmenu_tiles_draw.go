@@ -15,8 +15,8 @@ import (
 	"image/color"
 	"strings"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // startSnap — снимок состояния ввода для одного кадра.
@@ -168,9 +168,19 @@ func (m *StartMenu) tileKeyFor(g startGeo) tileKey {
 	}
 }
 
-// drawTile рисует одну плитку: подложка по стилю, значок, название, подзаголовок
-// и метка.
+// drawTile рисует одну плитку: у живой посреди перехода — композицию кэшей
+// (livetile.go), иначе — показанное содержимое.
 func (m *StartMenu) drawTile(ctx widget.DrawContext, rect image.Rectangle, t Tile, st theme.State, key string) {
+	if m.drawTileTransition(ctx, rect, t, st, key) {
+		return
+	}
+	t.Content = m.liveContent(t)
+	m.paintTile(ctx, rect, t, st, key)
+}
+
+// paintTile рисует плитку с содержимым t.Content: подложка по стилю, значок,
+// название, подзаголовок и метка.
+func (m *StartMenu) paintTile(ctx widget.DrawContext, rect image.Rectangle, t Tile, st theme.State, key string) {
 	s := m.fade.Style(m.tm, key, rect, st, func(st theme.State) *theme.Style { return m.tpart("tile", st) })
 	ink := s.Text
 	if bg := t.Content.Background; bg.A > 0 {

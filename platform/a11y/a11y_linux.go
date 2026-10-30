@@ -1,0 +1,1493 @@
+//go:build linux && !android
+
+// a11y_linux.go — мост доступности AT-SPI 2 (Linux) поверх своего D-Bus.
+//
+// Как это устроено у всех тулкитов и как сделано здесь:
+//
+//  1. Адрес ШИНЫ ДОСТУПНОСТИ берётся у сессионной шины:
+//     org.a11y.Bus.GetAddress (это отдельный dbus-daemon, поднимаемый
+//     at-spi-bus-launcher). Там же спрашивается org.a11y.Status.IsEnabled —
+//     без включённой доступности мост не поднимаем (нулевая цена по умолчанию).
+//  2. Приложение подключается к этой шине и ЭКСПОРТИРУЕТ дерево объектов
+//     /org/a11y/atspi/accessible/<id> с интерфейсами Accessible, Component,
+//     Application (+ Value/Action по роли).
+//  3. Регистрация в реестре: org.a11y.atspi.Socket.Embed на объекте
+//     /org/a11y/atspi/accessible/root сервиса org.a11y.atspi.Registry.
+//     После этого скринридер (Orca) видит приложение и обходит его дерево.
+//  4. События (фокус, смена имени/значения/состояния) шлются сигналами
+//     org.a11y.atspi.Event.Object с пути изменившегося объекта.
+//
+// Семантика берётся из движка (engine.AccessibilityTree) — виджетам ничего
+// делать не нужно. Снимок пересобирается лениво: по уведомлению об изменении
+// UI, но не чаще a11yRefreshEvery.
+
+package a11y
+
+import (
+	"fmt"
+	"image"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/oops1/headless-gui/v4/platform/dbus"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/widget/base"
+)
+
+const (
+	atspiRegistryName = "org.a11y.atspi.Registry"
+	atspiRootPath     = "/org/a11y/atspi/accessible/root"
+	atspiNullPath     = "/org/a11y/atspi/null"
+	atspiPathPrefix   = "/org/a11y/atspi/accessible/"
+
+	ifaceAccessible  = "org.a11y.atspi.Accessible"
+	ifaceComponent   = "org.a11y.atspi.Component"
+	ifaceApplication = "org.a11y.atspi.Application"
+	ifaceValue       = "org.a11y.atspi.Value"
+	ifaceAction      = "org.a11y.atspi.Action"
+	ifaceText        = "org.a11y.atspi.Text"
+	ifaceSocket      = "org.a11y.atspi.Socket"
+	ifaceCache       = "org.a11y.atspi.Cache"
+	atspiCachePath   = "/org/a11y/atspi/cache"
+
+	// Формат записи кэша AT-SPI: ссылка, приложение, родитель, индекс в
+	// родителе, число детей, интерфейсы, имя, роль, описание, состояния.
+	atspiCacheItemSig  = "((so)(so)(so)iiassusau)"
+	atspiCacheItemsSig = "a" + atspiCacheItemSig
+	ifaceEventObject   = "org.a11y.atspi.Event.Object"
+	ifaceEventFocus    = "org.a11y.atspi.Event.Focus"
+
+	// Тип координат в Component (ATSPI_COORD_TYPE_*).
+	atspiCoordScreen = 0
+	atspiCoordWindow = 1
+	atspiCoordParent = 2
+)
+
+// ─── Роли и состояния AT-SPI ─────────────────────────────────────────────────
+//
+// Числа — значения enum'ов ATSPI_ROLE_* / ATSPI_STATE_* из at-spi2-core
+// (проверены по atspi-constants.h 2.52).
+
+const (
+	atspiRoleInvalid     = 0
+	atspiRoleCheckBox    = 7
+	atspiRoleCheckMenuIt = 8
+	atspiRoleComboBox    = 11
+	atspiRoleDesktopFrm  = 14
+	atspiRoleDialog      = 16
+	atspiRoleFiller      = 20
+	atspiRoleFrame       = 23
+	atspiRolePasswordTxt = 40
+	atspiRoleImage       = 27
+	atspiRoleLabel       = 29
+	atspiRoleList        = 31
+	atspiRoleMenu        = 33
+	atspiRoleMenuBar     = 34
+	atspiRoleMenuItem    = 35
+	atspiRolePageTabList = 38
+	atspiRolePanel       = 39
+	atspiRoleProgressBar = 42
+	atspiRolePushButton  = 43
+	atspiRoleRadioButton = 44
+	atspiRoleSlider      = 51
+	atspiRoleSpinButton  = 52
+	atspiRoleText        = 61
+	atspiRoleToggleBtn   = 62
+	atspiRoleUnknown     = 67
+	atspiRoleApplication = 75
+	atspiRoleEntry       = 79
+	atspiRoleGrouping    = 99
+)
+
+const (
+	atspiStateActive    = 1
+	atspiStateChecked   = 4
+	atspiStateCollapsed = 5
+	atspiStateEditable  = 7
+	atspiStateEnabled   = 8
+	atspiStateExpandble = 9
+	atspiStateExpanded  = 10
+	atspiStateFocusable = 11
+	atspiStateFocused   = 12
+	atspiStateModal     = 16
+	atspiStatePressed   = 20
+	atspiStateSelectbl  = 22
+	atspiStateSelected  = 23
+	atspiStateSensitive = 24
+	atspiStateShowing   = 25
+	atspiStateVisible   = 30
+	atspiStateCheckable = 41
+	atspiStateHasPopup  = 42
+)
+
+// Слои компонента (ATSPI_LAYER_*).
+const (
+	atspiLayerWidget = 3
+	atspiLayerPopup  = 5
+)
+
+// atspiRoleOf переводит роль движка в роль AT-SPI.
+func atspiRoleOf(r base.AccessRole) uint32 {
+	switch r {
+	case base.RoleWindow:
+		return atspiRoleFrame
+	case base.RolePanel:
+		return atspiRolePanel
+	case base.RoleGroup:
+		return atspiRoleGrouping
+	case base.RoleButton:
+		return atspiRolePushButton
+	case base.RoleCheckBox:
+		return atspiRoleCheckBox
+	case base.RoleRadioButton:
+		return atspiRoleRadioButton
+	case base.RoleSwitch:
+		return atspiRoleToggleBtn
+	case base.RoleSlider:
+		return atspiRoleSlider
+	case base.RoleProgressBar:
+		return atspiRoleProgressBar
+	case base.RoleTextInput:
+		return atspiRoleEntry
+	case base.RoleDocument:
+		// В AT-SPI многострочный текст — это «text», а «entry» остаётся
+		// однострочному полю: по этому различию скринридер решает, читать
+		// содержимое построчно или одной подписью.
+		return atspiRoleText
+	case base.RoleLabel:
+		return atspiRoleLabel
+	case base.RoleComboBox:
+		return atspiRoleComboBox
+	case base.RoleList:
+		return atspiRoleList
+	case base.RoleTabControl:
+		return atspiRolePageTabList
+	case base.RoleMenuBar:
+		return atspiRoleMenuBar
+	case base.RoleSpinner:
+		return atspiRoleSpinButton
+	case base.RoleImage:
+		return atspiRoleImage
+	case base.RoleDialog:
+		return atspiRoleDialog
+	case base.RoleMenu:
+		return atspiRoleMenu
+	case base.RoleMenuItem:
+		return atspiRoleMenuItem
+	}
+	return atspiRoleUnknown
+}
+
+// atspiRoleName — машинное имя роли (нижний регистр, пробелы), как его отдают
+// GTK/Qt: скринридеры показывают его, когда нет локализованного варианта.
+func atspiRoleName(role uint32) string {
+	switch role {
+	case atspiRoleFrame:
+		return "frame"
+	case atspiRolePanel:
+		return "panel"
+	case atspiRoleGrouping:
+		return "grouping"
+	case atspiRolePushButton:
+		return "push button"
+	case atspiRoleCheckBox:
+		return "check box"
+	case atspiRoleRadioButton:
+		return "radio button"
+	case atspiRoleToggleBtn:
+		return "toggle button"
+	case atspiRoleSlider:
+		return "slider"
+	case atspiRoleProgressBar:
+		return "progress bar"
+	case atspiRoleEntry:
+		return "entry"
+	case atspiRoleText:
+		return "text"
+	case atspiRoleLabel:
+		return "label"
+	case atspiRoleComboBox:
+		return "combo box"
+	case atspiRoleList:
+		return "list"
+	case atspiRolePageTabList:
+		return "page tab list"
+	case atspiRoleMenuBar:
+		return "menu bar"
+	case atspiRoleMenu:
+		return "menu"
+	case atspiRoleMenuItem:
+		return "menu item"
+	case atspiRoleCheckMenuIt:
+		return "check menu item"
+	case atspiRoleSpinButton:
+		return "spin button"
+	case atspiRoleImage:
+		return "image"
+	case atspiRoleApplication:
+		return "application"
+	case atspiRoleDialog:
+		return "dialog"
+	}
+	return "unknown"
+}
+
+// atspiStateSet собирает битовый набор состояний AT-SPI (два uint32:
+// биты 0-31 и 32-63) по семантике узла.
+func atspiStateSet(info base.AccessInfo, focused bool) []uint32 {
+	var bits [2]uint32
+	set := func(b uint) { bits[b/32] |= 1 << (b % 32) }
+
+	set(atspiStateVisible)
+	// Элемент вне видимой области (прокручен за край, меню закрыто) существует
+	// и виден «в принципе», но на экране его нет: showing снимается.
+	if !a11yHasState(info.States, base.StateOffscreen) {
+		set(atspiStateShowing)
+	}
+	disabled := a11yHasState(info.States, base.StateDisabled)
+	if !disabled {
+		set(atspiStateEnabled)
+		set(atspiStateSensitive)
+	}
+	switch info.Role {
+	case base.RoleButton, base.RoleCheckBox, base.RoleRadioButton, base.RoleSwitch,
+		base.RoleSlider, base.RoleTextInput, base.RoleComboBox, base.RoleList,
+		base.RoleTabControl, base.RoleSpinner, base.RoleMenuItem:
+		if !disabled {
+			set(atspiStateFocusable)
+		}
+	}
+	switch info.Role {
+	case base.RoleCheckBox, base.RoleRadioButton, base.RoleSwitch:
+		set(atspiStateCheckable)
+	case base.RoleTextInput:
+		set(atspiStateEditable)
+	}
+	if a11yHasState(info.States, base.StateCheckable) {
+		set(atspiStateCheckable)
+	}
+	if a11yHasState(info.States, base.StateHasPopup) {
+		set(atspiStateHasPopup)
+		set(atspiStateExpandble)
+		if !a11yHasState(info.States, base.StateExpanded) {
+			set(atspiStateCollapsed)
+		}
+	}
+	if focused {
+		set(atspiStateFocused)
+		set(atspiStateActive)
+	}
+	if a11yHasState(info.States, base.StateChecked) {
+		set(atspiStateChecked)
+		if info.Role == base.RoleSwitch {
+			set(atspiStatePressed)
+		}
+	}
+	if a11yHasState(info.States, base.StateSelected) {
+		if info.Role == base.RoleRadioButton {
+			// Радиокнопка в AT-SPI «отмечена», а не «выбрана»: так её читает
+			// Orca («радиокнопка, отмечена»), так её отдают GTK и Qt. Состояние
+			// selected означало бы выбранную строку списка.
+			set(atspiStateChecked)
+		} else {
+			set(atspiStateSelected)
+			set(atspiStateSelectbl)
+		}
+	}
+	if a11yHasState(info.States, base.StateExpanded) {
+		set(atspiStateExpanded)
+		set(atspiStateExpandble)
+	}
+	if a11yHasState(info.States, base.StateModal) {
+		set(atspiStateModal)
+	}
+	if a11yHasState(info.States, base.StateInactive) {
+		bits[atspiStateActive/32] &^= 1 << (atspiStateActive % 32)
+	}
+	return bits[:]
+}
+
+// ─── Мост ────────────────────────────────────────────────────────────────────
+
+func init() {
+	native.RegisterAccessibility(func(h native.AccessHost) native.AccessBridge { return &atspiBridge{host: h} })
+}
+
+// atspiBridge — состояние моста для одного окна.
+type atspiBridge struct {
+	host native.AccessHost
+	conn *dbus.Conn
+
+	mu      sync.RWMutex
+	view    *a11yView
+	prev    *a11yView // предыдущий снимок — для деталей событий состояний
+	ids     a11yIDPool
+	stamp   time.Time
+	dirty   bool
+	appName string // уникальное имя на шине доступности (:1.N)
+
+	notifier uint64 // дескриптор подписки на изменения UI
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	appID    int32 // id приложения, назначенный реестром
+}
+
+// Start поднимает мост: проверяет, включена ли доступность, подключается к
+// шине a11y, экспортирует дерево и регистрируется в реестре.
+func (b *atspiBridge) Start() error {
+	if !b.enabled() {
+		return fmt.Errorf("a11y: доступность выключена")
+	}
+	addr, err := atspiBusAddress()
+	if err != nil {
+		return err
+	}
+	conn, err := dbus.Dial(addr)
+	if err != nil {
+		return fmt.Errorf("a11y: шина доступности: %w", err)
+	}
+	b.conn = conn
+	b.appName = conn.Unique
+	conn.SetCallHandler(b.handleCall)
+
+	// Регистрация в реестре: наш корень «вставляется» в рабочий стол.
+	reply, err := conn.Call(atspiRegistryName, atspiRootPath, ifaceSocket, "Embed",
+		"(so)", []any{dbus.Struct{Fields: []any{b.appName, dbus.ObjectPath(atspiRootPath)}}})
+	if err != nil {
+		conn.Close()
+		b.conn = nil
+		return fmt.Errorf("a11y: Embed в реестр: %w", err)
+	}
+	_ = reply // ответ — ссылка на рабочий стол, нам она не нужна
+
+	b.refresh(true)
+	b.stopCh = make(chan struct{})
+	// Подписка на изменения UI: сама по себе она только взводит флаг —
+	// пересборка снимка и рассылка событий идут в своей горутине не чаще
+	// a11yRefreshEvery, иначе бурная анимация утопит шину в событиях.
+	b.notifier = base.RegisterUINotifier(b.markDirty, nil)
+	go b.eventLoop()
+	return nil
+}
+
+// Stop снимает подписки и закрывает соединение.
+func (b *atspiBridge) Stop() {
+	b.stopOnce.Do(func() {
+		if b.stopCh != nil {
+			close(b.stopCh)
+		}
+		base.UnregisterUINotifier(b.notifier)
+		if b.conn != nil {
+			// Вежливо выписываемся из реестра — иначе Orca будет держать
+			// «мёртвое» приложение до таймаута.
+			_ = b.conn.CallNoReply(atspiRegistryName, atspiRootPath, ifaceSocket, "Unembed",
+				"(so)", []any{dbus.Struct{Fields: []any{b.appName, dbus.ObjectPath(atspiRootPath)}}})
+			b.conn.Close()
+		}
+	})
+}
+
+func (b *atspiBridge) markDirty() {
+	b.mu.Lock()
+	b.dirty = true
+	b.mu.Unlock()
+}
+
+// enabled решает, поднимать ли мост: переменная окружения HEADLESS_GUI_A11Y,
+// затем явное указание приложения (AccessibilityForced), затем
+// org.a11y.Status.
+func (b *atspiBridge) enabled() bool {
+	if v := os.Getenv("HEADLESS_GUI_A11Y"); v != "" {
+		return v != "0" && strings.ToLower(v) != "false"
+	}
+	if on, set := b.host.AccessibilityForced(); set {
+		return on
+	}
+	c, err := dbus.Session()
+	if err != nil {
+		return false
+	}
+	get := func(prop string) bool {
+		reply, err := c.Call("org.a11y.Bus", "/org/a11y/bus", dbus.IfaceProperties, "Get", "ss",
+			[]any{"org.a11y.Status", prop})
+		if err != nil || len(reply.Body) == 0 {
+			return false
+		}
+		v, ok := reply.Body[0].(dbus.Variant)
+		if !ok {
+			return false
+		}
+		on, _ := v.Val.(bool)
+		return on
+	}
+	return get("IsEnabled") || get("ScreenReaderEnabled")
+}
+
+// atspiBusAddress спрашивает у сессионной шины адрес шины доступности.
+func atspiBusAddress() (string, error) {
+	c, err := dbus.Session()
+	if err != nil {
+		return "", err
+	}
+	reply, err := c.Call("org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress", "", nil)
+	if err != nil {
+		return "", fmt.Errorf("a11y: org.a11y.Bus.GetAddress: %w", err)
+	}
+	addr, _ := reply.Body[0].(string)
+	if addr == "" {
+		return "", fmt.Errorf("a11y: пустой адрес шины доступности")
+	}
+	return addr, nil
+}
+
+// ─── Снимок ──────────────────────────────────────────────────────────────────
+
+// refresh пересобирает снимок семантики (force — не глядя на троттлинг) и
+// возвращает изменения относительно прошлого снимка.
+func (b *atspiBridge) refresh(force bool) a11yChanges {
+	b.mu.Lock()
+	if !force && !b.dirty && time.Since(b.stamp) < a11yRefreshEvery {
+		b.mu.Unlock()
+		return a11yChanges{FocusLost: -1, FocusGained: -1}
+	}
+	old := b.view
+	b.mu.Unlock()
+
+	// Дерево строит движок — под своим замком; наш держать нельзя.
+	snap := accessibilitySnapshot(b.host)
+	var oldSnap *a11ySnapshot
+	if old != nil {
+		oldSnap = old.Snap
+	}
+	ch := a11yDiff(oldSnap, snap)
+
+	b.mu.Lock()
+	b.prev = b.view
+	b.view = b.ids.assign(snap)
+	b.stamp = time.Now()
+	b.dirty = false
+	b.mu.Unlock()
+	return ch
+}
+
+// current возвращает актуальное представление, при необходимости пересобрав его.
+func (b *atspiBridge) current() *a11yView {
+	b.mu.RLock()
+	v, stamp, dirty := b.view, b.stamp, b.dirty
+	b.mu.RUnlock()
+	if v == nil || (dirty && time.Since(stamp) >= a11yRefreshEvery) {
+		b.refresh(v == nil)
+		b.mu.RLock()
+		v = b.view
+		b.mu.RUnlock()
+	}
+	return v
+}
+
+// eventLoop раз в a11yRefreshEvery пересобирает снимок (если UI менялся) и
+// рассылает события доступности.
+func (b *atspiBridge) eventLoop() {
+	t := time.NewTicker(a11yRefreshEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-b.stopCh:
+			return
+		case <-t.C:
+			b.mu.RLock()
+			dirty := b.dirty
+			b.mu.RUnlock()
+			if !dirty {
+				continue
+			}
+			b.emitChanges(b.refresh(true))
+		}
+	}
+}
+
+// ─── События ─────────────────────────────────────────────────────────────────
+
+// atspiEvent отправляет событие доступности. Формат сигнала AT-SPI —
+// "siiv(so)": подробность, два целочисленных параметра, произвольные данные и
+// ссылка на ПРИЛОЖЕНИЕ-отправитель. Путь сигнала — объект, с которым событие
+// произошло; интерфейс — org.a11y.atspi.Event.<Категория>.
+func (b *atspiBridge) atspiEvent(id int32, iface, member, detail string, d1, d2 int32, data dbus.Variant) {
+	if b.conn == nil {
+		return
+	}
+	_ = b.conn.Emit(atspiPath(id), iface, member, "siiv(so)",
+		[]any{detail, d1, d2, data, b.ref(atspiAppID)})
+}
+
+// emitChanges рассылает события по результатам диффа снимков. Индексы в диффе
+// относятся к снимку, наружу же идут устойчивые идентификаторы объектов.
+func (b *atspiBridge) emitChanges(ch a11yChanges) {
+	b.mu.RLock()
+	prevV, curV := b.prev, b.view
+	b.mu.RUnlock()
+	if curV == nil {
+		return
+	}
+	prev, cur := (*a11ySnapshot)(nil), curV.Snap
+	if prevV != nil {
+		prev = prevV.Snap
+	}
+	emptyStr := dbus.Variant{Sig: "s", Val: ""}
+
+	if ch.FocusLost >= 0 && prevV != nil {
+		b.atspiEvent(prevV.id(ch.FocusLost), ifaceEventObject, "StateChanged", "focused", 0, 0, emptyStr)
+	}
+	if ch.FocusGained >= 0 {
+		gained := curV.id(ch.FocusGained)
+		b.atspiEvent(gained, ifaceEventObject, "StateChanged", "focused", 1, 0, emptyStr)
+		// Устаревшее, но всё ещё слушаемое некоторыми клиентами событие фокуса.
+		b.atspiEvent(gained, ifaceEventFocus, "Focus", "", 0, 0, emptyStr)
+	}
+	if ch.Structural {
+		b.emitStructural(prevV, curV)
+		return
+	}
+	for _, idx := range ch.NameChanged {
+		n := cur.node(idx)
+		if n == nil {
+			continue
+		}
+		id := curV.id(idx)
+		b.atspiEvent(id, ifaceEventObject, "PropertyChange", "accessible-name", 0, 0,
+			dbus.Variant{Sig: "s", Val: b.nameOf(id, n)})
+	}
+	for _, idx := range ch.ValueChanged {
+		n := cur.node(idx)
+		if n == nil {
+			continue
+		}
+		val, _, _, _ := atspiValueOf(n)
+		b.atspiEvent(curV.id(idx), ifaceEventObject, "PropertyChange", "accessible-value", 0, 0,
+			dbus.Variant{Sig: "d", Val: val})
+	}
+	if prev == nil {
+		return
+	}
+	for _, idx := range ch.StateChanged {
+		id := curV.id(idx)
+		oldN, newN := prev.node(idx), cur.node(idx)
+		if oldN == nil || newN == nil {
+			continue
+		}
+		for _, st := range atspiStateEvents {
+			was := a11yHasState(oldN.Info.States, st.widgetState)
+			now := a11yHasState(newN.Info.States, st.widgetState)
+			if was == now {
+				continue
+			}
+			on := int32(1)
+			if now == st.inverted {
+				on = 0
+			}
+			b.atspiEvent(id, ifaceEventObject, "StateChanged",
+				atspiStateDetail(st.widgetState, st.detail, newN.Info.Role), on, 0, emptyStr)
+		}
+	}
+}
+
+// emitStructural сообщает о перестройке дерева: исчезнувшие объекты помечаются
+// defunct и удаляются из кэша клиента, появившиеся — добавляются. Благодаря
+// устойчивым идентификаторам «исчез» означает именно исчез, а не «сдвинулся
+// индекс», поэтому кэш клиента не разъезжается с реальностью.
+func (b *atspiBridge) emitStructural(prevV, curV *a11yView) {
+	emptyStr := dbus.Variant{Sig: "s", Val: ""}
+	if prevV != nil {
+		for id, idx := range prevV.Index {
+			if _, alive := curV.Index[id]; alive {
+				continue
+			}
+			node := prevV.Snap.node(idx)
+			parent := int32(-1)
+			if node != nil && node.Parent >= 0 {
+				parent = prevV.id(node.Parent)
+			}
+			b.atspiEvent(id, ifaceEventObject, "StateChanged", "defunct", 1, 0, emptyStr)
+			if b.conn != nil {
+				_ = b.conn.Emit(atspiCachePath, ifaceCache, "RemoveAccessible", "(so)",
+					[]any{b.ref(id)})
+			}
+			if parent >= 0 {
+				b.atspiEvent(parent, ifaceEventObject, "ChildrenChanged", "remove", 0, 0,
+					dbus.Variant{Sig: "(so)", Val: b.ref(id)})
+			}
+		}
+	}
+	for id, idx := range curV.Index {
+		if prevV != nil {
+			if _, existed := prevV.Index[id]; existed {
+				continue
+			}
+		}
+		if b.conn != nil {
+			_ = b.conn.Emit(atspiCachePath, ifaceCache, "AddAccessible", atspiCacheItemSig,
+				[]any{b.cacheItem(curV, id)})
+		}
+		node := curV.Snap.node(idx)
+		if node == nil {
+			continue
+		}
+		parent := curV.id(node.Parent)
+		if node.Parent < 0 {
+			parent = atspiAppID
+		}
+		b.atspiEvent(parent, ifaceEventObject, "ChildrenChanged", "add", node.Index, 0,
+			dbus.Variant{Sig: "(so)", Val: b.ref(id)})
+	}
+}
+
+// atspiStateEvents — состояния движка, о смене которых сообщаем клиенту.
+// inverted=true: состояние движка означает ОТСУТСТВИЕ состояния AT-SPI
+// (disabled → enabled=0).
+var atspiStateEvents = []struct {
+	widgetState string
+	detail      string
+	inverted    bool
+}{
+	{base.StateChecked, "checked", false},
+	{base.StateSelected, "selected", false},
+	{base.StateExpanded, "expanded", false},
+	{base.StateModal, "modal", false},
+	{base.StateDisabled, "enabled", true},
+	{base.StateDisabled, "sensitive", true},
+	{base.StateInactive, "active", true},
+	{base.StateOffscreen, "showing", true},
+}
+
+// atspiStateDetail — имя состояния AT-SPI для сигнала StateChanged по
+// изменившемуся состоянию движка. У радиокнопки «выбрана» значит «отмечена»
+// (см. atspiStateSet), поэтому и сообщается как checked.
+func atspiStateDetail(widgetState, detail string, role base.AccessRole) string {
+	if widgetState == base.StateSelected && role == base.RoleRadioButton {
+		return "checked"
+	}
+	return detail
+}
+
+// ─── Пути объектов ───────────────────────────────────────────────────────────
+
+// atspiAppID — идентификатор объекта ПРИЛОЖЕНИЯ. Он синтетический: в дереве
+// AT-SPI приложение — отдельный узел над окном (рабочий стол → приложение →
+// фрейм → виджеты), а снимок движка начинается сразу с окна. Приложение живёт
+// по пути /org/a11y/atspi/accessible/root, узлы снимка — по /…/accessible/<id>.
+const atspiAppID int32 = -1
+
+// atspiPath возвращает путь объекта по id узла.
+func atspiPath(id int32) string {
+	if id == atspiAppID {
+		return atspiRootPath
+	}
+	return atspiPathPrefix + strconv.Itoa(int(id))
+}
+
+// atspiParsePath разбирает путь объекта в id узла. ok=false — путь не наш.
+func atspiParsePath(path string) (int32, bool) {
+	if path == atspiRootPath {
+		return atspiAppID, true
+	}
+	if !strings.HasPrefix(path, atspiPathPrefix) {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(path, atspiPathPrefix))
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return int32(n), true
+}
+
+// ref собирает ссылку AT-SPI (имя на шине, путь объекта).
+func (b *atspiBridge) ref(id int32) dbus.Struct {
+	return dbus.Struct{Fields: []any{b.appName, dbus.ObjectPath(atspiPath(id))}}
+}
+
+// nullRef — «пустая» ссылка (нет родителя/объекта).
+func (b *atspiBridge) nullRef() dbus.Struct {
+	return dbus.Struct{Fields: []any{b.appName, dbus.ObjectPath(atspiNullPath)}}
+}
+
+// ─── Геометрия ───────────────────────────────────────────────────────────────
+
+// extents переводит логические границы узла в координаты запрошенного типа.
+// Клиенты доступности работают в ФИЗИЧЕСКИХ пикселях экрана, поэтому логические
+// координаты движка умножаются на HiDPI-масштаб окна.
+func (b *atspiBridge) extents(r image.Rectangle, coord uint32) (x, y, w, h int32) {
+	scale := b.host.Scale()
+	if scale <= 0 {
+		scale = 1
+	}
+	px := func(v int) int32 { return int32(float64(v)*scale + 0.5) }
+	x, y = px(r.Min.X), px(r.Min.Y)
+	w, h = px(r.Dx()), px(r.Dy())
+	if coord == atspiCoordScreen && b.host.Native() != nil {
+		ox, oy := b.host.Native().GetPosition()
+		x += int32(ox)
+		y += int32(oy)
+	}
+	return
+}
+
+// pointToLogical переводит точку клиента (в координатах coord) в логические
+// координаты окна — для hit-теста по снимку.
+func (b *atspiBridge) pointToLogical(x, y int32, coord uint32) (int, int) {
+	scale := b.host.Scale()
+	if scale <= 0 {
+		scale = 1
+	}
+	fx, fy := float64(x), float64(y)
+	if coord == atspiCoordScreen && b.host.Native() != nil {
+		ox, oy := b.host.Native().GetPosition()
+		fx -= float64(ox)
+		fy -= float64(oy)
+	}
+	return int(fx/scale + 0.5), int(fy/scale + 0.5)
+}
+
+// ─── Обработка вызовов ───────────────────────────────────────────────────────
+
+// appNode — синтетический узел приложения: единственный ребёнок — окно
+// (корень снимка). Собирается на лету, чтобы не дублировать состояние.
+func (b *atspiBridge) appNode(v *a11yView) *a11yNode {
+	n := &a11yNode{Parent: -1, Index: -1}
+	n.Info.Name = b.host.Title()
+	if len(v.Snap.Nodes) > 0 {
+		n.Children = []int32{v.id(a11yRootID)}
+	}
+	return n
+}
+
+// handleCall — точка входа всех вызовов от клиентов доступности.
+func (b *atspiBridge) handleCall(msg *dbus.Message) *dbus.Reply {
+	v := b.current()
+	if msg.Path == atspiCachePath {
+		return b.handleCache(msg, v)
+	}
+	id, ok := atspiParsePath(msg.Path)
+	if !ok {
+		return nil
+	}
+	// node — узел снимка; children в нём хранят индексы снимка, поэтому наружу
+	// они отдаются только через v.id(...).
+	var node *a11yNode
+	if id == atspiAppID {
+		node = b.appNode(v)
+	} else if node = v.node(id); node == nil {
+		return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.UnknownObject",
+			ErrMsg: "нет объекта " + msg.Path}
+	}
+
+	switch msg.Interface {
+	case dbus.IfaceIntrospectable:
+		if msg.Member == "Introspect" {
+			return &dbus.Reply{Sig: "s", Body: []any{atspiIntrospectXML(id == atspiAppID)}}
+		}
+	case dbus.IfaceProperties:
+		return b.handleProps(msg, v, id, node)
+	case ifaceAccessible:
+		return b.handleAccessible(msg, v, id, node)
+	case ifaceComponent:
+		return b.handleComponent(msg, v, id, node)
+	case ifaceApplication:
+		return b.handleApplication(msg)
+	case ifaceValue:
+		return b.handleValue(msg, node)
+	case ifaceAction:
+		return b.handleAction(msg, node)
+	case ifaceText:
+		return b.handleText(msg, node)
+	}
+	return nil
+}
+
+// handleCache — org.a11y.atspi.Cache: клиент забирает ВСЁ дерево одним
+// вызовом вместо сотен точечных запросов. Именно так libatspi (а значит Orca)
+// наполняет свой кэш при подключении к приложению.
+func (b *atspiBridge) handleCache(msg *dbus.Message, v *a11yView) *dbus.Reply {
+	switch {
+	case msg.Interface == dbus.IfaceIntrospectable && msg.Member == "Introspect":
+		return &dbus.Reply{Sig: "s", Body: []any{atspiCacheXML}}
+	case msg.Interface == ifaceCache && msg.Member == "GetItems":
+		items := make([]any, 0, len(v.Snap.Nodes)+1)
+		items = append(items, b.cacheItem(v, atspiAppID))
+		for i := range v.Snap.Nodes {
+			items = append(items, b.cacheItem(v, v.id(int32(i))))
+		}
+		return &dbus.Reply{Sig: atspiCacheItemsSig,
+			Body: []any{dbus.Array{ElemSig: atspiCacheItemSig, Items: items}}}
+	}
+	return nil
+}
+
+// cacheItem собирает запись кэша: ссылка, приложение, родитель, индекс в
+// родителе, число детей, интерфейсы, имя, роль, описание, состояния.
+func (b *atspiBridge) cacheItem(v *a11yView, id int32) dbus.Struct {
+	var node *a11yNode
+	if id == atspiAppID {
+		node = b.appNode(v)
+	} else {
+		node = v.node(id)
+	}
+	if node == nil {
+		return dbus.Struct{}
+	}
+	index := node.Index
+	switch id {
+	case atspiAppID:
+		index = -1
+	case v.id(a11yRootID):
+		index = 0 // окно — первый ребёнок приложения
+	}
+	focused := id != atspiAppID && v.id(v.Snap.Focus) == id
+	return dbus.Struct{Fields: []any{
+		b.ref(id),
+		b.ref(atspiAppID),
+		b.parentRef(id, node),
+		index,
+		int32(len(node.Children)),
+		b.interfacesOf(id, node),
+		b.nameOf(id, node),
+		b.roleOf(id, node),
+		node.Info.Description,
+		atspiStateSet(node.Info, focused),
+	}}
+}
+
+// handleProps — org.freedesktop.DBus.Properties для наших интерфейсов.
+func (b *atspiBridge) handleProps(msg *dbus.Message, v *a11yView, id int32, node *a11yNode) *dbus.Reply {
+	prop := func(iface, name string) (dbus.Variant, bool) {
+		switch iface {
+		case ifaceAccessible:
+			switch name {
+			case "Name":
+				return dbus.Variant{Sig: "s", Val: b.nameOf(id, node)}, true
+			case "Description":
+				return dbus.Variant{Sig: "s", Val: node.Info.Description}, true
+			case "Parent":
+				return dbus.Variant{Sig: "(so)", Val: b.parentRef(id, node)}, true
+			case "ChildCount":
+				return dbus.Variant{Sig: "i", Val: int32(len(node.Children))}, true
+			case "Locale":
+				return dbus.Variant{Sig: "s", Val: atspiLocale()}, true
+			case "AccessibleId":
+				if id == atspiAppID {
+					return dbus.Variant{Sig: "s", Val: "root"}, true
+				}
+				return dbus.Variant{Sig: "s", Val: strconv.Itoa(int(id))}, true
+			case "HelpText":
+				return dbus.Variant{Sig: "s", Val: node.Info.Description}, true
+			}
+		case ifaceApplication:
+			switch name {
+			case "ToolkitName":
+				return dbus.Variant{Sig: "s", Val: "headless-gui"}, true
+			case "Version":
+				return dbus.Variant{Sig: "s", Val: "3"}, true
+			case "AtspiVersion":
+				return dbus.Variant{Sig: "s", Val: "2.1"}, true
+			case "Id":
+				return dbus.Variant{Sig: "i", Val: b.appIDValue()}, true
+			}
+		case ifaceValue:
+			cur, min, max, step := atspiValueOf(node)
+			switch name {
+			case "CurrentValue":
+				return dbus.Variant{Sig: "d", Val: cur}, true
+			case "MinimumValue":
+				return dbus.Variant{Sig: "d", Val: min}, true
+			case "MaximumValue":
+				return dbus.Variant{Sig: "d", Val: max}, true
+			case "MinimumIncrement":
+				return dbus.Variant{Sig: "d", Val: step}, true
+			}
+		case ifaceText:
+			text, caret, _, _ := atspiTextOf(node)
+			switch name {
+			case "CharacterCount":
+				return dbus.Variant{Sig: "i", Val: int32(base.AccessRuneLen(text))}, true
+			case "CaretOffset":
+				return dbus.Variant{Sig: "i", Val: int32(caret)}, true
+			}
+		case ifaceAction:
+			// Свежий libatspi берёт число действий СВОЙСТВОМ NActions, а не
+			// методом GetNActions (без этой ветки get_n_actions() возвращал 0,
+			// хотя сами действия работали).
+			if name == "NActions" {
+				return dbus.Variant{Sig: "i", Val: int32(len(atspiActions(node)))}, true
+			}
+		}
+		return dbus.Variant{}, false
+	}
+
+	switch msg.Member {
+	case "Get":
+		if len(msg.Body) < 2 {
+			return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs", ErrMsg: "Get(iface, name)"}
+		}
+		iface, _ := msg.Body[0].(string)
+		name, _ := msg.Body[1].(string)
+		if val, ok := prop(iface, name); ok {
+			return &dbus.Reply{Sig: "v", Body: []any{val}}
+		}
+		return &dbus.Reply{ErrName: "org.freedesktop.DBus.Error.InvalidArgs",
+			ErrMsg: "нет свойства " + iface + "." + name}
+	case "GetAll":
+		iface, _ := msg.Body[0].(string)
+		var names []string
+		switch iface {
+		case ifaceAccessible:
+			names = []string{"Name", "Description", "Parent", "ChildCount", "Locale", "AccessibleId", "HelpText"}
+		case ifaceApplication:
+			names = []string{"ToolkitName", "Version", "AtspiVersion", "Id"}
+		case ifaceValue:
+			names = []string{"CurrentValue", "MinimumValue", "MaximumValue", "MinimumIncrement"}
+		case ifaceText:
+			names = []string{"CharacterCount", "CaretOffset"}
+		}
+		all := map[string]dbus.Variant{}
+		for _, n := range names {
+			if val, ok := prop(iface, n); ok {
+				all[n] = val
+			}
+		}
+		return &dbus.Reply{Sig: "a{sv}", Body: []any{all}}
+	case "Set":
+		// Реестр присваивает приложению номер: Application.Id — единственное
+		// свойство, которое нам действительно пишут.
+		if len(msg.Body) >= 3 {
+			if iface, _ := msg.Body[0].(string); iface == ifaceApplication {
+				if name, _ := msg.Body[1].(string); name == "Id" {
+					if v, ok := msg.Body[2].(dbus.Variant); ok {
+						if n, ok := v.Val.(int32); ok {
+							b.mu.Lock()
+							b.appID = n
+							b.mu.Unlock()
+						}
+					}
+				}
+			}
+		}
+		return &dbus.Reply{}
+	}
+	_ = v
+	return nil
+}
+
+// childID переводит ребёнка узла в устойчивый id. У приложения ребёнок уже
+// хранится как id, у прочих узлов — как индекс снимка.
+func (b *atspiBridge) childID(v *a11yView, id int32, child int32) int32 {
+	if id == atspiAppID {
+		return child
+	}
+	return v.id(child)
+}
+
+// handleAccessible — org.a11y.atspi.Accessible.
+func (b *atspiBridge) handleAccessible(msg *dbus.Message, v *a11yView, id int32, node *a11yNode) *dbus.Reply {
+	snap := v.Snap
+	switch msg.Member {
+	case "GetChildAtIndex":
+		idx, _ := msg.Body[0].(int32)
+		if idx < 0 || int(idx) >= len(node.Children) {
+			return &dbus.Reply{Sig: "(so)", Body: []any{b.nullRef()}}
+		}
+		return &dbus.Reply{Sig: "(so)", Body: []any{b.ref(b.childID(v, id, node.Children[idx]))}}
+	case "GetChildren":
+		items := make([]any, 0, len(node.Children))
+		for _, c := range node.Children {
+			items = append(items, b.ref(b.childID(v, id, c)))
+		}
+		return &dbus.Reply{Sig: "a(so)", Body: []any{dbus.Array{ElemSig: "(so)", Items: items}}}
+	case "GetIndexInParent":
+		if id == atspiAppID {
+			return &dbus.Reply{Sig: "i", Body: []any{int32(-1)}}
+		}
+		if id == a11yRootID {
+			return &dbus.Reply{Sig: "i", Body: []any{int32(0)}} // окно — первый ребёнок приложения
+		}
+		return &dbus.Reply{Sig: "i", Body: []any{node.Index}}
+	case "GetRelationSet":
+		return &dbus.Reply{Sig: "a(ua(so))", Body: []any{dbus.Array{ElemSig: "(ua(so))"}}}
+	case "GetRole":
+		return &dbus.Reply{Sig: "u", Body: []any{b.roleOf(id, node)}}
+	case "GetRoleName", "GetLocalizedRoleName":
+		return &dbus.Reply{Sig: "s", Body: []any{atspiRoleName(b.roleOf(id, node))}}
+	case "GetState":
+		states := atspiStateSet(node.Info, snap.Focus == id)
+		return &dbus.Reply{Sig: "au", Body: []any{states}}
+	case "GetAttributes":
+		attrs := map[string]string{"toolkit": "headless-gui"}
+		return &dbus.Reply{Sig: "a{ss}", Body: []any{attrs}}
+	case "GetApplication":
+		return &dbus.Reply{Sig: "(so)", Body: []any{b.ref(atspiAppID)}}
+	case "GetInterfaces":
+		return &dbus.Reply{Sig: "as", Body: []any{b.interfacesOf(id, node)}}
+	}
+	return nil
+}
+
+// handleComponent — org.a11y.atspi.Component (геометрия и попадание точкой).
+func (b *atspiBridge) handleComponent(msg *dbus.Message, v *a11yView, id int32, node *a11yNode) *dbus.Reply {
+	arg := func(i int) int32 {
+		if i < len(msg.Body) {
+			if v, ok := msg.Body[i].(int32); ok {
+				return v
+			}
+		}
+		return 0
+	}
+	coordAt := func(i int) uint32 {
+		if i < len(msg.Body) {
+			if v, ok := msg.Body[i].(uint32); ok {
+				return v
+			}
+		}
+		return atspiCoordScreen
+	}
+
+	switch msg.Member {
+	case "GetExtents":
+		x, y, w, h := b.extents(node.Info.Bounds, coordAt(0))
+		return &dbus.Reply{Sig: "(iiii)", Body: []any{dbus.Struct{Fields: []any{x, y, w, h}}}}
+	case "GetPosition":
+		x, y, _, _ := b.extents(node.Info.Bounds, coordAt(0))
+		return &dbus.Reply{Sig: "ii", Body: []any{x, y}}
+	case "GetSize":
+		_, _, w, h := b.extents(node.Info.Bounds, atspiCoordWindow)
+		return &dbus.Reply{Sig: "ii", Body: []any{w, h}}
+	case "Contains":
+		lx, ly := b.pointToLogical(arg(0), arg(1), coordAt(2))
+		return &dbus.Reply{Sig: "b", Body: []any{image.Pt(lx, ly).In(a11yVisibleRect(node.Info))}}
+	case "GetAccessibleAtPoint":
+		lx, ly := b.pointToLogical(arg(0), arg(1), coordAt(2))
+		hit := v.Snap.hitTest(lx, ly)
+		if hit < 0 {
+			return &dbus.Reply{Sig: "(so)", Body: []any{b.nullRef()}}
+		}
+		return &dbus.Reply{Sig: "(so)", Body: []any{b.ref(v.id(hit))}}
+	case "GetLayer":
+		// Открытое меню лежит в слое POPUP, прочее — в слое WIDGET.
+		if a11yHasState(node.Info.States, base.StatePopup) {
+			return &dbus.Reply{Sig: "u", Body: []any{uint32(atspiLayerPopup)}}
+		}
+		return &dbus.Reply{Sig: "u", Body: []any{uint32(atspiLayerWidget)}}
+	case "GetMDIZOrder":
+		return &dbus.Reply{Sig: "n", Body: []any{int16(0)}}
+	case "GetAlpha":
+		return &dbus.Reply{Sig: "d", Body: []any{1.0}}
+	case "GrabFocus":
+		// Скринридер переводит фокус ввода на элемент (Orca: перемещение по
+		// дереву с «follow focus»). node.Widget == nil у синтетического узла
+		// приложения — там фокусировать нечего, честно отвечаем false.
+		// Узел из AccessChildren получает фокус сам (base.AccessActionHandler
+		// владельца), а не его владелец целиком.
+		return &dbus.Reply{Sig: "b", Body: []any{accessibilityNodeAction(b.host, node, base.AccessFocus)}}
+	case "ScrollTo", "ScrollToPoint", "SetExtents", "SetPosition", "SetSize":
+		return &dbus.Reply{Sig: "b", Body: []any{false}}
+	}
+	return nil
+}
+
+// handleApplication — org.a11y.atspi.Application.
+func (b *atspiBridge) handleApplication(msg *dbus.Message) *dbus.Reply {
+	switch msg.Member {
+	case "GetLocale":
+		return &dbus.Reply{Sig: "s", Body: []any{atspiLocale()}}
+	case "RegisterEventListener", "DeregisterEventListener":
+		// Устаревшие методы: события мы шлём безусловно.
+		return &dbus.Reply{}
+	}
+	return nil
+}
+
+// handleValue — org.a11y.atspi.Value (слайдер, прогресс, спиннер).
+func (b *atspiBridge) handleValue(msg *dbus.Message, node *a11yNode) *dbus.Reply {
+	switch msg.Member {
+	case "SetCurrentValue":
+		return &dbus.Reply{Sig: "b", Body: []any{false}}
+	case "GetCurrentValue":
+		cur, _, _, _ := atspiValueOf(node)
+		return &dbus.Reply{Sig: "d", Body: []any{cur}}
+	}
+	return nil
+}
+
+// Номера и имена действий узла (Action.GetName). Нажатие есть у каждого узла,
+// второе действие — только у узла с подменю.
+const (
+	atspiActionClick  = 0
+	atspiActionExpand = 1
+)
+
+// atspiActions — имена действий узла в порядке номеров.
+func atspiActions(node *a11yNode) []string {
+	acts := []string{"click"}
+	if node != nil && (a11yHasState(node.Info.States, base.StateHasPopup) ||
+		a11yHasState(node.Info.States, base.StateExpanded)) {
+		acts = append(acts, "expand or contract")
+	}
+	return acts
+}
+
+// handleAction — org.a11y.atspi.Action: «click» у кнопок, флажков и пунктов
+// меню, «expand or contract» у пунктов с подменю.
+func (b *atspiBridge) handleAction(msg *dbus.Message, node *a11yNode) *dbus.Reply {
+	acts := atspiActions(node)
+	name := func() string {
+		if i := int(atspiActionIndex(msg)); i >= 0 && i < len(acts) {
+			return acts[i]
+		}
+		return ""
+	}
+	switch msg.Member {
+	case "GetNActions":
+		return &dbus.Reply{Sig: "i", Body: []any{int32(len(acts))}}
+	case "GetName", "GetLocalizedName":
+		return &dbus.Reply{Sig: "s", Body: []any{name()}}
+	case "GetDescription":
+		return &dbus.Reply{Sig: "s", Body: []any{""}}
+	case "GetKeyBinding":
+		return &dbus.Reply{Sig: "s", Body: []any{""}}
+	case "DoAction":
+		// Нажатие идёт синтетическим кликом через штатный путь ввода
+		// (engine.ActivateAccessible), поэтому работает для любого
+		// кликабельного виджета без разбора типов. Узел из AccessChildren,
+		// чей владелец принимает действия (base.AccessActionHandler),
+		// получает его сам — а не владелец кликом в центр.
+		switch int(atspiActionIndex(msg)) {
+		case atspiActionClick:
+			return &dbus.Reply{Sig: "b", Body: []any{accessibilityNodeAction(b.host, node, base.AccessInvoke)}}
+		case atspiActionExpand:
+			if len(acts) > atspiActionExpand {
+				kind := base.AccessExpand
+				if a11yHasState(node.Info.States, base.StateExpanded) {
+					kind = base.AccessCollapse
+				}
+				return &dbus.Reply{Sig: "b", Body: []any{accessibilityNodeAction(b.host, node, kind)}}
+			}
+		}
+		return &dbus.Reply{Sig: "b", Body: []any{false}}
+	}
+	return nil
+}
+
+// atspiActionIndex достаёт номер действия из тела вызова Action (первый
+// аргумент типа i). Отсутствует или другого типа — считаем 0 («click»).
+func atspiActionIndex(msg *dbus.Message) int32 {
+	if len(msg.Body) > 0 {
+		if v, ok := msg.Body[0].(int32); ok {
+			return v
+		}
+	}
+	return 0
+}
+
+// ─── Вспомогательное ─────────────────────────────────────────────────────────
+
+// parentRef — ссылка на родителя: у приложения это рабочий стол реестра,
+// у окна — приложение, у прочих — узел-родитель снимка.
+func (b *atspiBridge) parentRef(id int32, node *a11yNode) dbus.Struct {
+	switch {
+	case id == atspiAppID:
+		return dbus.Struct{Fields: []any{atspiRegistryName, dbus.ObjectPath(atspiRootPath)}}
+	case id == a11yRootID || node.Parent < 0:
+		return b.ref(atspiAppID)
+	}
+	return b.ref(node.Parent)
+}
+
+// roleOf — роль узла; синтетический корень — приложение.
+func (b *atspiBridge) roleOf(id int32, node *a11yNode) uint32 {
+	if id == atspiAppID {
+		return atspiRoleApplication
+	}
+	if node.Info.Role == base.RoleTextInput && a11yHasState(node.Info.States, base.StatePassword) {
+		return atspiRolePasswordTxt
+	}
+	if node.Info.Role == base.RoleMenuItem && a11yHasState(node.Info.States, base.StateCheckable) {
+		return atspiRoleCheckMenuIt
+	}
+	return atspiRoleOf(node.Info.Role)
+}
+
+// nameOf — имя узла; у приложения и безымянного окна — заголовок окна.
+func (b *atspiBridge) nameOf(id int32, node *a11yNode) string {
+	if node.Info.Name == "" && (id == atspiAppID || id == a11yRootID) {
+		return b.host.Title()
+	}
+	return node.Info.Name
+}
+
+// interfacesOf перечисляет интерфейсы, которые узел реально поддерживает.
+func (b *atspiBridge) interfacesOf(id int32, node *a11yNode) []string {
+	if id == atspiAppID {
+		return []string{ifaceAccessible, ifaceApplication}
+	}
+	out := []string{ifaceAccessible, ifaceComponent}
+	switch node.Info.Role {
+	case base.RoleSlider, base.RoleProgressBar, base.RoleSpinner:
+		out = append(out, ifaceValue)
+	case base.RoleButton, base.RoleCheckBox, base.RoleRadioButton, base.RoleSwitch,
+		base.RoleMenuItem:
+		out = append(out, ifaceAction)
+	case base.RoleTextInput, base.RoleDocument:
+		// Содержимое поля скринридер читает кусками — символами, словами и
+		// строками, следуя за кареткой. Для этого и нужен Text: одного
+		// «значения» элемента ему мало.
+		if _, ok := atspiTextProvider(node); ok {
+			out = append(out, ifaceText)
+		}
+	}
+	// Узел владельца, принимающего действия (панель сравнения), нажимаем и
+	// фокусируем, как кнопку: у него тоже есть Action.
+	if node.ActionID != "" && node.Info.Role != base.RoleButton && node.Info.Role != base.RoleMenuItem {
+		if _, ok := node.Widget.(base.AccessActionHandler); ok {
+			out = append(out, ifaceAction)
+		}
+	}
+	return out
+}
+
+// appIDValue — номер приложения, присвоенный реестром.
+func (b *atspiBridge) appIDValue() int32 {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.appID
+}
+
+// atspiValueOf вытаскивает числовое значение узла (Value-интерфейс).
+// Диапазон движок не публикует, поэтому 0..1 для прогресса и 0..100 иначе —
+// значение всё равно передаётся как есть.
+func atspiValueOf(node *a11yNode) (cur, min, max, step float64) {
+	cur, _ = strconv.ParseFloat(node.Info.Value, 64)
+	switch node.Info.Role {
+	case base.RoleProgressBar:
+		return cur, 0, 1, 0.01
+	}
+	return cur, 0, 100, 1
+}
+
+// atspiLocale — локаль приложения в формате POSIX.
+func atspiLocale() string {
+	for _, env := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
+		if v := os.Getenv(env); v != "" {
+			return v
+		}
+	}
+	return "C"
+}
+
+// atspiIntrospectXML — описание объекта для org.freedesktop.DBus.Introspectable.
+// Клиенты доступности его не требуют, но с ним объект видно в d-feet/busctl —
+// это главный инструмент отладки моста.
+func atspiIntrospectXML(root bool) string {
+	var sb strings.Builder
+	sb.WriteString(`<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">` + "\n<node>\n")
+	sb.WriteString(`<interface name="org.a11y.atspi.Accessible">
+<property name="Name" type="s" access="read"/>
+<property name="Description" type="s" access="read"/>
+<property name="Parent" type="(so)" access="read"/>
+<property name="ChildCount" type="i" access="read"/>
+<method name="GetChildAtIndex"><arg direction="in" type="i"/><arg direction="out" type="(so)"/></method>
+<method name="GetChildren"><arg direction="out" type="a(so)"/></method>
+<method name="GetIndexInParent"><arg direction="out" type="i"/></method>
+<method name="GetRelationSet"><arg direction="out" type="a(ua(so))"/></method>
+<method name="GetRole"><arg direction="out" type="u"/></method>
+<method name="GetRoleName"><arg direction="out" type="s"/></method>
+<method name="GetLocalizedRoleName"><arg direction="out" type="s"/></method>
+<method name="GetState"><arg direction="out" type="au"/></method>
+<method name="GetAttributes"><arg direction="out" type="a{ss}"/></method>
+<method name="GetApplication"><arg direction="out" type="(so)"/></method>
+<method name="GetInterfaces"><arg direction="out" type="as"/></method>
+</interface>
+<interface name="org.a11y.atspi.Component">
+<method name="Contains"><arg direction="in" type="i"/><arg direction="in" type="i"/><arg direction="in" type="u"/><arg direction="out" type="b"/></method>
+<method name="GetAccessibleAtPoint"><arg direction="in" type="i"/><arg direction="in" type="i"/><arg direction="in" type="u"/><arg direction="out" type="(so)"/></method>
+<method name="GetExtents"><arg direction="in" type="u"/><arg direction="out" type="(iiii)"/></method>
+<method name="GetPosition"><arg direction="in" type="u"/><arg direction="out" type="i"/><arg direction="out" type="i"/></method>
+<method name="GetSize"><arg direction="out" type="i"/><arg direction="out" type="i"/></method>
+<method name="GetLayer"><arg direction="out" type="u"/></method>
+<method name="GrabFocus"><arg direction="out" type="b"/></method>
+</interface>
+<interface name="org.a11y.atspi.Text">
+<property name="CharacterCount" type="i" access="read"/>
+<property name="CaretOffset" type="i" access="read"/>
+<method name="GetText"><arg direction="in" type="i"/><arg direction="in" type="i"/><arg direction="out" type="s"/></method>
+<method name="SetCaretOffset"><arg direction="in" type="i"/><arg direction="out" type="b"/></method>
+<method name="GetStringAtOffset"><arg direction="in" type="i"/><arg direction="in" type="u"/><arg direction="out" type="s"/><arg direction="out" type="i"/><arg direction="out" type="i"/></method>
+<method name="GetTextAtOffset"><arg direction="in" type="i"/><arg direction="in" type="u"/><arg direction="out" type="s"/><arg direction="out" type="i"/><arg direction="out" type="i"/></method>
+<method name="GetCharacterAtOffset"><arg direction="in" type="i"/><arg direction="out" type="i"/></method>
+<method name="GetNSelections"><arg direction="out" type="i"/></method>
+<method name="GetSelection"><arg direction="in" type="i"/><arg direction="out" type="i"/><arg direction="out" type="i"/></method>
+<method name="GetAttributes"><arg direction="in" type="i"/><arg direction="out" type="a{ss}"/><arg direction="out" type="i"/><arg direction="out" type="i"/></method>
+</interface>
+`)
+	if root {
+		sb.WriteString(`<interface name="org.a11y.atspi.Application">
+<property name="ToolkitName" type="s" access="read"/>
+<property name="Version" type="s" access="read"/>
+<property name="AtspiVersion" type="s" access="read"/>
+<property name="Id" type="i" access="readwrite"/>
+<method name="GetLocale"><arg direction="in" type="u"/><arg direction="out" type="s"/></method>
+</interface>
+`)
+	}
+	sb.WriteString("</node>\n")
+	return sb.String()
+}
+
+// atspiCacheXML — описание объекта кэша.
+const atspiCacheXML = `<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+<interface name="org.a11y.atspi.Cache">
+<method name="GetItems"><arg direction="out" type="` + atspiCacheItemsSig + `"/></method>
+<signal name="AddAccessible"><arg name="nodeAdded" type="` + atspiCacheItemSig + `"/></signal>
+<signal name="RemoveAccessible"><arg name="nodeRemoved" type="(so)"/></signal>
+</interface>
+</node>
+`
+
+// ─── org.a11y.atspi.Text ─────────────────────────────────────────────────────
+//
+// Содержимое поля ввода уезжало к скринридеру одной строкой — «значением»
+// элемента, как у ползунка. Для кнопки этого довольно, для текста — нет:
+// скринридер читает документ кусками, идёт за кареткой, озвучивает выделение.
+// Без этого интерфейса Orca объявляла поле пустым.
+
+// atspiTextProvider — текстовая семантика виджета узла.
+func atspiTextProvider(node *a11yNode) (base.AccessTextProvider, bool) {
+	if node == nil || node.Widget == nil {
+		return nil, false
+	}
+	return base.AccessTextOf(node.Widget)
+}
+
+// atspiTextOf — текст, каретка и выделение узла.
+//
+// Спрашиваются у виджета, а не берутся из снимка семантики: снимок
+// пересобирается раз в сто пятьдесят миллисекунд и отставал бы от набора.
+func atspiTextOf(node *a11yNode) (text string, caret, selFrom, selTo int) {
+	tp, ok := atspiTextProvider(node)
+	if !ok {
+		if node != nil {
+			return node.Info.Value, 0, 0, 0
+		}
+		return "", 0, 0, 0
+	}
+	text = tp.AccessText()
+	caret = tp.AccessCaret()
+	selFrom, selTo = tp.AccessSelection()
+	return text, caret, selFrom, selTo
+}
+
+// handleText — org.a11y.atspi.Text.
+func (b *atspiBridge) handleText(msg *dbus.Message, node *a11yNode) *dbus.Reply {
+	text, caret, selFrom, selTo := atspiTextOf(node)
+	n := base.AccessRuneLen(text)
+
+	switch msg.Member {
+	case "GetText":
+		from, to := atspiIntArg(msg, 0), atspiIntArg(msg, 1)
+		if to < 0 {
+			to = int32(n) // -1 означает «до конца», так его шлёт libatspi
+		}
+		return &dbus.Reply{Sig: "s", Body: []any{base.AccessSubstring(text, int(from), int(to))}}
+
+	case "GetCharacterCount":
+		return &dbus.Reply{Sig: "i", Body: []any{int32(n)}}
+
+	case "GetCaretOffset":
+		return &dbus.Reply{Sig: "i", Body: []any{int32(caret)}}
+
+	case "SetCaretOffset":
+		return &dbus.Reply{Sig: "b", Body: []any{b.setCaret(node, int(atspiIntArg(msg, 0)))}}
+
+	case "GetStringAtOffset":
+		s, from, to := a11yTextSlice(text, int(atspiIntArg(msg, 0)),
+			a11yGranularity(atspiUintArg(msg, 1)))
+		return &dbus.Reply{Sig: "sii", Body: []any{s, int32(from), int32(to)}}
+
+	case "GetTextAtOffset":
+		// Старый вид запроса: вид границы вместо зернистости.
+		s, from, to := a11yTextSlice(text, int(atspiIntArg(msg, 0)),
+			a11yTextBoundaryToGran(atspiUintArg(msg, 1)))
+		return &dbus.Reply{Sig: "sii", Body: []any{s, int32(from), int32(to)}}
+
+	case "GetCharacterAtOffset":
+		rs := []rune(text)
+		off := int(atspiIntArg(msg, 0))
+		if off < 0 || off >= len(rs) {
+			return &dbus.Reply{Sig: "i", Body: []any{int32(0)}}
+		}
+		return &dbus.Reply{Sig: "i", Body: []any{int32(rs[off])}}
+
+	case "GetNSelections":
+		cnt := int32(0)
+		if selFrom != selTo {
+			cnt = 1
+		}
+		return &dbus.Reply{Sig: "i", Body: []any{cnt}}
+
+	case "GetSelection":
+		if selFrom == selTo || atspiIntArg(msg, 0) != 0 {
+			return &dbus.Reply{Sig: "ii", Body: []any{int32(0), int32(0)}}
+		}
+		return &dbus.Reply{Sig: "ii", Body: []any{int32(selFrom), int32(selTo)}}
+
+	case "GetAttributes", "GetAttributeRun":
+		// Оформления текста движок не публикует: весь текст одного вида.
+		// Возвращаем пустой набор на весь документ — так отвечает и GTK для
+		// неоформленного текста.
+		return &dbus.Reply{Sig: "a{ss}ii",
+			Body: []any{dbus.Array{ElemSig: "{ss}"}, int32(0), int32(n)}}
+
+	case "GetDefaultAttributes", "GetDefaultAttributeSet":
+		return &dbus.Reply{Sig: "a{ss}", Body: []any{dbus.Array{ElemSig: "{ss}"}}}
+	}
+	return nil
+}
+
+// setCaret переставляет каретку по просьбе скринридера.
+//
+// Правка идёт на горутине движка: дерево виджетов принадлежит ей, а вызов
+// пришёл с шины.
+func (b *atspiBridge) setCaret(node *a11yNode, pos int) bool {
+	tp, ok := atspiTextProvider(node)
+	if !ok {
+		return false
+	}
+	setter, ok := tp.(base.AccessCaretSetter)
+	if !ok {
+		return false
+	}
+	b.host.PostToEngine(func() { setter.AccessSetCaret(pos) })
+	return true
+}
+
+// atspiIntArg — целый аргумент вызова по номеру (отсутствует — ноль).
+func atspiIntArg(msg *dbus.Message, i int) int32 {
+	if len(msg.Body) > i {
+		if v, ok := msg.Body[i].(int32); ok {
+			return v
+		}
+	}
+	return 0
+}
+
+// atspiUintArg — беззнаковый аргумент вызова по номеру.
+func atspiUintArg(msg *dbus.Message, i int) uint32 {
+	if len(msg.Body) > i {
+		switch v := msg.Body[i].(type) {
+		case uint32:
+			return v
+		case int32:
+			return uint32(v)
+		}
+	}
+	return 0
+}

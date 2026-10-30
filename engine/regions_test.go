@@ -5,9 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/output"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/output"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Классификация содержимого тайлов.
@@ -190,27 +190,27 @@ func TestRegions_ShapesAndShadowsAreNotText(t *testing.T) {
 	canvas := eng.canvas
 
 	// Скруглённая заливка: её углы идут через маску альфы.
-	canvas.resetTileMarks(image.Rect(0, 0, w, h))
+	canvas.ResetTileMarks(image.Rect(0, 0, w, h))
 	canvas.FillRoundRect(4, 4, 120, 120, 24, color.RGBA{R: 200, G: 90, B: 40, A: 255})
-	if got := canvas.marks[0].kind; got == output.RegionText {
+	if got := tileKind(canvas, 0); got == output.RegionText {
 		t.Error("угол скруглённой заливки объявлен текстом")
 	}
 
 	// Мягкая тень: composited через цветной глиф.
-	canvas.resetTileMarks(image.Rect(0, 0, w, h))
+	canvas.ResetTileMarks(image.Rect(0, 0, w, h))
 	canvas.DrawSoftShadow(image.Rect(70, 70, 180, 180), 12, 10,
 		color.RGBA{R: 0, G: 0, B: 0, A: 90})
-	shadowTile := canvas.marks[(h/2/64)*canvas.tilesX+(w/2/64)]
-	if shadowTile.kind == output.RegionText {
+	cols, rows := canvas.TileGrid()
+	if tileKind(canvas, (h/2/64)*cols+(w/2/64)) == output.RegionText {
 		t.Error("мягкая тень объявлена текстом")
 	}
 
 	// А текст — по-прежнему текст.
-	canvas.resetTileMarks(image.Rect(0, 0, w, h))
+	canvas.ResetTileMarks(image.Rect(0, 0, w, h))
 	canvas.DrawTextSize("Проверка", 8, 20, 14, color.RGBA{R: 240, G: 240, B: 240, A: 255})
 	found := false
-	for _, m := range canvas.marks {
-		if m.touched && m.kind == output.RegionText {
+	for i := 0; i < cols*rows; i++ {
+		if kind, touched := canvas.TileRegion(i); touched && kind == output.RegionText {
 			found = true
 			break
 		}
@@ -236,7 +236,7 @@ func TestRegions_RoundClipCornerIsNotSolid(t *testing.T) {
 	eng.renderFrame()
 
 	canvas := eng.canvas
-	canvas.resetTileMarks(image.Rect(0, 0, w, h))
+	canvas.ResetTileMarks(image.Rect(0, 0, w, h))
 
 	// Так рисует стеклянная панель: скруглённый клип, затем заливка области.
 	area := image.Rect(0, 0, 160, 160)
@@ -246,12 +246,13 @@ func TestRegions_RoundClipCornerIsNotSolid(t *testing.T) {
 	canvas.ClearRoundClip()
 
 	// Угловой тайл — тот, что накрывает дугу.
-	if got := canvas.marks[0].kind; got == output.RegionSolid {
+	if got := tileKind(canvas, 0); got == output.RegionSolid {
 		t.Error("угловой тайл под скруглённым клипом объявлен сплошным")
 	}
 	// Тайл в середине области — сплошной: там дуга ничего не режет.
-	mid := (80 / 64) * canvas.tilesX + (80 / 64)
-	if got := canvas.marks[mid].kind; got != output.RegionSolid {
+	cols, _ := canvas.TileGrid()
+	mid := (80/64)*cols + (80 / 64)
+	if got := tileKind(canvas, mid); got != output.RegionSolid {
 		t.Errorf("середина залитой области объявлена %v, ждали solid", got)
 	}
 }
@@ -374,4 +375,10 @@ func TestRegions_WidgetOverWallpaperWins(t *testing.T) {
 	if got, ok := regionAt(frame.Regions, w-32, h-32); ok && got.Kind != output.RegionImage {
 		t.Errorf("тайл с открытыми обоями объявлен %v, ждали картинку", got.Kind)
 	}
+}
+
+// tileKind — тип области тайла i в текущей разметке холста.
+func tileKind(c *Canvas, i int) output.RegionKind {
+	kind, _ := c.TileRegion(i)
+	return kind
 }

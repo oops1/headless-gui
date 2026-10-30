@@ -8,9 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Снимки для просмотра глазами: окно с заголовком, подписью и кнопкой под
@@ -18,6 +19,7 @@ import (
 //
 // Запуск: GOLDEN_OUT=<папка> go test ./tests -run DefaultFontShots -count=1
 func TestDefaultFontShots(t *testing.T) {
+	testreset.Globals(t)
 	dir := os.Getenv("GOLDEN_OUT")
 	if dir == "" {
 		t.Skip("снимки делаются только при заданном GOLDEN_OUT")

@@ -5,8 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Возможности редактора на настоящем движке: Tab через цепочку доставки
@@ -37,6 +38,7 @@ func tbScene(t *testing.T, tb *widget.TextBox) (*engine.Engine, *widget.Button) 
 // Без AcceptTab Tab уводит фокус — как у приложений, собранных до появления
 // поля. С AcceptTab он остаётся в тексте как символ.
 func TestTextBox_TabKeyThroughEngine(t *testing.T) {
+	testreset.Globals(t)
 	tab := widget.KeyEvent{Code: widget.KeyTab, Pressed: true}
 
 	tb := widget.NewTextBox("")
@@ -96,6 +98,7 @@ func tbCountColor(img *image.RGBA, r image.Rectangle, c color.RGBA, tol int) int
 
 // Цвет диапазона доходит до кадра, а текст без Styler рисуется цветом виджета.
 func TestTextBox_StylerColorReachesFrame(t *testing.T) {
+	testreset.Globals(t)
 	green := color.RGBA{G: 255, A: 255}
 	tb := widget.NewTextBox("")
 	tb.SetText("highlighted text")
@@ -124,6 +127,7 @@ func TestTextBox_StylerColorReachesFrame(t *testing.T) {
 
 // Шрифт и его начертание меняют кадр и раскладку: жирный шрифт шире обычного.
 func TestTextBox_FontNameThroughEngine(t *testing.T) {
+	testreset.Globals(t)
 	tb := widget.NewTextBox("")
 	tb.Wrap = false
 	tb.SetText("Repository Repository")
@@ -157,6 +161,7 @@ func TestTextBox_FontNameThroughEngine(t *testing.T) {
 // Табуляция на настоящем движке: текст после неё стоит правее, чем при одном
 // пробеле, и ровно на табстопе.
 func TestTextBox_TabStopsThroughEngine(t *testing.T) {
+	testreset.Globals(t)
 	tb := widget.NewTextBox("")
 	tb.Wrap = false
 	tb.TabSize = 4
@@ -174,6 +179,7 @@ func TestTextBox_TabStopsThroughEngine(t *testing.T) {
 // Полоса прокрутки на настоящем движке: у длинной строки без переноса она
 // видна и ползунок едет за мышью.
 func TestTextBox_HBarThroughEngine(t *testing.T) {
+	testreset.Globals(t)
 	tb := widget.NewTextBox("")
 	tb.Wrap = false
 	long := ""

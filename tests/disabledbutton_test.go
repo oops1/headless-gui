@@ -4,8 +4,9 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Вид выключенной кнопки — запрос GG-31.
@@ -57,6 +58,7 @@ func meanLum(img *image.RGBA, r image.Rectangle) int {
 // В светлой теме выключенная кнопка обязана быть НЕ ТЕМНЕЕ рабочей: иначе она
 // тяжелее соседки и читается как нажатая.
 func TestDisabledButton_LightThemeIsNotHeavier(t *testing.T) {
+	testreset.Globals(t)
 	img, on, off := buttonPair(t, widget.Win11LightTheme())
 
 	// Сравниваем фон, а не всю кнопку: у рабочей текст чёрный и сильно
@@ -72,6 +74,7 @@ func TestDisabledButton_LightThemeIsNotHeavier(t *testing.T) {
 
 // В тёмной теме — наоборот: выключенная не светлее рабочей.
 func TestDisabledButton_DarkThemeStaysDim(t *testing.T) {
+	testreset.Globals(t)
 	img, on, off := buttonPair(t, widget.Win11DarkTheme())
 
 	strip := func(r image.Rectangle) image.Rectangle {
@@ -85,6 +88,7 @@ func TestDisabledButton_DarkThemeStaysDim(t *testing.T) {
 
 // Силуэт у выключенной тот же: скруглённые углы, а не прямоугольник поверх них.
 func TestDisabledButton_KeepsRoundedCorners(t *testing.T) {
+	testreset.Globals(t)
 	th := widget.Win11LightTheme()
 	img, on, off := buttonPair(t, th)
 
@@ -102,6 +106,7 @@ func TestDisabledButton_KeepsRoundedCorners(t *testing.T) {
 
 // Текст выключенной кнопки приглушён: это и есть главный признак.
 func TestDisabledButton_TextIsMuted(t *testing.T) {
+	testreset.Globals(t)
 	img, on, off := buttonPair(t, widget.Win11LightTheme())
 
 	// Полоса по высоте подписи: у рабочей текст тёмный, у выключенной —

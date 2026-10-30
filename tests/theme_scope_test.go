@@ -5,8 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Тема на поддерево: две темы в одном кадре.
@@ -43,6 +44,7 @@ func scopeScene(t *testing.T, w, h int) (*engine.Engine, *widget.ThemeScope, *wi
 }
 
 func TestThemeScope_TwoThemesInOneFrame(t *testing.T) {
+	testreset.Globals(t)
 	eng, _, _, leftBtn, rightBtn := scopeScene(t, 400, 160)
 
 	if leftBtn.Background == rightBtn.Background {
@@ -66,6 +68,7 @@ func TestThemeScope_TwoThemesInOneFrame(t *testing.T) {
 // области, а не только цвет. Форма читается из общей переменной, поэтому
 // именно её потерять проще всего.
 func TestThemeScope_ShapeIsPerScope(t *testing.T) {
+	testreset.Globals(t)
 	eng, _, _, leftBtn, rightBtn := scopeScene(t, 400, 160)
 	img := eng.RenderOnce()
 	if img == nil {
@@ -92,6 +95,7 @@ func TestThemeScope_ShapeIsPerScope(t *testing.T) {
 
 // Глобальная смена темы не трогает область с собственной темой.
 func TestThemeScope_SurvivesGlobalThemeChange(t *testing.T) {
+	testreset.Globals(t)
 	eng, _, right, _, rightBtn := scopeScene(t, 400, 160)
 
 	before := rightBtn.Background
@@ -109,6 +113,7 @@ func TestThemeScope_SurvivesGlobalThemeChange(t *testing.T) {
 // Область без темы ведёт себя как обычный контейнер: глобальная тема доходит
 // до её детей.
 func TestThemeScope_WithoutThemeIsTransparent(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 200, 100))
