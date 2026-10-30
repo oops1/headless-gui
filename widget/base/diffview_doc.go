@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/oops1/headless-gui/v3/widget/diffview"
+	"github.com/oops1/headless-gui/v4/widget/diffview"
 )
 
 // diffview_doc.go — буфер одной стороны сравнения: текст, файл, каретка и

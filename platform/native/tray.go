@@ -10,7 +10,7 @@ import (
 	"errors"
 	"image"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // Tray — иконка в трее и уведомления одного окна. Методы зовутся с любой

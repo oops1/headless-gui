@@ -32,7 +32,7 @@ import (
 	"bytes"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v4/platform/keyboard"
 )
 
 // wlLockState — последнее состояние переключателей, присланное композитором.

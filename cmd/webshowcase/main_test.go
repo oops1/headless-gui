@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/cmd/internal/showcasedemo"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/cmd/internal/showcasedemo"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // xamlPath — разметка витрины относительно каталога пакета.

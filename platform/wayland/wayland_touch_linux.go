@@ -21,7 +21,7 @@ package wayland
 import (
 	"sync/atomic"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // wlTouch — состояние касаний окна Wayland.

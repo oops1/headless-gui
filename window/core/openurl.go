@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // ErrOpenScheme — у ссылки схема, которую открывать нельзя. Различимо через

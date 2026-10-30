@@ -3,7 +3,7 @@ package shell
 import (
 	"image/color"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // systemThemeFromAppsUseLight переводит значение AppsUseLightTheme из реестра

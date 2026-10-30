@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	hgfonts "github.com/oops1/headless-gui/v3/assets/fonts"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget/svg"
+	hgfonts "github.com/oops1/headless-gui/v4/assets/fonts"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget/svg"
 )
 
 func svgTextEngine(t *testing.T) *Engine {

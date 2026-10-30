@@ -13,7 +13,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Сквозная проверка с НАСТОЯЩИМ OLE: два окна в одном процессе, настоящее

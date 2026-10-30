@@ -10,7 +10,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // X11: цели файлов в TARGETS есть, на запрос списка — ответ из горутины с

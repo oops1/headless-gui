@@ -4,7 +4,7 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // Буфер в порядке B,G,R,A (ExternalSurface.SetBGRA) — так пишет wl_shm:

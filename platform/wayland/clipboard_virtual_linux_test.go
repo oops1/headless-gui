@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // Виртуальные файлы в буфере Linux: типы объявлены сразу, пути приложение даёт

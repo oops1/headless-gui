@@ -4,7 +4,7 @@ package engine
 // движка; задания холста — в canvas_jobs.go.
 
 import (
-	"github.com/oops1/headless-gui/v3/internal/workpool"
+	"github.com/oops1/headless-gui/v4/internal/workpool"
 )
 
 // poolBatch — одна раздача частей (workpool.Batch).

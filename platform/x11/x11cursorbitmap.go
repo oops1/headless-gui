@@ -12,7 +12,7 @@ package x11
 import (
 	"encoding/binary"
 
-	"github.com/oops1/headless-gui/v3/platform/pointer"
+	"github.com/oops1/headless-gui/v4/platform/pointer"
 )
 
 // x11CursorIDs — идентификаторы ресурсов, нужных на время сборки курсора.

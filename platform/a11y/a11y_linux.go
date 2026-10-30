@@ -32,9 +32,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/dbus"
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/platform/dbus"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 const (

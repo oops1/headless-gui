@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/internal/testhook"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
 )
 
 // Window.SetSize на настоящем окне Win32: MoveWindow → WM_SIZE → onResize →

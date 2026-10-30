@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 // stubHost — движок для тестов цикла без движка: журнал вызовов, масштаб,

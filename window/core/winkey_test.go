@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/keyboard"
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/platform/keyboard"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Клавиша Windows раньше отбрасывалась на всех трёх бэкендах: VK_LWIN и

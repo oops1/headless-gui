@@ -4,7 +4,7 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // E7: сессия 4K (33 МБ), в кадре меняется 10% площади. Что стоит кадр:

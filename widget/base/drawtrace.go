@@ -23,7 +23,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/oops1/headless-gui/v3/internal/goid"
+	"github.com/oops1/headless-gui/v4/internal/goid"
 )
 
 var (

@@ -17,7 +17,7 @@ package loop
 import (
 	"time"
 
-	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 // Pacing — кто решает, когда готовится кадр.

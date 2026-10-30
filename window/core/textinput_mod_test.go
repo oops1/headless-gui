@@ -3,7 +3,7 @@ package core
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Windows сообщает AltGr как Ctrl+Alt. Виджеты при любом Ctrl уходят в ветку

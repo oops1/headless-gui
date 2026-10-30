@@ -15,9 +15,9 @@ import (
 
 	"golang.org/x/image/font/gofont/gomono"
 
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 const glyphTestText = "Hello, мир! 0123 ✓"

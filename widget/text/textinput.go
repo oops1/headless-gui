@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // TextInput — однострочное текстовое поле в стиле Windows 10 Dark.

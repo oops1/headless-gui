@@ -18,8 +18,8 @@ package raster
 import (
 	"image"
 
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
-	"github.com/oops1/headless-gui/v3/output"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 // NewWindowCanvas создаёт холст-окно над холстом движка src: тот же масштаб,

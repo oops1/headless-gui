@@ -11,9 +11,9 @@ package wayland
 // замком: ни канала, ни ожидания владельца.
 
 import (
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 var _ base.ClipboardFormatsProvider = (*wlClipboard)(nil)

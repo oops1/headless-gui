@@ -7,8 +7,8 @@ import (
 
 	"golang.org/x/image/font/gofont/gomono"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // byNameT — именованный шрифт холста по имени (nil, если его нет).

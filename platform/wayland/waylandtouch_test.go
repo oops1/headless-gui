@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // Тело события в формате wire: слова little-endian, координаты — wl_fixed 24.8.

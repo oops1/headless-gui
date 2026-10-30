@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v4/platform/keyboard"
 )
 
 // Клавиши-переключатели X11 на проводе: окно крутит настоящий цикл событий над

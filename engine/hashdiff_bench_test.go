@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 func benchHashPair(b *testing.B, run func(b *testing.B, hash bool)) {

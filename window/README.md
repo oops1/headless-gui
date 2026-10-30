@@ -23,9 +23,9 @@ import (
     "image/color"
     "log"
 
-    "github.com/oops1/headless-gui/v3/engine"
-    "github.com/oops1/headless-gui/v3/widget"
-    "github.com/oops1/headless-gui/v3/window"
+    "github.com/oops1/headless-gui/v4/engine"
+    "github.com/oops1/headless-gui/v4/widget"
+    "github.com/oops1/headless-gui/v4/window"
 )
 
 func main() {
@@ -61,7 +61,7 @@ func main() {
 их не умеет. Переключить программу — сменить путь импорта:
 
 ```go
-import window "github.com/oops1/headless-gui/v3/window/minimal"
+import window "github.com/oops1/headless-gui/v4/window/minimal"
 ```
 
 Возможность можно подключить и поштучно — пустым импортом её пакета
@@ -142,11 +142,11 @@ go build -ldflags="-H windowsgui" -o showcase.exe ./cmd/showcase
 
 ## Использование в своём проекте
 
-`window` — пакет модуля `github.com/oops1/headless-gui/v3`, отдельного модуля
+`window` — пакет модуля `github.com/oops1/headless-gui/v4`, отдельного модуля
 у него нет:
 
 ```
-require github.com/oops1/headless-gui/v3 v3.x.y
+require github.com/oops1/headless-gui/v4 v4.x.y
 ```
 
 ## API

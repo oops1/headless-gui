@@ -24,7 +24,7 @@ import (
 	"image"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 // maxSurfaces — сколько буферов принимает SetSurfaces. Больше четырёх

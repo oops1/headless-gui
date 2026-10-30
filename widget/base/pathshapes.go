@@ -8,12 +8,12 @@
 package base
 
 import (
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
 	"image"
 	"image/color"
 	"math"
 
-	geom "github.com/oops1/headless-gui/v3/core/geom"
+	geom "github.com/oops1/headless-gui/v4/core/geom"
 )
 
 // Point2F — точка с дробными координатами в логических единицах. Тип живёт в

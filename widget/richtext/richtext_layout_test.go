@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // fakeRichMeasurer — измеритель с предсказуемыми числами: ширина руны —

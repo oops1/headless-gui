@@ -4,7 +4,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget/xaml"
+	"github.com/oops1/headless-gui/v4/widget/xaml"
 )
 
 // Теги ввода текста строятся строителями пакета после RegisterXAML: поле,

@@ -4,7 +4,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Флаг ставит init пакета там, где перетаскивание есть: Windows и Linux.

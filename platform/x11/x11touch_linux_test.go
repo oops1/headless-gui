@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 func TestXI_QueryExtensionMatchesShm(t *testing.T) {

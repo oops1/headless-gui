@@ -7,8 +7,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // TestDockPanel_SetBoundsBeforeAddChild — репро из ENGINE_ISSUES #7:

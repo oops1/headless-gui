@@ -5,10 +5,10 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testengine"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testengine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Список окон раскрывается вбок от боковой панели: у левой — вправо от кнопки,

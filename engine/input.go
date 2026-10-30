@@ -11,8 +11,8 @@ import (
 	"image"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/core/input"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/core/input"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // inputHost — движок глазами ввода (input.Host). Методы зовутся без замков

@@ -6,7 +6,7 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Полный экран на выбранном мониторе Wayland, на проводе: set_fullscreen

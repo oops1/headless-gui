@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/oops1/headless-gui/v3/platform/dbus"
+	"github.com/oops1/headless-gui/v4/platform/dbus"
 )
 
 // Имя и путь самого портала общие с чтением темы (systheme_portal.go):

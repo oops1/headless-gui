@@ -29,7 +29,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // Пределы разбора: вложенность и размер определяет чужой документ, а стек

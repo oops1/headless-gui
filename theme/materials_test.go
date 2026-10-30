@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v4/theme"
 )
 
 // Компоненты, у которых профили Windows 11 объявляют материал и тень.

@@ -18,7 +18,7 @@ import (
 	"image/png"
 	"strings"
 
-	"github.com/oops1/headless-gui/v3/internal/dib"
+	"github.com/oops1/headless-gui/v4/internal/dib"
 )
 
 // MIME-типы изображения.

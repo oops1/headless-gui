@@ -19,9 +19,9 @@ import (
 	"image"
 	"runtime"
 
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
-	"github.com/oops1/headless-gui/v3/internal/workpool"
-	"github.com/oops1/headless-gui/v3/output"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
+	"github.com/oops1/headless-gui/v4/internal/workpool"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 // backWindowIdle — через сколько кадров без окна back оно освобождается.

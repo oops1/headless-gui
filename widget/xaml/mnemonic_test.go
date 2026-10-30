@@ -3,7 +3,7 @@ package xaml
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 func TestMenuBar_UseMnemonicsFromXAML(t *testing.T) {

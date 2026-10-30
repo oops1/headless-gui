@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // countTask считает выполненные части и может упасть на заданной.

@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/desktop"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/desktop"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Снимки быстрых настроек Windows 11: светлый и тёмный, главная страница,

@@ -9,8 +9,8 @@ import (
 	"math"
 	"strings"
 
-	"github.com/oops1/headless-gui/v3/platform/dbus"
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/dbus"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Портал настроек рабочего стола (XDG Desktop Portal) и его настройка темы.

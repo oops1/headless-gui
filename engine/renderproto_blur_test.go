@@ -25,10 +25,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/core/overlay"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/internal/workpool"
-	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v4/core/overlay"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/workpool"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 type protoBlurMode uint8

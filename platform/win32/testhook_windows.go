@@ -9,7 +9,7 @@ package win32
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/internal/testhook"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
 )
 
 func init() {

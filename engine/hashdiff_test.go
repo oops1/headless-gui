@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // hashPair — две одинаковые сцены: с хэш-диффом и без (растр и дифф всех

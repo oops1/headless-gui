@@ -4,7 +4,7 @@ package engine
 // плана 4.0): код потребителей не меняется.
 
 import (
-	hgraster "github.com/oops1/headless-gui/v3/core/raster"
+	hgraster "github.com/oops1/headless-gui/v4/core/raster"
 	"image"
 )
 

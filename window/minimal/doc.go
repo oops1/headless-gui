@@ -7,7 +7,7 @@
 // созданные через window и через window/minimal, взаимозаменяемы, и имена
 // API совпадают. Переключить программу — сменить путь импорта:
 //
-//	import window "github.com/oops1/headless-gui/v3/window/minimal"
+//	import window "github.com/oops1/headless-gui/v4/window/minimal"
 //
 // Без возможности её методы честно отвечают «не поддерживается» так же, как
 // на оконной системе, которая её не умеет. Возможность можно подключить и

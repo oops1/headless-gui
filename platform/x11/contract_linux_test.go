@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/platform/native/contracttest"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native/contracttest"
 )
 
 // Контрактные сценарии бэкендов (ADR-0013 §7) на настоящем X-сервере

@@ -3,7 +3,7 @@ package desktop
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // Детерминированные проверки подписчика FakeTileSource (tileSub): устаревшая

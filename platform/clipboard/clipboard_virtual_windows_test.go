@@ -15,7 +15,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // Тесты COM-объектов виртуальных файлов. Первые не трогают системный буфер: они

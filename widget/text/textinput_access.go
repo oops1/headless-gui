@@ -1,6 +1,6 @@
 package text
 
-import "github.com/oops1/headless-gui/v3/widget/base"
+import "github.com/oops1/headless-gui/v4/widget/base"
 
 // textinput_access.go — текст TextInput и TextBox для вспомогательных
 // технологий (AccessTextProvider и сеттеры из accesstext.go): методы читают

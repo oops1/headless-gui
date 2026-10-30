@@ -21,8 +21,8 @@ package engine
 import (
 	"sync/atomic"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // motionEngines — сколько движков процесса живут с профилем не MotionFull.

@@ -5,7 +5,7 @@ package keyboard
 import (
 	"strings"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // LockKeys — набор включённых клавиш-переключателей.

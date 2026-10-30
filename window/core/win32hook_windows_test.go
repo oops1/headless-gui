@@ -11,7 +11,7 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/oops1/headless-gui/v3/internal/testhook"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
 	"golang.org/x/sys/windows"
 )
 

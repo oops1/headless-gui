@@ -4,8 +4,8 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 // TestHandleFitResize — FitScale: логическое разрешение фиксировано,

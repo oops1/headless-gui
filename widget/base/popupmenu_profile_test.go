@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v4/theme"
 )
 
 // Меню читает вид из профиля темы само: метрики theme.KeyMenu*, стили

@@ -3,8 +3,8 @@ package dock
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testhook"
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // dock_testutil_test.go — помощники тестов дока: копии помощников тестов

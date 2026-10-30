@@ -4,7 +4,7 @@
 //
 // Подключается пустым импортом (так делает фасад window):
 //
-//	import _ "github.com/oops1/headless-gui/v3/platform/a11y"
+//	import _ "github.com/oops1/headless-gui/v4/platform/a11y"
 //
 // init регистрирует фабрику мостов в platform/native, и окно ядра
 // (window/core) поднимает мост на каждое окно после создания окна ОС, а

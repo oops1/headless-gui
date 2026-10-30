@@ -3,7 +3,7 @@ package base
 import (
 	"image"
 
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
 )
 
 // Признак «изображение непрозрачно» для быстрого пути холста (v3.38) —

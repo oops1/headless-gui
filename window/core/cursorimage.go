@@ -14,7 +14,7 @@ package core
 // Файл без платформенного суффикса: кэш и пересчёт пикселей — чистые функции.
 
 import (
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // cursorImageSource — движок знает курсор-картинку (реализует *engine.Engine).

@@ -22,7 +22,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // richNowMs — часы для мигания; в тестах подменяются, чтобы фазу можно было

@@ -5,9 +5,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/output"
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/output"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Смена заголовка и право остановить закрытие — пункт 3 замечаний difftool.

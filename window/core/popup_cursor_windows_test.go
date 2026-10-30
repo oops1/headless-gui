@@ -6,9 +6,9 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/internal/testhook"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Принудительный курсор и настоящие окна-попапы Win32: хост поднимает окно

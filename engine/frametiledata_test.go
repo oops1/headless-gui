@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // Без байтов тайлов кадр говорит те же места изменений, а front идёт за

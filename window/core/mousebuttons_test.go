@@ -3,7 +3,7 @@ package core
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Боковые кнопки мыши «назад/вперёд» (X1/X2) доходят до движка на всех

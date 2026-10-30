@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/oops1/headless-gui/v3/internal/facadegen"
+	"github.com/oops1/headless-gui/v4/internal/facadegen"
 )
 
 func main() {

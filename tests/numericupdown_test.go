@@ -4,9 +4,9 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
-	"github.com/oops1/headless-gui/v3/widget/datagrid"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
+	"github.com/oops1/headless-gui/v4/widget/datagrid"
 )
 
 func TestNumericUpDown_StepClamp(t *testing.T) {

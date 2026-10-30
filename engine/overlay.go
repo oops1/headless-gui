@@ -13,10 +13,10 @@ import (
 	"image"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/core/input"
-	"github.com/oops1/headless-gui/v3/core/overlay"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/core/input"
+	"github.com/oops1/headless-gui/v4/core/overlay"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // PopupFrame — кадр одного активного оверлея для нативного окна-попапа.

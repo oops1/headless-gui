@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/core/input"
-	"github.com/oops1/headless-gui/v3/core/overlay"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/core/input"
+	"github.com/oops1/headless-gui/v4/core/overlay"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // cyclicWidget — виджет, чей Children() возвращает самого себя.

@@ -10,8 +10,8 @@ package engine
 // привязку снимают.
 
 import (
-	"github.com/oops1/headless-gui/v3/widget"
-	"github.com/oops1/headless-gui/v3/widget/svg"
+	"github.com/oops1/headless-gui/v4/widget"
+	"github.com/oops1/headless-gui/v4/widget/svg"
 )
 
 // treeOwner — ключ владельца: сравнимое значение, по которому приёмник

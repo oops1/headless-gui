@@ -5,7 +5,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // Картинка вынесенного каскадного меню: два тела со сплошной альфой, вокруг

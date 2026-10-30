@@ -5,8 +5,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Перетаскивание окна с тенью над однородным фоном: один перенос вместе с

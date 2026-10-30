@@ -2,12 +2,12 @@ package engine
 
 import (
 	"fmt"
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
-	"github.com/oops1/headless-gui/v3/core/input"
-	"github.com/oops1/headless-gui/v3/core/loop"
-	"github.com/oops1/headless-gui/v3/core/overlay"
-	hgraster "github.com/oops1/headless-gui/v3/core/raster"
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
+	"github.com/oops1/headless-gui/v4/core/input"
+	"github.com/oops1/headless-gui/v4/core/loop"
+	"github.com/oops1/headless-gui/v4/core/overlay"
+	hgraster "github.com/oops1/headless-gui/v4/core/raster"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
 	"image"
 	_ "image/jpeg" // декодер JPEG для SetBackgroundFile
 	"image/png"
@@ -19,10 +19,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/output"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
-	"github.com/oops1/headless-gui/v3/widget/svg"
+	"github.com/oops1/headless-gui/v4/output"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
+	"github.com/oops1/headless-gui/v4/widget/svg"
 )
 
 // Engine управляет холстом, деревом виджетов и циклом рендеринга.

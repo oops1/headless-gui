@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // TileSource — источник живого содержимого плитки: часы, погода, почта,

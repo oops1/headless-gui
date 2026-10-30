@@ -5,9 +5,9 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/core/overlay"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/core/overlay"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Дыра в картинке вынесенного оверлея.

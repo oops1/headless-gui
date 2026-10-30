@@ -1,15 +1,15 @@
 package engine
 
 import (
-	hgraster "github.com/oops1/headless-gui/v3/core/raster"
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
+	hgraster "github.com/oops1/headless-gui/v4/core/raster"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
 	"image"
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/core/overlay"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/core/overlay"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // popupPair — две сцены с одинаковым содержимым: большой холст и холст попапа,

@@ -3,7 +3,7 @@ package text
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // textbox_hbar.go — геометрия горизонтальной полосы прокрутки редактора.

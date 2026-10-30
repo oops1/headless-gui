@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Каретка RichText на настоящем движке: снимок кадра, события идут тем же

@@ -18,8 +18,8 @@ package core
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // trayWindow — операции окна, которые нужны трею: спрятать окно (исчезает из

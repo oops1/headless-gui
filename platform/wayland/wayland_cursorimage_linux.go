@@ -29,8 +29,8 @@ package wayland
 import (
 	"golang.org/x/sys/unix"
 
-	"github.com/oops1/headless-gui/v3/platform/pointer"
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/platform/pointer"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // wlImgBuf — готовый буфер курсора-картинки.

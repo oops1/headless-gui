@@ -2,10 +2,10 @@ package raster
 
 import (
 	"bytes"
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // Знаки вне зон («•» в поле пароля, «·» между именем и адресом, «°») с

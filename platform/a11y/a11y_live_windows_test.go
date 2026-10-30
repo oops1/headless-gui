@@ -7,11 +7,11 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/internal/testhook"
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/platform/win32"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/win32"
+	"github.com/oops1/headless-gui/v4/widget"
 	"golang.org/x/sys/windows"
 )
 

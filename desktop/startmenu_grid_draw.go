@@ -15,8 +15,8 @@ import (
 	"image"
 	"strconv"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Ключи наведения и выбора вида Windows 11; префиксы не пересекаются с

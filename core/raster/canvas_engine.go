@@ -15,8 +15,8 @@ import (
 	"golang.org/x/image/font/gofont/goitalic"
 	"golang.org/x/image/font/gofont/gomono"
 
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
-	"github.com/oops1/headless-gui/v3/output"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 // AddDefaultFonts подключает шрифты, которые движок даёт всякому холсту.

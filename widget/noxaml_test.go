@@ -57,7 +57,7 @@ func xamlCode(nm string) []string {
 			continue
 		}
 		sym := strings.Join(f[2:], " ")
-		if !strings.HasPrefix(sym, "github.com/oops1/headless-gui/v3/widget/xaml.") {
+		if !strings.HasPrefix(sym, "github.com/oops1/headless-gui/v4/widget/xaml.") {
 			continue
 		}
 		if strings.HasSuffix(sym, ".init") || strings.Contains(sym, ".init.") {

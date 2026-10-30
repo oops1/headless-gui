@@ -4,7 +4,7 @@ import (
 	"image"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // stubHost — движок для тестов ввода без движка: корень, модальные окна и

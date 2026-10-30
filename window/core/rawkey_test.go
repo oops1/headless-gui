@@ -6,11 +6,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/output"
-	"github.com/oops1/headless-gui/v3/platform/keyboard"
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/platform/pointer"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/output"
+	"github.com/oops1/headless-gui/v4/platform/keyboard"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/pointer"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // v3.39: сырой скан-код у клавиши, клавиши вне таблицы VK, сырое колесо,

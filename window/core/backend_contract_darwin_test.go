@@ -5,8 +5,8 @@ package core
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/cocoa"
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/cocoa"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // backend_contract_darwin_test.go — бэкенд Cocoa удовлетворяет

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v4/engine"
 )
 
 // Демонстрация собирается и рисуется под каждой темой.

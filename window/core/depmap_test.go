@@ -33,7 +33,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/depmap"
+	"github.com/oops1/headless-gui/v4/internal/depmap"
 )
 
 // Глобальное состояние пакета тест не трогает: только чтение исходников.

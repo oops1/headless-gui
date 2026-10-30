@@ -17,7 +17,7 @@ import (
 	"encoding/binary"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/platform/pointer"
+	"github.com/oops1/headless-gui/v4/platform/pointer"
 )
 
 // Номера глифов в шрифте «cursor» (X11 cursorfont.h). Каждому курсору там

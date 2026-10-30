@@ -48,8 +48,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/oops1/headless-gui/v3/internal/goid"
-	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v4/internal/goid"
+	"github.com/oops1/headless-gui/v4/platform/keyboard"
 )
 
 // Запросы virtual-keyboard-unstable-v1 и формат keymap.

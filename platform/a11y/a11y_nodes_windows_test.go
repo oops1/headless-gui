@@ -8,9 +8,9 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/platform/win32"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/platform/win32"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // UIA: радиокнопки, прокрутка, меню, диалог и действия по узлам (v3.38).

@@ -9,7 +9,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/oops1/headless-gui/v3/platform/pointer"
+	"github.com/oops1/headless-gui/v4/platform/pointer"
 )
 
 // Win32: захват указателя на живом окне — регистрация Raw Input, зажим курсора

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // Срабатывание таймера паузы, которое ждало замка, пока hide или pin

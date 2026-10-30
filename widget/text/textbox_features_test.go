@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // Возможности редактора, из-за которых его считали негодным для кода: шрифт,

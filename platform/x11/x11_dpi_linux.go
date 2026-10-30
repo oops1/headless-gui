@@ -2,7 +2,7 @@
 
 package x11
 
-import "github.com/oops1/headless-gui/v3/platform/native"
+import "github.com/oops1/headless-gui/v4/platform/native"
 
 // x11_dpi_linux.go — HiDPI на X11: масштаб интерфейса из настроек рабочего
 // стола.

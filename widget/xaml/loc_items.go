@@ -18,8 +18,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/internal/goid"
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/internal/goid"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // locItemTarget — одна «свёрнутая» строка: ключ, способ её применить и

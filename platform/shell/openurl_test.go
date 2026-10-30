@@ -2,8 +2,8 @@ package shell
 
 import (
 	"errors"
-	"github.com/oops1/headless-gui/v3/platform/dbus"
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/dbus"
+	"github.com/oops1/headless-gui/v4/platform/native"
 	"os/exec"
 	"reflect"
 	"strings"

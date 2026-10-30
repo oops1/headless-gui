@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Список файлов в буфере обмена Wayland. Компоновщик подменён парой сокетов.

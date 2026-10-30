@@ -7,7 +7,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // blitconv_bench_test.go — бенчмарки конвертации кадра RGBA→BGRA (PERF-2).

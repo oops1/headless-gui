@@ -40,7 +40,7 @@ package core
 import (
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v4/platform/keyboard"
 )
 
 // lockKeysBackend — бэкенд знает состояние клавиш-переключателей. Отдельный

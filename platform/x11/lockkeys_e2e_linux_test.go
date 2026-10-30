@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v4/platform/keyboard"
 )
 
 func TestX11LockKeysE2E(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/calendar"
+	"github.com/oops1/headless-gui/v4/internal/calendar"
 )
 
 // datepicker.go — поле даты с выпадающим месячным календарём (WPF DatePicker).

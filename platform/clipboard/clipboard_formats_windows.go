@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 var procFmtsAvailable = user32Clip.NewProc("IsClipboardFormatAvailable")

@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Начальное положение и «развёрнуто» на настоящем окне Win32 (initial.go).

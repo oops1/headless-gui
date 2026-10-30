@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/keyboard"
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/keyboard"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // v3.39 на X11 и Wayland: скан-код (evdev) у каждой клавиши, в том числе у тех,

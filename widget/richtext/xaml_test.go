@@ -5,8 +5,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
-	"github.com/oops1/headless-gui/v3/widget/xaml"
+	"github.com/oops1/headless-gui/v4/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/xaml"
 )
 
 const richXAML = `<Canvas Width="400" Height="300">

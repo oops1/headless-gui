@@ -8,7 +8,7 @@ package text
 import (
 	"image/color"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // SetPlaceholder задаёт подсказку в пустом поле (поле Placeholder).

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // GG-68, пример из замечания: счётчик растёт и из OnClick кнопки, и из функций

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
 )
 
 // HorizontalAlignment — WPF HorizontalAlignment (позиционирование внутри родителя).

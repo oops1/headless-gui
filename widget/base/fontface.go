@@ -1,6 +1,6 @@
 package base
 
-import "github.com/oops1/headless-gui/v3/core/text"
+import "github.com/oops1/headless-gui/v4/core/text"
 
 // Веса шрифта по шкале CSS/OpenType (usWeightClass). Движок подбирает
 // ближайшее начертание зарегистрированного семейства.

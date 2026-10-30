@@ -26,7 +26,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/oops1/headless-gui/v3/platform/win32"
+	"github.com/oops1/headless-gui/v4/platform/win32"
 )
 
 // errUIAUnavailable — мост поднять не на чем: нет uiautomationcore.dll или

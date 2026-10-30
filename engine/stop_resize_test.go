@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // Смена холста у остановленного движка не виснет: Stop закрывает канал

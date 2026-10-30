@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // registered — службы оболочки, которые положил в реестр init пакета

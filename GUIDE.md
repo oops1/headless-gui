@@ -30,8 +30,8 @@ headless-gui/
 import (
     "image"
     "image/color"
-    "github.com/oops1/headless-gui/v3/engine"
-    "github.com/oops1/headless-gui/v3/widget"
+    "github.com/oops1/headless-gui/v4/engine"
+    "github.com/oops1/headless-gui/v4/widget"
 )
 
 eng := engine.New(1920, 1080, 30)   // ширина, высота, FPS
@@ -1100,7 +1100,7 @@ tw.Tree.OnItemInvoked = func(e treeview.ItemInvokedEvent) { ... } // двойн�
 Data Binding с HierarchicalDataTemplate:
 
 ```go
-import "github.com/oops1/headless-gui/v3/widget/treeview"
+import "github.com/oops1/headless-gui/v4/widget/treeview"
 
 tmpl := &treeview.HierarchicalDataTemplate{
     ItemsSourcePath: "Children",
@@ -1841,7 +1841,7 @@ root Canvas (0,0)
 Отдельный модуль с платформенными бэкендами. Без CGO на всех платформах (Windows: Win32 API, macOS: Cocoa через purego, Linux: X11 protocol).
 
 ```go
-import "github.com/oops1/headless-gui/v3/window"
+import "github.com/oops1/headless-gui/v4/window"
 
 eng := engine.New(1280, 720, 30)
 // ... строим UI, eng.Start() ...
@@ -4101,7 +4101,7 @@ x, y, ok := win.Position()
 API совпадают; переключить программу — сменить путь импорта:
 
 ```go
-import window "github.com/oops1/headless-gui/v3/window/minimal"
+import window "github.com/oops1/headless-gui/v4/window/minimal"
 ```
 
 Без возможности её методы отвечают так, как на оконной системе, которая её не
@@ -5961,31 +5961,27 @@ menu.SetTileGroups([]desktop.TileGroup{{ID: "work", Tiles: []desktop.Tile{{
 ## Структура модулей
 
 ```
-go.mod:  module github.com/oops1/headless-gui/v3
-  require golang.org/x/image
-
-go.mod:  module github.com/oops1/headless-gui/v3/window
-  require github.com/oops1/headless-gui/v3 => ../
-  require github.com/ebitengine/purego, golang.org/x/sys
+go.mod:  module github.com/oops1/headless-gui/v4
+  require github.com/ebitengine/purego, github.com/go-text/typesetting,
+          golang.org/x/image, golang.org/x/sys
 ```
 
-Приложение-потребитель подключает основной модуль:
+Модуль один: нативное окно (`window`, `window/minimal`), платформа
+(`platform/...`) и движок — его пакеты. Приложение-потребитель подключает
+его целиком:
 
 ```
-require github.com/oops1/headless-gui/v3 v0.x.x
+require github.com/oops1/headless-gui/v4 v4.0.0
 ```
 
-Если нужно нативное окно:
-
-```
-require github.com/oops1/headless-gui/v3/window v0.x.x
-```
+Переход с v3: в импортах заменить `github.com/oops1/headless-gui/v3` на
+`github.com/oops1/headless-gui/v4` (путь модуля с версии 4.0.0 по правилам
+Go оканчивается на `/v4`).
 
 Для локальной разработки используйте `replace`:
 
 ```
-replace github.com/oops1/headless-gui/v3 => ../GuiEngine
-replace github.com/oops1/headless-gui/v3/window => ../GuiEngine/window
+replace github.com/oops1/headless-gui/v4 => ../headless-gui
 ```
 
 ### Пакеты движка `core/` (v4.0, в разработке)
@@ -6059,11 +6055,11 @@ widget               фасад над всеми ними; JSON-загрузч�
 
 ```go
 import (
-	"github.com/oops1/headless-gui/v3/widget/base"
-	"github.com/oops1/headless-gui/v3/widget/text"
-	"github.com/oops1/headless-gui/v3/widget/xaml"
+	"github.com/oops1/headless-gui/v4/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/text"
+	"github.com/oops1/headless-gui/v4/widget/xaml"
 
-	_ "github.com/oops1/headless-gui/v3/platform/clipboard"
+	_ "github.com/oops1/headless-gui/v4/platform/clipboard"
 )
 
 func main() {

@@ -3,8 +3,8 @@ package tests
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // GG-83: пустой итог держит одну служебную пустую строку — каретке нужно где-то

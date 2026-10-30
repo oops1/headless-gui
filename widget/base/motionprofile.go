@@ -19,7 +19,7 @@ package base
 //   - MotionRemote — длительности прежние, шаг квантует прогресс на
 //     RemoteMotionSteps и не зовёт тик повторно на том же шаге.
 
-import "github.com/oops1/headless-gui/v3/theme"
+import "github.com/oops1/headless-gui/v4/theme"
 
 // RemoteMotionSteps — сколько промежуточных состояний у перехода в профиле
 // MotionRemote, считая конечное: 0, 1/3, 2/3, 1.

@@ -7,8 +7,8 @@ package xaml
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testhook"
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // SaveStrings запоминает таблицы переводов и возвращает их после теста.

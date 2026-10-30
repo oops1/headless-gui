@@ -2,7 +2,7 @@ package raster
 
 import (
 	"bytes"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 	"image"
 	"image/color"
 	"testing"

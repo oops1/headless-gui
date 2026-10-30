@@ -5,9 +5,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testengine"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testengine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Щелчок по плитке «Пуска» через движок запускает приложение, а не переносит

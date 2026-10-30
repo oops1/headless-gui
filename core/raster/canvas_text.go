@@ -5,7 +5,7 @@ package raster
 // core/text (задача 4.1 плана 4.0).
 
 import (
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
 	"image"
 	"image/color"
 )

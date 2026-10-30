@@ -13,9 +13,9 @@ import (
 	"image/color"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/printing"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/printing"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Цвета бумаги: белый лист, чёрный текст — не зависят от темы приложения.

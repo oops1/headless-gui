@@ -19,7 +19,7 @@ package core
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // popupFadeKind — как окно-попап умеет прозрачность.

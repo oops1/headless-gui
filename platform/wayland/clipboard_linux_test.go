@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Буфер обмена на Linux работал только через xclip/xsel: подпроцесс, которого

@@ -16,10 +16,10 @@ import (
 	"runtime"
 	"testing"
 
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
-	hgraster "github.com/oops1/headless-gui/v3/core/raster"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
+	hgraster "github.com/oops1/headless-gui/v4/core/raster"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // glass — слой размытой подложки с тинтом и подписью поверх.

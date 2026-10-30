@@ -26,7 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v4/platform/keyboard"
 )
 
 // x11LockTimeout — сколько приложение ждёт ответ цикла событий.

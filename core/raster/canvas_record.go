@@ -9,7 +9,7 @@ import (
 	"math"
 	"unicode/utf8"
 
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
 )
 
 // TextBounds — верхняя оценка логического охвата строки text у точки (x, y)

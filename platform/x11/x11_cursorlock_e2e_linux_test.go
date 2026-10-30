@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/pointer"
+	"github.com/oops1/headless-gui/v4/platform/pointer"
 )
 
 // Живая проверка против настоящего X-сервера (Xvfb, WSLg/XWayland через

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/cmd/internal/showcasestrings"
-	"github.com/oops1/headless-gui/v3/printing"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/cmd/internal/showcasestrings"
+	"github.com/oops1/headless-gui/v4/printing"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Документ для «Сохранить в PDF» и «Печать…» собирается движком: две страницы

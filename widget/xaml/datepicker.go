@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // datepicker.go — тег <DatePicker> в разметке.

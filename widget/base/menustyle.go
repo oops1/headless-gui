@@ -4,7 +4,7 @@ import (
 	"image/color"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v4/theme"
 )
 
 // menustyle.go — вид контекстного меню по профилю темы.

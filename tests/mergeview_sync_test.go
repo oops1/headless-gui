@@ -3,7 +3,7 @@ package tests
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // GG-63: итог и верхние панели прокручиваются вместе, по блокам. Отдельно

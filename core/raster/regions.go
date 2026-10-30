@@ -13,7 +13,7 @@ import (
 	"image"
 	"image/color"
 
-	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 // tileMark — признак одного тайла за текущий кадр.

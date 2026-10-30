@@ -17,10 +17,10 @@ import (
 	"testing"
 	"time"
 
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/output"
-	"github.com/oops1/headless-gui/v3/widget"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/output"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // reviewCompareFrames — renderFrame у пары и сравнение front-буферов, тайлов и регионов.

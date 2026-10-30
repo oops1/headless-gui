@@ -1,7 +1,7 @@
 package engine
 
 import (
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
 	"image"
 	"image/color"
 	"math"
@@ -11,9 +11,9 @@ import (
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 
-	hgfonts "github.com/oops1/headless-gui/v3/assets/fonts"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	hgfonts "github.com/oops1/headless-gui/v4/assets/fonts"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // openSansEngine — движок со вшитым Open Sans (Light, Regular, SemiBold,

@@ -1,8 +1,8 @@
 package raster
 
 import (
-	"github.com/oops1/headless-gui/v3/core/geom"
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
+	"github.com/oops1/headless-gui/v4/core/geom"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
 	"image"
 	"image/color"
 	"math/rand"
@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/image/draw"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // noiseRGBA — детерминированное шумное изображение: на гладком градиенте

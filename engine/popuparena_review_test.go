@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
-	"github.com/oops1/headless-gui/v3/core/overlay"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
+	"github.com/oops1/headless-gui/v4/core/overlay"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // revPopup — хостовый оверлей со всем «тяжёлым»: тень, скруглённый клип,

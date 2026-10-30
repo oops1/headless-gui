@@ -14,7 +14,7 @@ import (
 	"image"
 	"strings"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Ключи наведения на дорожки полос; префикс не пересекается с другими

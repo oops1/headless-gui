@@ -3,8 +3,8 @@
 package shell
 
 import (
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/platform/win32"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/win32"
 )
 
 func init() {

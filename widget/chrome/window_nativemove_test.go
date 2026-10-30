@@ -4,7 +4,7 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // Под Wayland окно не знает своей позиции и задать её не может: перемещение и

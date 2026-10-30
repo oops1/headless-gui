@@ -1,6 +1,6 @@
 package dialog
 
-import "github.com/oops1/headless-gui/v3/widget/base"
+import "github.com/oops1/headless-gui/v4/widget/base"
 
 // dialog_access.go — диалог в дереве доступности.
 //

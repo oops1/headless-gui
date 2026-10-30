@@ -15,7 +15,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // tinyPNGBytes — минимальный валидный PNG (8×8, непрозрачный), пригодный и

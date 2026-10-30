@@ -8,8 +8,8 @@ package loop
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/lockcheck"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/lockcheck"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 func TestLockOrder_LoopLocksAreLeaves(t *testing.T) {

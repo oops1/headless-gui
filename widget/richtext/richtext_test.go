@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // Тесты виджета RichText без окна: измеритель подменён предсказуемым (5 px на

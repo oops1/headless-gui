@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // findByRole возвращает первый узел с заданной ролью (обход в глубину).

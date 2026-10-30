@@ -12,10 +12,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
-	dgridPkg "github.com/oops1/headless-gui/v3/widget/datagrid"
-	svgPkg "github.com/oops1/headless-gui/v3/widget/svg"
-	tvPkg "github.com/oops1/headless-gui/v3/widget/treeview"
+	"github.com/oops1/headless-gui/v4/widget/base"
+	dgridPkg "github.com/oops1/headless-gui/v4/widget/datagrid"
+	svgPkg "github.com/oops1/headless-gui/v4/widget/svg"
+	tvPkg "github.com/oops1/headless-gui/v4/widget/treeview"
 )
 
 // applyXAMLSizeAttr сохраняет явные XAML Width/Height (для alignment).

@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
-	dg "github.com/oops1/headless-gui/v3/widget/datagrid"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
+	dg "github.com/oops1/headless-gui/v4/widget/datagrid"
 )
 
 // blockingCtx замирает на первой же отрисовке текста, изображая медленный

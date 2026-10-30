@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/oops1/headless-gui/v3/internal/focusreq"
+	"github.com/oops1/headless-gui/v4/internal/focusreq"
 )
 
 // MenuBarItem описывает один пункт верхнего горизонтального меню.

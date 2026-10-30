@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // TestMain устанавливает детерминированный in-memory буфер обмена на время

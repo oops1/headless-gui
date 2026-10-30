@@ -17,7 +17,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // ClipVirtual — обещание виртуальных файлов, которым мы владеем как владелец

@@ -13,7 +13,7 @@ import (
 	"image"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/internal/clipimage"
+	"github.com/oops1/headless-gui/v4/internal/clipimage"
 )
 
 const (

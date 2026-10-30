@@ -30,7 +30,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // touchEpoch — начало отсчёта штампов, которые движок ставит событиям без

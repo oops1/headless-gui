@@ -1,10 +1,10 @@
 package base
 
 import (
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
 	"image"
 
-	geom "github.com/oops1/headless-gui/v3/core/geom"
+	geom "github.com/oops1/headless-gui/v4/core/geom"
 )
 
 // Опциональные возможности контекста для изображений: частичная отрисовка с

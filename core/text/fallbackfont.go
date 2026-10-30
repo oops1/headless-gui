@@ -25,7 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/oops1/headless-gui/v3/internal/testhook"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
 )
 
 // readFallbackFile читает файл запасного шрифта. Тесты подменяют чтение через

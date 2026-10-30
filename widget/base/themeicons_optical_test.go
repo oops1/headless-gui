@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v4/theme"
 )
 
 // Оптические размеры: у значка свой файл на 16, 20 и 24, и по запрошенному

@@ -16,8 +16,8 @@ package xaml
 import (
 	"strings"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
-	dgridPkg "github.com/oops1/headless-gui/v3/widget/datagrid"
+	"github.com/oops1/headless-gui/v4/widget/base"
+	dgridPkg "github.com/oops1/headless-gui/v4/widget/datagrid"
 )
 
 // applyItemsSource ставит коллекцию источником строк или узлов. Возвращает

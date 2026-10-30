@@ -12,7 +12,7 @@ import (
 	"image"
 	"image/color"
 
-	"github.com/oops1/headless-gui/v3/widget/treeview"
+	"github.com/oops1/headless-gui/v4/widget/treeview"
 )
 
 // ─── DrawContextAdapter ────────────────────────────────────────────────────

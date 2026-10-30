@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>headless-gui v3 — Документация API</title>
+<title>headless-gui v4 — Документация API</title>
 <style>
 :root{--bg:#1e1e2e;--surface:#2a2a3e;--card:#313147;--border:#45455a;--text:#cdd6f4;--dim:#a6adc8;--accent:#89b4fa;--accent2:#f5c2e7;--green:#a6e3a1;--yellow:#f9e2af;--red:#f38ba8;--code-bg:#1a1a2e;--sidebar-w:280px;--header-h:60px}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -142,7 +142,7 @@ tr:hover td{background:rgba(137,180,250,.05)}
 <h2 id="overview">О проекте</h2>
 <p><strong>headless-gui</strong> — off-screen GUI-движок на Go. Рендерит виджеты в RGBA-буфер и выдаёт только изменившиеся тайлы (64&times;64 px). Не зависит от оконной системы — вывод можно подключить к чему угодно: нативное окно Win32/Cocoa/X11, WebSocket, RDP-сессия.</p>
 
-<p>Модуль: <code>github.com/oops1/headless-gui/v3</code></p>
+<p>Модуль: <code>github.com/oops1/headless-gui/v4</code></p>
 
 <p>Зависимости: <code>ebitengine/purego</code>, <code>golang.org/x/image</code>, <code>golang.org/x/sys</code>. Без CGO.</p>
 
@@ -167,8 +167,8 @@ tr:hover td{background:rgba(137,180,250,.05)}
 <pre><code>import (
     "image"
     "image/color"
-    "github.com/oops1/headless-gui/v3/engine"
-    "github.com/oops1/headless-gui/v3/widget"
+    "github.com/oops1/headless-gui/v4/engine"
+    "github.com/oops1/headless-gui/v4/widget"
 )
 
 eng := engine.New(1920, 1080, 30) // ширина, высота, FPS
@@ -192,7 +192,7 @@ for frame := range eng.Frames() {
 }</code></pre>
 
 <h3>С нативным окном</h3>
-<pre><code>import "github.com/oops1/headless-gui/v3/window"
+<pre><code>import "github.com/oops1/headless-gui/v4/window"
 
 win := window.New(eng, "Моё приложение")
 win.SetMaxFPS(60)
@@ -424,7 +424,7 @@ type DirtyTile struct {
 }</code></pre>
 
 <h2 id="native-window">Нативное окно</h2>
-<pre><code>import "github.com/oops1/headless-gui/v3/window"
+<pre><code>import "github.com/oops1/headless-gui/v4/window"
 
 win := window.New(eng, "Заголовок")
 win.SetMaxFPS(60)
@@ -443,7 +443,7 @@ win.Run() // блокирующий вызов</code></pre>
 
 <h2 id="printing">Печать и PDF</h2>
 <p>Страницы рисуются тем же контекстом, что и экран (те же шрифты, та же вёрстка), затем уходят на принтер или сохраняются в PDF.</p>
-<pre><code>import "github.com/oops1/headless-gui/v3/printing"
+<pre><code>import "github.com/oops1/headless-gui/v4/printing"
 
 setup := printing.NewPageSetup(printing.A4)
 w, h := setup.SheetSize()                     // 2480x3508 at 300 dpi
@@ -1475,7 +1475,7 @@ widget.UnregisterXAMLWidget("MyWidget")</code></pre>
 <!-- Footer -->
 <hr style="margin-top:64px;border-color:var(--border)">
 <p style="color:var(--dim);font-size:.85rem;text-align:center;margin-top:16px">
-headless-gui v3 &mdash; <code>github.com/oops1/headless-gui/v3</code> &mdash; Go &ge; 1.22 (ядра AVX2: Go &ge; 1.27, <code>GOEXPERIMENT=simd</code>) &mdash; MIT License
+headless-gui v4 &mdash; <code>github.com/oops1/headless-gui/v4</code> &mdash; Go &ge; 1.22 (ядра AVX2: Go &ge; 1.27, <code>GOEXPERIMENT=simd</code>) &mdash; MIT License
 </p>
 
 </main>

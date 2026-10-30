@@ -1,4 +1,4 @@
-module github.com/oops1/headless-gui/v3
+module github.com/oops1/headless-gui/v4
 
 go 1.22.0
 

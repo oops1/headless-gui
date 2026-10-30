@@ -3,7 +3,7 @@ package keyboard
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 func TestX11KeycodeToVK_PhysicalLayout(t *testing.T) {

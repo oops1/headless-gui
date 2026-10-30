@@ -3,9 +3,9 @@ package core
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/output"
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/output"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Alt не доходил до приложения никак: WM_SYSKEYDOWN не обрабатывался, ModAlt

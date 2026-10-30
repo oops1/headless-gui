@@ -2,7 +2,7 @@ package core
 
 // rawsource.go — необязательные возможности бэкенда и движка: сырые клавиши и колесо.
 
-import "github.com/oops1/headless-gui/v3/platform/keyboard"
+import "github.com/oops1/headless-gui/v4/platform/keyboard"
 
 // rawKeySource — бэкенд умеет сообщать клавиши вместе со скан-кодом, в том
 // числе те, которых нет в таблице VK.

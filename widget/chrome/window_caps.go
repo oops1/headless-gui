@@ -1,6 +1,6 @@
 package chrome
 
-import "github.com/oops1/headless-gui/v3/widget/base"
+import "github.com/oops1/headless-gui/v4/widget/base"
 
 // window_caps.go — Window как контейнер со своей раскладкой (ChildLayouter)
 // и его семантика для доступности (AccessDescriber): вместо веток по типу в

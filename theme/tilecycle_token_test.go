@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v4/theme"
 )
 
 // Токен tile.cycle (переход живой плитки меню «Пуск», ADR-0010) и метрика вида

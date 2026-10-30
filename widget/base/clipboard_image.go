@@ -23,7 +23,7 @@ import (
 	"errors"
 	"image"
 
-	"github.com/oops1/headless-gui/v3/internal/clipimage"
+	"github.com/oops1/headless-gui/v4/internal/clipimage"
 )
 
 // ErrClipboardImageUnsupported возвращается ClipboardSetImage, когда текущий

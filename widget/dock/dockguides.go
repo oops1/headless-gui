@@ -16,7 +16,7 @@ import (
 	"image"
 	"image/color"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 const (

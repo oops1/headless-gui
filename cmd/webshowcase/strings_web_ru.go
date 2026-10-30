@@ -1,6 +1,6 @@
 package main
 
-import "github.com/oops1/headless-gui/v3/widget"
+import "github.com/oops1/headless-gui/v4/widget"
 
 // webShowcaseRU — строки, которые есть только у браузерной витрины: пояснения
 // про отсутствие окна ОС и записи её журнала. Общие с оконной витриной строки

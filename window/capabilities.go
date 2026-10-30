@@ -5,8 +5,8 @@ package window
 // своего init. window/minimal — тот же фасад без этого файла.
 
 import (
-	_ "github.com/oops1/headless-gui/v3/platform/a11y"
-	_ "github.com/oops1/headless-gui/v3/platform/dnd"
-	_ "github.com/oops1/headless-gui/v3/platform/shell"
-	_ "github.com/oops1/headless-gui/v3/platform/tray"
+	_ "github.com/oops1/headless-gui/v4/platform/a11y"
+	_ "github.com/oops1/headless-gui/v4/platform/dnd"
+	_ "github.com/oops1/headless-gui/v4/platform/shell"
+	_ "github.com/oops1/headless-gui/v4/platform/tray"
 )

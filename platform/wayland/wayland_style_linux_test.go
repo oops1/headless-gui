@@ -5,7 +5,7 @@ package wayland
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Wayland умеет только Borderless: ни зон ресайза, ни маски углов; Tool —

@@ -14,7 +14,7 @@ import (
 	"image/color"
 	"strings"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // RichRun — кусок текста с единым оформлением.

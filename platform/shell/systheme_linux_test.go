@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/dbus"
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/dbus"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // GTK_THEME важнее портала и не требует шины вовсе: ответ приходит до того,

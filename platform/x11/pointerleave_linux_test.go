@@ -5,7 +5,7 @@ package x11
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/pointer"
+	"github.com/oops1/headless-gui/v4/platform/pointer"
 )
 
 // X11: LeaveNotify с обычным уходом — движение за окно; в дочернее окно — нет.

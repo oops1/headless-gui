@@ -5,9 +5,9 @@ package core
 import (
 	"os"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/platform/wayland"
-	"github.com/oops1/headless-gui/v3/platform/x11"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/wayland"
+	"github.com/oops1/headless-gui/v4/platform/x11"
 )
 
 // platformMonitors — мониторы без окна: Wayland, если он доступен (так же

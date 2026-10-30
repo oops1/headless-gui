@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
-	"github.com/oops1/headless-gui/v3/widget/text"
+	"github.com/oops1/headless-gui/v4/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/text"
 )
 
 // FileDialogMode — режим файлового диалога.

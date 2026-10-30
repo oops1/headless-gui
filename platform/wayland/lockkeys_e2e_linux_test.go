@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v4/platform/keyboard"
 )
 
 // Живая проверка против настоящего сервера. Без DISPLAY / WAYLAND_DISPLAY

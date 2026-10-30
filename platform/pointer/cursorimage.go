@@ -6,7 +6,7 @@ import (
 	"container/list"
 	"image"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // CursorCacheSize — сколько готовых курсоров-картинок держит окно.

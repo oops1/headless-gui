@@ -4,7 +4,7 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // Положение окна у бокового края и при прижатии к краю монитора считается без

@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	dgridPkg "github.com/oops1/headless-gui/v3/widget/datagrid"
+	dgridPkg "github.com/oops1/headless-gui/v4/widget/datagrid"
 )
 
 // SortDirection — направление сортировки.

@@ -17,7 +17,7 @@
 //     обратно флагу.
 package desktop
 
-import "github.com/oops1/headless-gui/v3/theme"
+import "github.com/oops1/headless-gui/v4/theme"
 
 // BarAlign — как группа «пуск + приложения» стоит на панели.
 type BarAlign int

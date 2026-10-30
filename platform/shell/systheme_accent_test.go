@@ -4,7 +4,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/dbus"
+	"github.com/oops1/headless-gui/v4/platform/dbus"
 )
 
 func accentTestVal(r, g, b float64) dbus.Variant {

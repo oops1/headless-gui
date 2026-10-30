@@ -1,9 +1,9 @@
 package a11y
 
 import (
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // testWin — окно для тестов мостов: то, что мост видит у окна ядра (движок,

@@ -7,7 +7,7 @@ package input
 // именно об уходе с ОКНА, по одной точке это не отличить от обычного движения
 // мимо него — для этого есть widget.PointerLeaveHandler.
 
-import "github.com/oops1/headless-gui/v3/widget"
+import "github.com/oops1/headless-gui/v4/widget"
 
 // SendPointerLeave сообщает виджетам, что указатель покинул окно: каждому
 // видимому виджету дерева (и модального окна, и открытых оверлеев), который
