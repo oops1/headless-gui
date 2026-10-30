@@ -7755,7 +7755,9 @@ source allows; the target chooses one.
 - Return `true`: the drag was started (it is carried by the OS asynchronously or in a
   modal OS loop). `false`: it cannot be started — no button held / no press serial,
   the backend cannot (macOS; Wayland compositor older than `wl_data_device_manager`
-  v3), empty list or mask, another drag is running. Relative paths are made absolute.
+  v3), drag and drop is not wired (`window/minimal`: no `platform/dnd`, the window is
+  not a drop target either), empty list or mask, another drag is running. Relative
+  paths are made absolute.
 - The end is reported once to `SetOnDragFinished(effect)`: the action chosen by the
   target (`DragEffectCopy|Move|Link`), `0` — cancelled or refused (Esc, drop on
   nothing, target refused, the pointer grab failed, X11 target silent for 10 s).

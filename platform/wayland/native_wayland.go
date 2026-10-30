@@ -2203,10 +2203,12 @@ func (w *WaylandWindow) handleDataDevice(opcode uint16, b []byte) {
 
 // dndEnter начинает сессию приёма: если в offer есть text/uri-list, сообщает
 // приложению о входе (SetOnDragEnter) и отвечает компоновщику. Перетаскивание
-// без файлов (текст, изображение) приложению не показывается.
+// без файлов (текст, изображение) приложению не показывается. Без
+// возможности перетаскивания (window/minimal, platform/dnd не подключён)
+// offer отклоняется: wl_data_device нужен и буферу обмена, его не снять.
 func (w *WaylandWindow) dndEnter() {
 	w.dndAnswered, w.dndAccepted, w.dndActions = false, false, false
-	w.dndEntered = w.dndOffer != 0 && w.offerGet(w.dndOffer)
+	w.dndEntered = native.DragDropEnabled() && w.dndOffer != 0 && w.offerGet(w.dndOffer)
 	if w.dndEntered && w.onDragEnter != nil {
 		w.onDragEnter(w.dndX, w.dndY)
 	}

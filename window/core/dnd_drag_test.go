@@ -1,6 +1,7 @@
 package core
 
 import (
+	"image"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -210,4 +211,25 @@ func TestBeginDragFiles_Refusals(t *testing.T) {
 		t.Error("бэкенд без перетаскивания вернул true")
 	}
 	bare.setupFilesDrop() // не падает на бэкенде без интерфейсов
+}
+
+// Без возможности перетаскивания (window/minimal: platform/dnd не подключён)
+// окно перетаскивания не начинает и значка не обещает, даже если бэкенд умеет.
+func TestBeginDragFiles_NoCapability(t *testing.T) {
+	dndOff()
+	defer func() { dndOff = native.RegisterDragDrop() }()
+	win, fn, _ := dragWindow(1)
+	if win.BeginDragFiles([]string{"x.png"}, native.DragEffectCopy) {
+		t.Error("без возможности перетаскивание начато")
+	}
+	if len(fn.began) != 0 {
+		t.Errorf("бэкенд получил перетаскивание: %q", fn.began)
+	}
+	iwin, ifn := imgWindow() // бэкенд, который значок рисует
+	if iwin.DragImageSupported() {
+		t.Error("без возможности обещан значок перетаскивания")
+	}
+	if iwin.BeginDragFilesImage([]string{"x.png"}, native.DragEffectCopy, image.NewRGBA(image.Rect(0, 0, 4, 4)), image.Point{}) || len(ifn.imgs) != 0 {
+		t.Error("без возможности перетаскивание со значком начато")
+	}
 }

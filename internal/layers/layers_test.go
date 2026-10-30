@@ -17,7 +17,7 @@ var features = []string{"platform/a11y", "platform/dnd", "platform/shell", "plat
 
 // wired — возможности, уже подключённые к window пустым импортом
 // (window/capabilities.go). Пополняется по шагам 9.8.
-var wired = []string{"platform/a11y", "platform/shell", "platform/tray"}
+var wired = []string{"platform/a11y", "platform/dnd", "platform/shell", "platform/tray"}
 
 // backends — бэкенды окна.
 var backends = []string{"platform/win32", "platform/x11", "platform/wayland", "platform/cocoa"}

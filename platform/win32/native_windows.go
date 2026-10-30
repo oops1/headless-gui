@@ -658,7 +658,9 @@ func (w *Win32Window) Create(title string, width, height int) error {
 // реально работает только вызов из Create; поздний вызов из
 // SetOnFilesDropped видит уже включённый приём и ничего не делает.
 func (w *Win32Window) enableFileDrop() {
-	if w.hwnd == 0 || w.fileDropEnabled {
+	// Без возможности перетаскивания (window/minimal, platform/dnd не
+	// подключён) окно приёмником не объявляется: ни OLE, ни DragAcceptFiles.
+	if w.hwnd == 0 || w.fileDropEnabled || !native.DragDropEnabled() {
 		return
 	}
 	w.fileDropEnabled = true

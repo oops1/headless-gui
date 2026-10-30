@@ -11,8 +11,8 @@ import (
 // умеет текущая ОС, зарегистрирована.
 func TestCapabilities_Wired(t *testing.T) {
 	want := map[string][]string{
-		"windows": {"a11y", "shell", "tray"},
-		"linux":   {"a11y", "shell", "tray"},
+		"windows": {"a11y", "dnd", "shell", "tray"},
+		"linux":   {"a11y", "dnd", "shell", "tray"},
 		"darwin":  {"shell"},
 	}[runtime.GOOS]
 	got := map[string]bool{}

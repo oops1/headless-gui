@@ -714,6 +714,26 @@ Linux есть).
   дочерних окон Linux иконка живёт до закрытия главного (их `tearDown`);
   GUIDE и README о трее — на 9.12.
 
+- **9.8d, перетаскивание → флаг `platform/dnd` (запасной вариант §3).**
+  Приёмник и источник остались в бэкендах: они живут на внутренностях окна
+  (OLE `IDropTarget` и `DoDragDrop`, XDND, `wl_data_device`), и точки
+  расширения вышли бы толще самой возможности. Пакет `platform/dnd` — флаг:
+  `init` зовёт `native.RegisterDragDrop` (ячейка `dnd` реестра 9.8.0, на
+  Windows и Linux), бэкенды и ядро читают `native.DragDropEnabled`. Без него
+  (`window/minimal`): Win32 не объявляет окно приёмником (ни
+  `OleInitialize`/`RegisterDragDrop`, ни `DragAcceptFiles`), X11 не ставит
+  `XdndAware`, Wayland отклоняет offer (`wl_data_device` нужен буферу обмена,
+  его не снять), `BeginDragFiles` и `DragImageSupported` в ядре — `false`;
+  выигрыша в размере нет, код остаётся в бинаре. Тестовые бинари ядра и
+  бэкендов включают флаг своим `init` (как фасад `window`) и снимают его в
+  проверках «без возможности»: `TestBeginDragFiles_NoCapability`,
+  `TestEnableFileDrop_NoCapability`, `TestWayland_DragTargetNoCapability`;
+  у X11 отдельной проверки нет (`XdndAware` ставится в `Create` на живом
+  соединении). Проверено заодно: UI Automation не зависит от OLE окна — в
+  тестовом бинаре `platform/a11y` флага нет, `OleInitialize` на потоке окна не
+  зовётся, а живой `TestUIA_LiveWMGetObject` получает корневой провайдер.
+  Слои: `window` подключает `platform/dnd` (тянет только `platform/native`).
+
 ## Последствия
 
 - Открытый API `window` сохраняется целиком; новый открытый API —

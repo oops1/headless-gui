@@ -9,6 +9,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
 )
 
 // Тесты COM-объектов перетаскивания. Вызывают методы по номерам слотов vtable
@@ -463,5 +465,18 @@ func TestDragImageSupported_NeedsOLE(t *testing.T) {
 	w.oleReady = true
 	if !w.DragImageSupported() {
 		t.Error("с OLE DragImageSupported = false")
+	}
+}
+
+// Без возможности перетаскивания (window/minimal) окно приёмником не
+// объявляется: ни RegisterDragDrop (и OLE на потоке окна), ни
+// DragAcceptFiles.
+func TestEnableFileDrop_NoCapability(t *testing.T) {
+	dndOff()
+	defer func() { dndOff = native.RegisterDragDrop() }()
+	w := &Win32Window{hwnd: 1} // настоящего окна нет: до ОС дело дойти не должно
+	w.enableFileDrop()
+	if w.fileDropEnabled || w.dropTarget != nil {
+		t.Error("без возможности окно объявлено приёмником")
 	}
 }

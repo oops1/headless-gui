@@ -439,3 +439,31 @@ func TestWayland_DragSourceFinishAndCancel(t *testing.T) {
 		}
 	})
 }
+
+// Без возможности перетаскивания (window/minimal) файлы не принимаются:
+// приложению ничего, компоновщику — отказ (wl_data_device остаётся ради
+// буфера обмена).
+func TestWayland_DragTargetNoCapability(t *testing.T) {
+	dndOff()
+	defer func() { dndOff = native.RegisterDragDrop() }()
+	c, offer := dragSetup(t)
+	n := 0
+	c.w.SetOnDragEnter(func(x, y int) { n++ })
+	c.w.SetOnFilesDropped(func(p []string, x, y int) { n++ })
+	c.w.handleDataDevice(wlDataDeviceEvEnter, enterBody(5, 11, 1, 1, offer))
+	c.w.handleDataDevice(wlDataDeviceEvDrop, nil)
+	msgs := splitWlMsgs(t, c.read(t))
+	acc, ok := findWlMsg(msgs, offer, wlDataOfferAccept)
+	if !ok {
+		t.Fatal("отказ не отправлен")
+	}
+	if _, mime := wlAcceptMime(t, acc); mime != "" {
+		t.Errorf("без возможности файлы приняты как %q", mime)
+	}
+	if _, ok := findWlMsg(msgs, offer, wlDataOfferReceive); ok {
+		t.Error("данные запрошены без возможности")
+	}
+	if n != 0 {
+		t.Errorf("приложение получило %d событий без возможности", n)
+	}
+}

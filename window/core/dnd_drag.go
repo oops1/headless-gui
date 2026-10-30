@@ -20,7 +20,9 @@ import (
 // Сам сброс файлов в окно (SetOnFilesDropped) остался прежним: события
 // приёмника — дополнение к нему, а не замена. Бэкенд, не умеющий
 // перетаскивания (macOS), просто не реализует интерфейсы ниже, и вызовы
-// становятся no-op.
+// становятся no-op. Включает перетаскивание возможность platform/dnd
+// (native.DragDropEnabled): без неё (window/minimal) бэкенд не объявляет окно
+// приёмником, а BeginDragFiles отвечает false.
 
 // dragTargetEvents — необязательная возможность нативного бэкенда сообщать о
 // перетаскивании НАД окном (приёмник): вход, движение и выход. Реализуется
@@ -143,7 +145,7 @@ func (win *Window) SetOnDragFinished(fn func(effect native.DragEffect)) {
 //
 // Возвращает true, если перетаскивание начато: дальше его ведёт ОС, а о
 // конце сообщит SetOnDragFinished. false — начать нельзя: бэкенд не умеет
-// (macOS), пустой список или маска, нет зажатой кнопки / serial'а нажатия,
+// (macOS) или перетаскивание не подключено (window/minimal), пустой список или маска, нет зажатой кнопки / serial'а нажатия,
 // сервер не даёт wl_data_device. Относительные пути приводятся к абсолютным.
 //
 // Win32: DoDragDrop (модальный цикл ОС на потоке окна, данные — CF_HDROP);
@@ -175,8 +177,12 @@ func (win *Window) BeginDragFilesImage(paths []string, effect native.DragEffect,
 
 // DragImageSupported сообщает, нарисует ли бэкенд окна значок, заданный в
 // BeginDragFilesImage. false — перетаскивание начнётся, но без значка (X11,
-// macOS); приложение может показать свою подсказку. До Run — false.
+// macOS, window/minimal); приложение может показать свою подсказку. До Run —
+// false.
 func (win *Window) DragImageSupported() bool {
+	if !native.DragDropEnabled() {
+		return false
+	}
 	if ds, ok := win.native.(interface{ DragImageSupported() bool }); ok {
 		return ds.DragImageSupported()
 	}
@@ -185,6 +191,9 @@ func (win *Window) DragImageSupported() bool {
 }
 
 func (win *Window) beginDragFiles(paths []string, effect native.DragEffect, img image.Image, hotspot image.Point) bool {
+	if !native.DragDropEnabled() {
+		return false
+	}
 	src, ok := win.native.(fileDragSource)
 	if !ok {
 		return false

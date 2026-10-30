@@ -459,8 +459,9 @@ func (w *X11Window) Create(title string, width, height int) error {
 
 	// XdndAware = 5: объявляем поддержку XDND v5 (тип property — ATOM(4),
 	// format 32, значение — версия протокола). Источник читает это свойство,
-	// решая, принимает ли окно перетаскивание.
-	if w.atomXdndAware != 0 {
+	// решая, принимает ли окно перетаскивание. Без возможности перетаскивания
+	// (window/minimal, platform/dnd не подключён) не объявляем.
+	if w.atomXdndAware != 0 && native.DragDropEnabled() {
 		w.x11ChangeProperty(w.wid, w.atomXdndAware, 4 /*ATOM*/, 32, uint32ToBytes(5))
 	}
 
