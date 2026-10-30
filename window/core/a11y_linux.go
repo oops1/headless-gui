@@ -57,8 +57,6 @@ const (
 	atspiCacheItemsSig = "a" + atspiCacheItemSig
 	ifaceEventObject   = "org.a11y.atspi.Event.Object"
 	ifaceEventFocus    = "org.a11y.atspi.Event.Focus"
-	ifaceProps         = "org.freedesktop.DBus.Properties"
-	ifaceIntrospect    = "org.freedesktop.DBus.Introspectable"
 
 	// Тип координат в Component (ATSPI_COORD_TYPE_*).
 	atspiCoordScreen = 0
@@ -408,7 +406,7 @@ func (b *atspiBridge) enabled() bool {
 		return false
 	}
 	get := func(prop string) bool {
-		reply, err := c.Call("org.a11y.Bus", "/org/a11y/bus", ifaceProps, "Get", "ss",
+		reply, err := c.Call("org.a11y.Bus", "/org/a11y/bus", dbus.IfaceProperties, "Get", "ss",
 			[]any{"org.a11y.Status", prop})
 		if err != nil || len(reply.Body) == 0 {
 			return false
@@ -780,11 +778,11 @@ func (b *atspiBridge) handleCall(msg *dbus.Message) *dbus.Reply {
 	}
 
 	switch msg.Interface {
-	case ifaceIntrospect:
+	case dbus.IfaceIntrospectable:
 		if msg.Member == "Introspect" {
 			return &dbus.Reply{Sig: "s", Body: []any{atspiIntrospectXML(id == atspiAppID)}}
 		}
-	case ifaceProps:
+	case dbus.IfaceProperties:
 		return b.handleProps(msg, v, id, node)
 	case ifaceAccessible:
 		return b.handleAccessible(msg, v, id, node)
@@ -807,7 +805,7 @@ func (b *atspiBridge) handleCall(msg *dbus.Message) *dbus.Reply {
 // наполняет свой кэш при подключении к приложению.
 func (b *atspiBridge) handleCache(msg *dbus.Message, v *a11yView) *dbus.Reply {
 	switch {
-	case msg.Interface == ifaceIntrospect && msg.Member == "Introspect":
+	case msg.Interface == dbus.IfaceIntrospectable && msg.Member == "Introspect":
 		return &dbus.Reply{Sig: "s", Body: []any{atspiCacheXML}}
 	case msg.Interface == ifaceCache && msg.Member == "GetItems":
 		items := make([]any, 0, len(v.Snap.Nodes)+1)

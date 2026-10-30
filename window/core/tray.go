@@ -2,7 +2,7 @@
 // системных balloon-уведомлений и восстановления окна из трея.
 //
 // Поддержаны Windows (Shell_NotifyIcon, platform/win32/tray_windows.go) и Linux — X11 и
-// Wayland (StatusNotifierItem по D-Bus, tray_sni_linux.go). Бэкенд реализует
+// Wayland (StatusNotifierItem по D-Bus, platform/tray/sni_linux.go). Бэкенд реализует
 // приватный интерфейс trayHost; на прочих платформах (macOS/headless) окно его
 // не реализует — методы становятся вежливыми no-op'ами и возвращают
 // ошибку/ничего. Компилируется на всех платформах.
@@ -50,21 +50,21 @@ type trayHost interface {
 // nativeTrayMenu — опциональная возможность бэкенда: контекстное меню трея
 // показывает САМА система, а не мы. Так устроен Linux (StatusNotifierItem
 // отдаёт дерево меню панели по com.canonical.dbusmenu, и позиции иконки мы
-// даже не знаем). Реализуется linuxTray (tray_sni_linux.go).
+// даже не знаем). Реализуется tray.SNI (platform/tray).
 //
-// setTrayMenuNative передаёт бэкенду актуальное меню (nil — убрать) и
+// SetTrayMenuNative передаёт бэкенду актуальное меню (nil — убрать) и
 // возвращает true, если он взял показ на себя: тогда Window не добавляет
 // PopupMenu в дерево виджетов и не открывает его по правому клику.
 // Win32Window интерфейс НЕ реализует — путь Windows не меняется.
 type nativeTrayMenu interface {
-	setTrayMenuNative(menu *widget.PopupMenu) bool
+	SetTrayMenuNative(menu *widget.PopupMenu) bool
 }
 
 // balloonHost — УЗКАЯ часть возможностей трея: только системные уведомления.
 // Выделена отдельно, потому что на Linux уведомления живут без иконки в трее
 // (демон org.freedesktop.Notifications показывает их сам), а полноценного трея
 // у X11/Wayland-бэкендов пока нет. Win32Window реализует и trayHost, и этот
-// интерфейс; X11Window/WaylandWindow — только его (см. notify_linux.go).
+// интерфейс; X11Window/WaylandWindow — только его (см. platform/tray/notify_linux.go).
 type balloonHost interface {
 	// ShowBalloon показывает системное уведомление.
 	// infoFlag: 0=none, 1=info, 2=warning, 3=error.
@@ -99,8 +99,6 @@ func trayButton(button int) widget.MouseButton {
 		return widget.MouseLeft
 	}
 }
-
-// ─── Чистые помощники (тестируются без ОС) ───────────────────────────────────
 
 // ─── Публичный API (window.Window) ───────────────────────────────────────────
 
@@ -283,8 +281,8 @@ func (win *Window) ensureTrayDispatcher(th trayHost) {
 	th.SetTrayClickHandler(win.dispatchTrayClick)
 	// Меню, которое показывает сама система (Linux), сообщает выбор пункта со
 	// своего потока — пункт выполняется на горутине движка.
-	if mr, ok := th.(interface{ setTrayMenuRunner(run func(fn func())) }); ok {
-		mr.setTrayMenuRunner(win.onEngine)
+	if mr, ok := th.(interface{ SetTrayMenuRunner(run func(fn func())) }); ok {
+		mr.SetTrayMenuRunner(win.onEngine)
 	}
 }
 
@@ -317,7 +315,7 @@ func (win *Window) pushTrayMenuNative() {
 	if !ok {
 		return
 	}
-	win.trayMenuNative = nm.setTrayMenuNative(win.trayMenu)
+	win.trayMenuNative = nm.SetTrayMenuNative(win.trayMenu)
 }
 
 // showTrayMenu показывает трей-меню у курсора. Экранные координаты курсора

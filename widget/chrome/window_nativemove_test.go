@@ -77,12 +77,12 @@ func TestWindow_NativeResize_EdgesReportedToHost(t *testing.T) {
 		x, y int
 		want int
 	}{
-		{"левый край", b.Min.X + 1, b.Min.Y + 150, NativeEdgeLeft},
-		{"правый край", b.Max.X - 1, b.Min.Y + 150, NativeEdgeRight},
-		{"верхний край", b.Min.X + 200, b.Min.Y, NativeEdgeTop},
-		{"нижний край", b.Min.X + 200, b.Max.Y - 1, NativeEdgeBottom},
-		{"левый верхний угол", b.Min.X, b.Min.Y, NativeEdgeTop | NativeEdgeLeft},
-		{"правый нижний угол", b.Max.X - 1, b.Max.Y - 1, NativeEdgeBottom | NativeEdgeRight},
+		{"левый край", b.Min.X + 1, b.Min.Y + 150, base.NativeEdgeLeft},
+		{"правый край", b.Max.X - 1, b.Min.Y + 150, base.NativeEdgeRight},
+		{"верхний край", b.Min.X + 200, b.Min.Y, base.NativeEdgeTop},
+		{"нижний край", b.Min.X + 200, b.Max.Y - 1, base.NativeEdgeBottom},
+		{"левый верхний угол", b.Min.X, b.Min.Y, base.NativeEdgeTop | base.NativeEdgeLeft},
+		{"правый нижний угол", b.Max.X - 1, b.Max.Y - 1, base.NativeEdgeBottom | base.NativeEdgeRight},
 	}
 	for _, c := range cases {
 		w := nativeWin()
@@ -144,12 +144,12 @@ func TestWindow_NativeEdgeBits(t *testing.T) {
 		want int
 	}{
 		{base.EdgeNone, 0},
-		{base.EdgeN, NativeEdgeTop},
-		{base.EdgeS, NativeEdgeBottom},
-		{base.EdgeW, NativeEdgeLeft},
-		{base.EdgeE, NativeEdgeRight},
-		{base.EdgeN | base.EdgeW, NativeEdgeTop | NativeEdgeLeft},
-		{base.EdgeS | base.EdgeE, NativeEdgeBottom | NativeEdgeRight},
+		{base.EdgeN, base.NativeEdgeTop},
+		{base.EdgeS, base.NativeEdgeBottom},
+		{base.EdgeW, base.NativeEdgeLeft},
+		{base.EdgeE, base.NativeEdgeRight},
+		{base.EdgeN | base.EdgeW, base.NativeEdgeTop | base.NativeEdgeLeft},
+		{base.EdgeS | base.EdgeE, base.NativeEdgeBottom | base.NativeEdgeRight},
 	}
 	for _, c := range cases {
 		if got := nativeEdgeBits(c.e); got != c.want {

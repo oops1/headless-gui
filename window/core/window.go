@@ -441,7 +441,8 @@ type Window struct {
 	// Сеттеры трея вызываются до Run() (native ещё nil), поэтому желаемое
 	// состояние буферизуется и применяется в Run() после создания окна
 	// (applyPendingTray). На платформах без поддержки (native не trayHost) —
-	// тихий no-op. См. tray.go, platform/win32/tray_windows.go, tray_sni_linux.go.
+	// тихий no-op. См. tray.go, platform/win32/tray_windows.go,
+	// platform/tray/sni_linux.go.
 	trayIcon          image.Image
 	trayTooltip       string
 	trayIconWant      bool

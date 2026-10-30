@@ -7,8 +7,8 @@ import (
 
 // Захват клавиатуры (E3): общий слой окна и фильтр перехвата без платформы.
 // Хук Win32, XGrabKeyboard и inhibitor Wayland проверяются в
-// platform/win32/keygrab_windows_test.go, x11_keygrab_linux_test.go,
-// wayland_keygrab_linux_test.go.
+// platform/win32/keygrab_windows_test.go,
+// platform/x11/x11_keygrab_linux_test.go, wayland_keygrab_linux_test.go.
 
 // grabSpy — бэкенд с захватом клавиатуры.
 type grabSpy struct {

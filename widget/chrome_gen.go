@@ -74,15 +74,6 @@ func NewWindow(title string, width, height int) *Window {
 	return chrome.NewWindow(title, width, height)
 }
 
-// Биты краёв окна для OnNativeResize. Хост получает их вместо внутреннего
-// ResizeEdge: значения устойчивы и не зависят от порядка констант выше.
-const (
-	NativeEdgeTop    = chrome.NativeEdgeTop
-	NativeEdgeBottom = chrome.NativeEdgeBottom
-	NativeEdgeLeft   = chrome.NativeEdgeLeft
-	NativeEdgeRight  = chrome.NativeEdgeRight
-)
-
 // ── window_tabs.go ──
 
 // TitleTabPart — что находится под точкой в полосе вкладок заголовка.

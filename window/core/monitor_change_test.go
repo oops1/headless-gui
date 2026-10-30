@@ -12,7 +12,8 @@ import (
 
 // Событие смены мониторов (E5): общий слой окна без платформы. Платформенные
 // источники событий проверяются в platform/win32/monitor_change_windows_test.go,
-// x11_monitor_change_linux_test.go, wayland_monitor_change_linux_test.go.
+// platform/x11/x11_monitor_change_linux_test.go,
+// wayland_monitor_change_linux_test.go.
 
 // monTestSpy — бэкенд, умеющий сообщать о смене мониторов.
 type monTestSpy struct {

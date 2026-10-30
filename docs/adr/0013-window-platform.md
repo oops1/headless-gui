@@ -354,6 +354,38 @@ Linux есть).
   буфер одной резервацией и так выводится на любой версии. Блит через DIB-секцию не
   понадобился: буфер одной резервацией выводится и на Windows 10.
 
+**9.3.** Бэкенд X11 — пакет `platform/x11`:
+
+- Вместе с окном переехали файлы, по имени не похожие на бэкенд:
+  `activate_x11_linux.go`, `alwaysontop_x11_linux.go`, `icon_linux.go`,
+  `initial_x11_linux.go`, XDND (`dnd_linux.go` — методы `X11Window`),
+  раскладки (`locale_linux.go` → `x11_locale_linux.go`), переносимые разбор
+  протокола и помощники (`x11argb.go`, `x11shape.go`, `x11cursorbitmap.go`,
+  `x11touch.go` и другие).
+- Трей StatusNotifierItem и уведомления `org.freedesktop.Notifications`
+  встраиваются и в X11, и в Wayland, поэтому вынесены слоем ниже бэкендов —
+  пакет `platform/tray` (`tray.SNI`, `tray.Notifier`). Окна встраивают их
+  через неэкспортированные псевдонимы: методы трея продвигаются, а полей в
+  открытом API `window.X11Window` и `window.WaylandWindow` нет. `HideToTray`
+  и `RestoreFromTray` — методы бэкендов. На 9.8 трей подключится через точки
+  расширения, и направление зависимости развернётся (бэкенд не будет
+  импортировать трей).
+- Биты краёв окна `NativeEdge*` (рамка → `OnNativeResize` → бэкенд) — в
+  `widget/base` вместо `widget/chrome`: бэкенды импортируют только
+  `widget/base`. Открытые имена `widget.NativeEdge*` прежние.
+- Стандартные интерфейсы D-Bus — `dbus.IfaceProperties`,
+  `dbus.IfaceIntrospectable`; порядок мониторов — `native.SortMonitors`;
+  `SolidBands` бэкенд берёт из `core/raster`, а не из `engine`.
+- В ядре — псевдоним `X11Window = x11.X11Window` (открытое имя фасада) и
+  выбор бэкенда; методы трея `SetTrayMenuNative`, `SetTrayMenuRunner`
+  экспортированы (интерфейсы ядра `nativeTrayMenu` и анонимный).
+- Тесты ядра `backend_contract_*_test.go`: каждый бэкенд удовлетворяет всем
+  интерфейсам-возможностям ядра, которым удовлетворял на 9.3 (проверка при
+  сборке) — тихая потеря возможности при переносе бэкенда (как
+  `dragImageSupported` на 9.2) теперь ошибка сборки тестов.
+- Тесты Linux прогоняются в WSL (WSLg — живые X11-тесты тоже): тестовые
+  бинари собираются с `GOOS=linux` и запускаются в каталогах пакетов.
+
 ## Последствия
 
 - Открытый API `window` сохраняется целиком; новый открытый API —

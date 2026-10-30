@@ -15,7 +15,8 @@ package core
 //	Win32   MoveWindow → WM_SIZE → onResize сразу; развёрнутому окну
 //	        меняется нормальный прямоугольник — размер «после восстановления»;
 //	X11     ConfigureWindow → ConfigureNotify от менеджера → onResize; размер
-//	        окна меняется только по этому событию (x11_setsize_linux.go);
+//	        окна меняется только по этому событию
+//	        (platform/x11/x11_setsize_linux.go);
 //	Wayland размер обычного окна выбирает клиент: onResize и буфер нового
 //	        размера без ожидания configure (WaylandWindow.SetSize);
 //	Cocoa   не реализовано (NSWindow.setFrame в бэкенде не написан).

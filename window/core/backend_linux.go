@@ -8,7 +8,13 @@ import (
 	"os"
 
 	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/platform/x11"
 )
+
+// X11Window — реализация NativeWindow через X11 протокол.
+// Чистый Go без CGO и внешних зависимостей.
+// Общается с X-сервером напрямую через Unix socket.
+type X11Window = x11.X11Window
 
 // NewNativeWindow выбирает бэкенд: Wayland при доступном композиторе
 // (WAYLAND_DISPLAY + живой сокет), иначе X11 (в т.ч. XWayland).

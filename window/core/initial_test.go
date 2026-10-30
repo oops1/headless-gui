@@ -13,7 +13,7 @@ import (
 //
 // Чистая арифметика и порядок, в котором bringUp настраивает бэкенд, — на
 // любой платформе; живые окна — в platform/win32/initial_windows_test.go,
-// провод X11 и Wayland — в initial_x11_linux_test.go и
+// провод X11 — в platform/x11/initial_x11_linux_test.go, Wayland — в
 // initial_wayland_linux_test.go.
 
 // initFake — бэкенд, записывающий порядок вызовов: что получил до Create и с

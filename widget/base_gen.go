@@ -2594,6 +2594,17 @@ func NotifyMove(src, dst image.Rectangle) { base.NotifyMove(src, dst) }
 // координатам — а у двух движков одного разрешения они совпадают.
 func NotifyWidgetMove(w Widget, src, dst image.Rectangle) { base.NotifyWidgetMove(w, src, dst) }
 
+// ── nativeedge.go ──
+
+// Биты краёв окна для OnNativeResize. Хост получает их вместо внутреннего
+// ResizeEdge: значения устойчивы и не зависят от порядка констант ResizeEdge.
+const (
+	NativeEdgeTop    = base.NativeEdgeTop
+	NativeEdgeBottom = base.NativeEdgeBottom
+	NativeEdgeLeft   = base.NativeEdgeLeft
+	NativeEdgeRight  = base.NativeEdgeRight
+)
+
 // ── navpanel.go ──
 
 // NavPanelItem — пункт боковой навигации.

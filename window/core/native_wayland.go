@@ -3,7 +3,7 @@
 package core
 
 // Wayland-бэкенд: сырой wire-протокол через unix-сокет, без CGO и внешних
-// зависимостей (симметрично X11-бэкенду в native_linux.go).
+// зависимостей (симметрично X11-бэкенду в platform/x11/native_linux.go).
 //
 // Использует базовые интерфейсы ядра протокола + xdg-shell:
 //
@@ -161,13 +161,13 @@ const wlBufWaitTimeout = 32 * time.Millisecond
 
 // WaylandWindow — реализация NativeWindow поверх Wayland (xdg-shell + wl_shm).
 type WaylandWindow struct {
-	// linuxNotifier — системные уведомления через D-Bus (notify_linux.go):
-	// путь общий с X11, композитора не касается.
-	linuxNotifier
+	// trayNotifier — системные уведомления через D-Bus (platform/tray): путь
+	// общий с X11, композитора не касается.
+	trayNotifier
 
-	// linuxTray — иконка в системном трее по StatusNotifierItem
-	// (tray_sni_linux.go): тоже чистый D-Bus, композитора не касается.
-	linuxTray
+	// traySNI — иконка в системном трее по StatusNotifierItem
+	// (platform/tray): тоже чистый D-Bus, композитора не касается.
+	traySNI
 
 	conn *net.UnixConn
 

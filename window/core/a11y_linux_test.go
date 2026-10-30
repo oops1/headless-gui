@@ -265,7 +265,7 @@ func TestATSPIBridgeLive(t *testing.T) {
 	}
 	getProp := func(path, iface, name string) any {
 		t.Helper()
-		reply := call(path, ifaceProps, "Get", "ss", []any{iface, name})
+		reply := call(path, dbus.IfaceProperties, "Get", "ss", []any{iface, name})
 		v, ok := reply.Body[0].(dbus.Variant)
 		if !ok {
 			t.Fatalf("свойство %s.%s: %#v", iface, name, reply.Body[0])

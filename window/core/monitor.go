@@ -26,7 +26,6 @@ package core
 
 import (
 	"image"
-	"sort"
 
 	"github.com/oops1/headless-gui/v3/platform/native"
 )
@@ -44,7 +43,7 @@ type monitorSource interface {
 // Можно звать из любой горутины и без окна. На X11 и Wayland это короткое
 // отдельное подключение к серверу: вызывать на каждый кадр не стоит.
 func Monitors() []native.Monitor {
-	return sortMonitors(platformMonitors())
+	return native.SortMonitors(platformMonitors())
 }
 
 // MonitorOf возвращает монитор, на котором находится окно (с наибольшей долей
@@ -95,21 +94,4 @@ func monitorAt(list []native.Monitor, x, y int) (native.Monitor, bool) {
 		}
 	}
 	return native.Monitor{}, false
-}
-
-// sortMonitors упорядочивает мониторы: основной первым, остальные слева
-// направо, затем сверху вниз. Порядок, в котором их перечисляет система, ничем
-// не гарантирован, а приложению нужен предсказуемый («второй монитор»).
-func sortMonitors(list []native.Monitor) []native.Monitor {
-	sort.SliceStable(list, func(i, j int) bool {
-		a, b := list[i], list[j]
-		if a.Primary != b.Primary {
-			return a.Primary
-		}
-		if a.Bounds.Min.X != b.Bounds.Min.X {
-			return a.Bounds.Min.X < b.Bounds.Min.X
-		}
-		return a.Bounds.Min.Y < b.Bounds.Min.Y
-	})
-	return list
 }

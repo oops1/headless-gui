@@ -326,7 +326,7 @@ func (w *Window) SystemMenuItems() []base.MenuItem {
 		}},
 		{Text: base.Tr("win.sys.size"), Disabled: !canSize, OnClick: func() {
 			if w.OnNativeResize != nil {
-				w.OnNativeResize(NativeEdgeBottom | NativeEdgeRight)
+				w.OnNativeResize(base.NativeEdgeBottom | base.NativeEdgeRight)
 			}
 		}},
 		{Text: base.Tr("win.sys.minimize"), Disabled: !canMin, OnClick: func() {

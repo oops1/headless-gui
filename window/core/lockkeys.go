@@ -25,7 +25,7 @@ package core
 //	         маске, на которой стоит клавиша; нет XKB — ядерный протокол
 //	         (QueryPointer, маска Lock и модификатор клавиши Num_Lock из
 //	         GetModifierMapping). Вопрос уходит в цикл событий окна и там
-//	         получает ответ (x11_lockkeys_linux.go).
+//	         получает ответ (platform/x11/x11_lockkeys_linux.go).
 //	Wayland  последнее wl_keyboard.modifiers: mods_locked, биты — по индексам
 //	         модификаторов Lock и Mod2/NumLock из keymap композитора. Пока
 //	         после получения фокуса modifiers не пришло, состояние неизвестно.

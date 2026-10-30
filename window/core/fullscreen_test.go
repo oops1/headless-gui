@@ -208,7 +208,7 @@ func TestFullscreen_MaximizeButtonLeavesFullscreen(t *testing.T) {
 func TestMonitorHelpers(t *testing.T) {
 	left := native.Monitor{Bounds: image.Rect(0, 0, 1920, 1080), Work: image.Rect(0, 0, 1920, 1040), Scale: 1}
 	right := native.Monitor{Bounds: image.Rect(1920, 0, 3840, 1080), Scale: 1.5, Primary: true}
-	list := sortMonitors([]native.Monitor{left, right})
+	list := native.SortMonitors([]native.Monitor{left, right})
 	if !list[0].Primary || list[1].Bounds != left.Bounds {
 		t.Errorf("порядок: основной первым, got %v", list)
 	}

@@ -77,7 +77,7 @@ func TestATSPILive_NodeActionsOnWire(t *testing.T) {
 	if !hasAction {
 		t.Fatal("узел владельца не объявил интерфейс Action")
 	}
-	if n := call(right, ifaceProps, "Get", "ss", ifaceAction, "NActions").Body[0].(dbus.Variant).Val; n != int32(1) {
+	if n := call(right, dbus.IfaceProperties, "Get", "ss", ifaceAction, "NActions").Body[0].(dbus.Variant).Val; n != int32(1) {
 		t.Errorf("NActions = %v", n)
 	}
 

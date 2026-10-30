@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v3/platform/x11"
 )
 
 // platformMonitors — мониторы без окна: Wayland, если он доступен (так же
@@ -18,5 +19,5 @@ func platformMonitors() []native.Monitor {
 			}
 		}
 	}
-	return x11PlatformMonitors()
+	return x11.EnumMonitors()
 }

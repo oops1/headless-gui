@@ -197,7 +197,7 @@ func (win *Window) monitorsRefresh(gen uint64, read func() []native.Monitor) {
 }
 
 // monitorListsEqual — два списка описывают одну и ту же конфигурацию. Порядок
-// записей у Monitors() устойчив (sortMonitors), так что сравниваем по месту.
+// записей у Monitors() устойчив (native.SortMonitors), так что сравниваем по месту.
 func monitorListsEqual(a, b []native.Monitor) bool {
 	if len(a) != len(b) {
 		return false

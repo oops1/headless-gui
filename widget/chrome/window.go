@@ -303,7 +303,7 @@ type Window struct {
 	OnNativeMove func() bool
 
 	// OnNativeResize просит хоста начать изменение размера за край окна
-	// средствами ОС. edges — биты краёв (NativeEdgeTop и далее).
+	// средствами ОС. edges — биты краёв (base.NativeEdgeTop и далее).
 	//
 	// Задан — значит край окна снова живой в нативном режиме: движок
 	// показывает над ним курсор и ловит нажатие, но размер меняет система.
@@ -603,29 +603,20 @@ const (
 
 // ─── Resize перетаскиванием краёв ───────────────────────────────────────────
 
-// Биты краёв окна для OnNativeResize. Хост получает их вместо внутреннего
-// ResizeEdge: значения устойчивы и не зависят от порядка констант выше.
-const (
-	NativeEdgeTop    = 1
-	NativeEdgeBottom = 2
-	NativeEdgeLeft   = 4
-	NativeEdgeRight  = 8
-)
-
 // nativeEdgeBits переводит внутреннюю маску краёв в биты NativeEdge*.
 func nativeEdgeBits(e base.ResizeEdge) int {
 	bits := 0
 	if e&base.EdgeN != 0 {
-		bits |= NativeEdgeTop
+		bits |= base.NativeEdgeTop
 	}
 	if e&base.EdgeS != 0 {
-		bits |= NativeEdgeBottom
+		bits |= base.NativeEdgeBottom
 	}
 	if e&base.EdgeW != 0 {
-		bits |= NativeEdgeLeft
+		bits |= base.NativeEdgeLeft
 	}
 	if e&base.EdgeE != 0 {
-		bits |= NativeEdgeRight
+		bits |= base.NativeEdgeRight
 	}
 	return bits
 }

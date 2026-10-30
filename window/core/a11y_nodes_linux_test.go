@@ -222,7 +222,7 @@ func TestATSPIMenu_ActionsOnItems(t *testing.T) {
 
 	// Число действий: у пункта с подменю два.
 	nact := func(id int32) int32 {
-		return atspiCallNode(b, id, ifaceProps, "Get", ifaceAction, "NActions").Body[0].(dbus.Variant).Val.(int32)
+		return atspiCallNode(b, id, dbus.IfaceProperties, "Get", ifaceAction, "NActions").Body[0].(dbus.Variant).Val.(int32)
 	}
 	if nact(open) != 1 || nact(more) != 2 {
 		t.Errorf("NActions: %d и %d, ожидалось 1 и 2", nact(open), nact(more))

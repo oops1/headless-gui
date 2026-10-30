@@ -3,13 +3,14 @@ package core
 // depmap_test.go — карта зависимостей пакета по будущим пакетам бэкендов
 // (ADR-0013, этап 9). Группы — по именам файлов: бэкенды Win32, X11,
 // Wayland, Cocoa (с файлами, которые по смыслу их, хотя названы иначе:
-// activate_x11_linux.go, icon_linux.go, initial_wayland_linux.go…);
+// activate_wayland_linux.go, initial_wayland_linux.go…);
 // возможности под ОС (доступность, трей, DnD, оболочка — feature: их
 // отделяет 9.8); остальное — ядро (обвязка окна).
 //
 // Win32 с 9.2 — свой пакет platform/win32 (здесь только прослойка ядра
 // backend_windows.go: возможности ОС теми же именами, что на других
-// платформах, — это ядро, как и выбор бэкенда backend_linux.go).
+// платформах, — это ядро, как и выбор бэкенда backend_linux.go), X11 с 9.3 —
+// platform/x11.
 //
 // Правило (с 9.2b): бэкенд не зависит ни от ядра, ни от другого бэкенда —
 // общее у них в platform/native, platform/keyboard, platform/pointer,
@@ -35,11 +36,8 @@ func TestDepMap_BackendOrder(t *testing.T) {
 	re := regexp.MustCompile
 	baseline := map[string][]string{
 		"windows": {},
-		"linux": {
-			"wayland → feature",
-			"x11 → feature",
-		},
-		"darwin": {},
+		"linux":   {},
+		"darwin":  {},
 	}
 	depmap.Run(t, depmap.Config{
 		Dir:  ".",
