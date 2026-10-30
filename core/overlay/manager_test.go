@@ -4,11 +4,11 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/core/raster"
-	"github.com/oops1/headless-gui/v3/core/text"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/core/raster"
+	"github.com/oops1/headless-gui/v4/core/text"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // stubHost — движок для тестов оверлеев без движка: журнал повреждений.

@@ -1,6 +1,6 @@
 package desktop
 
-import "github.com/oops1/headless-gui/v3/widget"
+import "github.com/oops1/headless-gui/v4/widget"
 
 // FocusRequester — то, у чего панель просит фокус; его реализует
 // *engine.Engine (методы RequestFocus и ReturnFocus).

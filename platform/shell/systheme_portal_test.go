@@ -3,8 +3,8 @@ package shell
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/dbus"
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/dbus"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 func TestSystemThemeFromPortalValue(t *testing.T) {

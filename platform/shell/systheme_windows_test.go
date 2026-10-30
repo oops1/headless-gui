@@ -11,9 +11,9 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 
-	"github.com/oops1/headless-gui/v3/internal/testhook"
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/platform/win32"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/win32"
 )
 
 // TestDetectSystemTheme_ReadsRegistry сверяет ответ с реестром, прочитанным

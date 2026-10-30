@@ -17,8 +17,8 @@ package engine
 import (
 	"image"
 
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
-	"github.com/oops1/headless-gui/v3/widget"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // SetCommandPath включает или выключает путь команд. По умолчанию включён.

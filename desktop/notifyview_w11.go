@@ -24,8 +24,8 @@ import (
 	"image/color"
 	"strconv"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Пропорции раскладки Windows 11, которые не размеры темы, а устройство фигур.

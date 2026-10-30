@@ -12,7 +12,7 @@ package x11
 import (
 	"encoding/binary"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // SetInitialPlacement запоминает положение и «развёрнуто» до Create.

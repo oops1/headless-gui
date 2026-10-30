@@ -14,7 +14,7 @@ import (
 
 	xdraw "golang.org/x/image/draw"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // ─── Дополнительные Win32/Shell/DWM константы ────────────────────────────────

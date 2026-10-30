@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"image"
 
-	"github.com/oops1/headless-gui/v3/internal/focusreq"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/focusreq"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // qsSliderStep — шаг ползунка с клавиатуры; qsSliderBigStep — PageUp/PageDown;

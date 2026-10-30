@@ -235,8 +235,8 @@ package main
 import (
     "image"
     "image/color"
-    "github.com/oops1/headless-gui/v3/engine"
-    "github.com/oops1/headless-gui/v3/widget"
+    "github.com/oops1/headless-gui/v4/engine"
+    "github.com/oops1/headless-gui/v4/widget"
 )
 
 func main() {
@@ -301,8 +301,8 @@ eng.SetRoot(root)
 
 | Модуль | Зависимость |
 |---|---|
-| `github.com/oops1/headless-gui/v3` | `golang.org/x/image` |
-| `github.com/oops1/headless-gui/v3/window` | `golang.org/x/sys/windows`, `github.com/ebitengine/purego` |
+| `github.com/oops1/headless-gui/v4` | `golang.org/x/image` |
+| `github.com/oops1/headless-gui/v4/window` | `golang.org/x/sys/windows`, `github.com/ebitengine/purego` |
 
 Go 1.22+. Модуль `window/` опционален — ядро движка не имеет CGO-зависимостей. Оконный модуль тоже без CGO на всех платформах.
 

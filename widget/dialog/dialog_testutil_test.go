@@ -2,7 +2,7 @@ package dialog
 
 // Помощники тестов пакета (копии помощников тестов ядра).
 
-import "github.com/oops1/headless-gui/v3/widget/base"
+import "github.com/oops1/headless-gui/v4/widget/base"
 
 // accNodeNamed ищет узел дерева по имени (обход в глубину).
 func accNodeNamed(n *base.AccessNode, name string) *base.AccessNode {

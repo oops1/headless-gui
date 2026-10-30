@@ -1,6 +1,6 @@
 package main
 
-import "github.com/oops1/headless-gui/v3/widget"
+import "github.com/oops1/headless-gui/v4/widget"
 
 // locale.go — строки приложения. Ключи «app.» свои: ключи контрола («merge.»)
 // живут в движке и переводятся вместе с ним.

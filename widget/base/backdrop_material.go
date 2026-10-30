@@ -8,13 +8,13 @@ package base
 // той же функцией, а не своими литералами.
 
 import (
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
 	"image"
 	"math"
 	"sync/atomic"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v4/theme"
 )
 
 // ShadowParamDrawer — см. draw.ShadowParamDrawer (core/draw); алиас: тот же тип.

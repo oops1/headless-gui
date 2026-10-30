@@ -3,7 +3,7 @@ package minimal
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/facadegen"
+	"github.com/oops1/headless-gui/v4/internal/facadegen"
 )
 
 // Проверки фасада — internal/facadegen (verify.go), как у window; тесты
@@ -24,7 +24,7 @@ func TestFacade_TypesIdentical(t *testing.T) {
 	if testing.Short() {
 		t.Skip("проверка типов из исходников")
 	}
-	facadegen.VerifyTypesIdentical(t, facadegen.WindowMinimal("../.."), "github.com/oops1/headless-gui/v3/window/minimal", 150)
+	facadegen.VerifyTypesIdentical(t, facadegen.WindowMinimal("../.."), "github.com/oops1/headless-gui/v4/window/minimal", 150)
 }
 
 // API тот же, что у window: снимок общий (обновляется только из window —

@@ -15,8 +15,8 @@ package chrome
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
-	"github.com/oops1/headless-gui/v3/widget/svg"
+	"github.com/oops1/headless-gui/v4/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/svg"
 )
 
 // Размеры значка окна в заголовке, px.

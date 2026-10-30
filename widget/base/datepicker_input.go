@@ -4,7 +4,7 @@ import (
 	"image"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/calendar"
+	"github.com/oops1/headless-gui/v4/internal/calendar"
 )
 
 // datepicker_input.go — клавиатура, мышь, фокус и закрытие календаря.

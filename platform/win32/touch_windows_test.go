@@ -10,7 +10,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // Раскладка структур указателей обязана совпадать с C: через неё система

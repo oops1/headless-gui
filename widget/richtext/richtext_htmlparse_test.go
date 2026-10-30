@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // Тесты разбора HTML в абзацы (вставка из буфера обмена). Дамп — тот же, что в

@@ -16,7 +16,7 @@ import (
 	"image"
 	"image/color"
 
-	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v4/theme"
 )
 
 // ThemeStyle — параметры отрисовки контролов (форма, а не цвета).

@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
-	"github.com/oops1/headless-gui/v3/widget/xaml"
+	"github.com/oops1/headless-gui/v4/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/xaml"
 )
 
 // RegisterXAML регистрирует теги ввода текста в реестре XAML r. Фасад

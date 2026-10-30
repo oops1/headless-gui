@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Пробный тест ревью 5.4: живое окно Win32 из szWin32Window оставляет

@@ -12,8 +12,8 @@ package win32
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/platform/pointer"
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/platform/pointer"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // SetCursorImage показывает курсор из картинки. Реализует cursorImageSetter;

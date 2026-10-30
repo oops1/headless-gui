@@ -1,12 +1,12 @@
 package desktop
 
 import (
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 	"image"
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v4/theme"
 )
 
 // Плавное раскрытие и сворачивание стопки уведомлений Windows 11 (v3.34): токен

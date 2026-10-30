@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Значок окна на Wayland (xdg-toplevel-icon-v1). Компоновщик подменён парой

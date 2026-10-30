@@ -19,8 +19,8 @@ package engine
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/output"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/output"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // widgetMove — объявление переноса в логических координатах (копия

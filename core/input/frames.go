@@ -29,7 +29,7 @@ package input
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // HitStep — шаг пути hit-теста: виджет и смещение его кадра. Off — сумма

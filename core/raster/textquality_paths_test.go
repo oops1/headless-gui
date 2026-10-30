@@ -1,8 +1,8 @@
 package raster
 
 import (
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 	"image"
 	"image/color"
 	"testing"

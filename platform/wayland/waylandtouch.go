@@ -37,9 +37,9 @@ import (
 	"math"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/platform/pointer"
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/pointer"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // Значения протокола wl_seat / wl_touch.

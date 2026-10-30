@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/goid"
-	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v4/internal/goid"
+	"github.com/oops1/headless-gui/v4/platform/keyboard"
 )
 
 // SetLockKeys на Wayland через zwp_virtual_keyboard_v1. Композитор подменён

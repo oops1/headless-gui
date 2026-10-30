@@ -1,6 +1,6 @@
 package engine
 
-import "github.com/oops1/headless-gui/v3/internal/goid"
+import "github.com/oops1/headless-gui/v4/internal/goid"
 
 // curGoroutineID — номер текущей горутины.
 //

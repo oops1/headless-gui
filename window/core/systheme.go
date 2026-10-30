@@ -18,7 +18,7 @@ import (
 	"image/color"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // detectSystemTheme, detectSystemAccent, watchSystemTheme и watchSystemAccent

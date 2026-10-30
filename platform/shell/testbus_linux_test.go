@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/dbus"
+	"github.com/oops1/headless-gui/v4/platform/dbus"
 )
 
 // dialTestBus — копия помощника из platform/dbus (dbus_conn_linux_test.go):

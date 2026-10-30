@@ -8,7 +8,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v4/engine"
 )
 
 // Настоящее окно-попап Win32 на переходе (popup_fade.go): слоистое окно,

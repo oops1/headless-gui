@@ -1,11 +1,11 @@
 package raster
 
 import (
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // newShapingCanvas — движок с системными fallback-шрифтами (arial/DejaVu

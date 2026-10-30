@@ -5,7 +5,7 @@ package x11
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // TestPropertyTooBig проверяет отсечку неправдоподобной длины свойства XDND.

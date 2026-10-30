@@ -34,7 +34,7 @@ package base
 import (
 	"image"
 
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
 )
 
 // DirectDrawer — см. draw.DirectDrawer: виджет, которого нельзя записать

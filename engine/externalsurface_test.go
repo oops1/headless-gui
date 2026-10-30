@@ -1,16 +1,16 @@
 package engine
 
 import (
-	"github.com/oops1/headless-gui/v3/core/overlay"
-	hgraster "github.com/oops1/headless-gui/v3/core/raster"
+	"github.com/oops1/headless-gui/v4/core/overlay"
+	hgraster "github.com/oops1/headless-gui/v4/core/raster"
 	"image"
 	"image/color"
 	"sync"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/output"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/output"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // E7: widget.ExternalSurface — чужой буфер выводится в холст без копии в

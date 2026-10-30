@@ -30,8 +30,8 @@ headless-gui/
 import (
     "image"
     "image/color"
-    "github.com/oops1/headless-gui/v3/engine"
-    "github.com/oops1/headless-gui/v3/widget"
+    "github.com/oops1/headless-gui/v4/engine"
+    "github.com/oops1/headless-gui/v4/widget"
 )
 
 eng := engine.New(1920, 1080, 30)   // width, height, FPS
@@ -1110,7 +1110,7 @@ whole group starts. Highlighting is drawn from `TreeViewItem.IsSelected`.
 Data Binding with HierarchicalDataTemplate:
 
 ```go
-import "github.com/oops1/headless-gui/v3/widget/treeview"
+import "github.com/oops1/headless-gui/v4/widget/treeview"
 
 tmpl := &treeview.HierarchicalDataTemplate{
     ItemsSourcePath: "Children",
@@ -1849,7 +1849,7 @@ Common attributes: `Name`/`x:Name`, `Left`/`Canvas.Left`, `Top`/`Canvas.Top`, `W
 Separate module with platform-native backends. CGO-free on all platforms (Windows: Win32 API, macOS: Cocoa via purego, Linux: X11 protocol).
 
 ```go
-import "github.com/oops1/headless-gui/v3/window"
+import "github.com/oops1/headless-gui/v4/window"
 
 eng := engine.New(1280, 720, 30)
 // ... build UI, eng.Start() ...
@@ -4136,7 +4136,7 @@ links, system theme and accent, languages). There is one `Window` type and the A
 names are the same; switching a program means changing the import path:
 
 ```go
-import window "github.com/oops1/headless-gui/v3/window/minimal"
+import window "github.com/oops1/headless-gui/v4/window/minimal"
 ```
 
 Without a capability its methods answer as on a windowing system that cannot do it:
@@ -5991,31 +5991,27 @@ The model is described in `docs/adr/0010-live-tiles.md`.
 ## Module Structure
 
 ```
-go.mod:  module github.com/oops1/headless-gui/v3
-  require golang.org/x/image
-
-go.mod:  module github.com/oops1/headless-gui/v3/window
-  require github.com/oops1/headless-gui/v3 => ../
-  require github.com/ebitengine/purego, golang.org/x/sys
+go.mod:  module github.com/oops1/headless-gui/v4
+  require github.com/ebitengine/purego, github.com/go-text/typesetting,
+          golang.org/x/image, golang.org/x/sys
 ```
 
-Consumer application imports the main module:
+There is one module: the native window (`window`, `window/minimal`), the
+platform (`platform/...`) and the engine are its packages. A consumer
+application requires it as a whole:
 
 ```
-require github.com/oops1/headless-gui/v3 v0.x.x
+require github.com/oops1/headless-gui/v4 v4.0.0
 ```
 
-If native window is needed:
-
-```
-require github.com/oops1/headless-gui/v3/window v0.x.x
-```
+Moving from v3: replace `github.com/oops1/headless-gui/v3` with
+`github.com/oops1/headless-gui/v4` in imports (since 4.0.0 the module path ends
+with `/v4`, as Go requires for major version 4).
 
 For local development use `replace`:
 
 ```
-replace github.com/oops1/headless-gui/v3 => ../GuiEngine
-replace github.com/oops1/headless-gui/v3/window => ../GuiEngine/window
+replace github.com/oops1/headless-gui/v4 => ../headless-gui
 ```
 
 ### Engine packages `core/` (v4.0, in progress)
@@ -6089,11 +6085,11 @@ their XAML tags explicitly (the facade does it itself on the first `LoadUIFromXA
 
 ```go
 import (
-	"github.com/oops1/headless-gui/v3/widget/base"
-	"github.com/oops1/headless-gui/v3/widget/text"
-	"github.com/oops1/headless-gui/v3/widget/xaml"
+	"github.com/oops1/headless-gui/v4/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/text"
+	"github.com/oops1/headless-gui/v4/widget/xaml"
 
-	_ "github.com/oops1/headless-gui/v3/platform/clipboard"
+	_ "github.com/oops1/headless-gui/v4/platform/clipboard"
 )
 
 func main() {

@@ -4,9 +4,9 @@ package engine
 // нужны и тестам движка (тестовые файлы другого пакета не импортируются).
 
 import (
-	hgraster "github.com/oops1/headless-gui/v3/core/raster"
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
-	"github.com/oops1/headless-gui/v3/internal/testhook"
+	hgraster "github.com/oops1/headless-gui/v4/core/raster"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
 	"image"
 	"image/color"
 	"math/rand"

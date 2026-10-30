@@ -11,7 +11,7 @@ package x11
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // atomCardinal — предопределённый атом CARDINAL (X11 protocol, §Atoms).

@@ -14,7 +14,7 @@ package dialog
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // dialogMinW/dialogMinH — во что диалог не даёт себя сжать, если приложение не

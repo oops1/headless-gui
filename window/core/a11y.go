@@ -6,8 +6,8 @@
 package core
 
 import (
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // SetAccessibilityEnabled принудительно включает (true) или выключает (false)

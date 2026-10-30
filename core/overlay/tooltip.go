@@ -12,9 +12,9 @@ import (
 	"image/color"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/core/input"
-	"github.com/oops1/headless-gui/v3/core/raster"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/core/input"
+	"github.com/oops1/headless-gui/v4/core/raster"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // SetTooltipsEnabled включает/выключает показ всплывающих подсказок.

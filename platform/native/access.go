@@ -5,7 +5,7 @@ package native
 // platform/a11y и регистрируется здесь; ядро окна отдаёт ему себя через
 // AccessHost.
 
-import "github.com/oops1/headless-gui/v3/widget/base"
+import "github.com/oops1/headless-gui/v4/widget/base"
 
 // AccessHost — окно ядра глазами моста доступности. Методы зовутся с любой
 // горутины: потоки UIA, обработчики D-Bus, цикл событий моста.

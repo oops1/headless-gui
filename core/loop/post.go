@@ -17,7 +17,7 @@
 
 package loop
 
-import "github.com/oops1/headless-gui/v3/internal/goid"
+import "github.com/oops1/headless-gui/v4/internal/goid"
 
 // Post ставит fn в очередь на выполнение в горутине кадра.
 //

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // Тесты редактора RichText без окна (измеритель — предсказуемый, как в

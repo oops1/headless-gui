@@ -1,6 +1,6 @@
 # AI Agent Reference: headless-gui Framework
 
-**Framework**: `github.com/oops1/headless-gui/v3`  
+**Framework**: `github.com/oops1/headless-gui/v4`  
 **Language**: Go  
 **Rendering**: Off-screen to RGBA buffer with dirty tile output  
 **No CGO**: Pure Go implementation  
@@ -118,16 +118,16 @@ this file — new APIs go into a version section below.
 ### Module & Imports
 
 ```go
-module: github.com/oops1/headless-gui/v3
+module: github.com/oops1/headless-gui/v4
 go version: 1.22+
 
 import (
-    "github.com/oops1/headless-gui/v3/engine"
-    "github.com/oops1/headless-gui/v3/widget"
-    "github.com/oops1/headless-gui/v3/widget/datagrid"
-    "github.com/oops1/headless-gui/v3/widget/treeview"
-    "github.com/oops1/headless-gui/v3/output"
-    "github.com/oops1/headless-gui/v3/window"
+    "github.com/oops1/headless-gui/v4/engine"
+    "github.com/oops1/headless-gui/v4/widget"
+    "github.com/oops1/headless-gui/v4/widget/datagrid"
+    "github.com/oops1/headless-gui/v4/widget/treeview"
+    "github.com/oops1/headless-gui/v4/output"
+    "github.com/oops1/headless-gui/v4/window"
 )
 ```
 
@@ -350,9 +350,9 @@ func (e *Engine) SendKeyEvent(e widget.KeyEvent)
 package main
 
 import (
-    "github.com/oops1/headless-gui/v3/engine"
-    "github.com/oops1/headless-gui/v3/widget"
-    "github.com/oops1/headless-gui/v3/window"
+    "github.com/oops1/headless-gui/v4/engine"
+    "github.com/oops1/headless-gui/v4/widget"
+    "github.com/oops1/headless-gui/v4/window"
 )
 
 func main() {
@@ -424,7 +424,7 @@ okBtn.OnClick = func() {
 
 ```go
 import (
-    dg "github.com/oops1/headless-gui/v3/widget/datagrid"
+    dg "github.com/oops1/headless-gui/v4/widget/datagrid"
 )
 
 // Create data source
@@ -475,7 +475,7 @@ grid.OnCellEditEnding = func(e *dg.CellEditEndingEvent) {
 ### 5. TreeView with Items
 
 ```go
-import tv "github.com/oops1/headless-gui/v3/widget/treeview"
+import tv "github.com/oops1/headless-gui/v4/widget/treeview"
 
 // Create TreeView (from treeview subpackage)
 tree := tv.New()
@@ -1568,7 +1568,7 @@ func (w *MyWidget) Draw(ctx DrawContext) {
 DataGrid is in a subpackage and requires separate import:
 
 ```go
-import dg "github.com/oops1/headless-gui/v3/widget/datagrid"
+import dg "github.com/oops1/headless-gui/v4/widget/datagrid"
 
 grid := widget.NewDataGridWidget()
 grid.SetItemsSource(dg.NewObservableCollection())
@@ -1580,7 +1580,7 @@ grid.Columns = append(grid.Columns, &dg.DataGridTextColumn{...})
 TreeView is in a subpackage:
 
 ```go
-import tv "github.com/oops1/headless-gui/v3/widget/treeview"
+import tv "github.com/oops1/headless-gui/v4/widget/treeview"
 
 tree := tv.New()  // Don't use widget.NewTreeView directly
 tree.AddRoot(&tv.TreeViewItem{Text: "Root"})
@@ -1591,7 +1591,7 @@ tree.AddRoot(&tv.TreeViewItem{Text: "Root"})
 Both `DataGrid` and `TreeView` use `datagrid.ObservableCollection` as their data source:
 
 ```go
-import dg "github.com/oops1/headless-gui/v3/widget/datagrid"
+import dg "github.com/oops1/headless-gui/v4/widget/datagrid"
 
 // For TreeView
 collection := dg.NewObservableCollection()
@@ -2682,7 +2682,7 @@ err := eng.RegisterFontFS(fontsFS, "assets/fonts") // same names as on disk
 // 3. Or take Open Sans (Light/Regular/SemiBold/Bold/Italic/BoldItalic, ~0.8 MB)
 //    already embedded by the engine's own package -- opt-in, so programs that
 //    do not import it do not grow:
-//      import "github.com/oops1/headless-gui/v3/assets/fonts"
+//      import "github.com/oops1/headless-gui/v4/assets/fonts"
 err = fonts.Register(eng) // then eng.SetDefaultFont("OpenSans") if wanted
 ```
 
@@ -5854,7 +5854,7 @@ the screen and the paper disagreed.
 The model is the screen's: the application draws each page into an image with
 the same `DrawContext` (`engine.New` + `SetScale` + `RenderOnce` renders a
 widget tree into an `*image.RGBA`) and the engine sends the finished pages to a
-printer. Package `printing` (`github.com/oops1/headless-gui/v3/printing`) holds
+printer. Package `printing` (`github.com/oops1/headless-gui/v4/printing`) holds
 paper, orientation, margins, printers and printing; package `output/pdf` builds a
 PDF from page images with no dependencies.
 

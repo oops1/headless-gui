@@ -10,8 +10,8 @@ package native
 import (
 	"strings"
 
-	"github.com/oops1/headless-gui/v3/internal/clipimage"
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/internal/clipimage"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // formatsFromMimes переводит имена типов, объявленных владельцем буфера, в набор

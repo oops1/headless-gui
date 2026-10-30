@@ -3,7 +3,7 @@
 package tray
 
 import (
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // linuxTray — трей окна на Linux: иконка StatusNotifierItem и уведомления

@@ -6,8 +6,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testhook"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Курсор-картинка (Engine.SetCursorImage) над настоящими окнами-попапами

@@ -15,7 +15,7 @@ package input
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // routePointerOwner отдаёт движение (x, y — логические экранные координаты)

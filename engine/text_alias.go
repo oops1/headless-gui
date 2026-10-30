@@ -3,7 +3,7 @@ package engine
 // text_alias.go — прежние имена пакета engine, перенесённые в core/text (задача 4.1
 // плана 4.0): код потребителей не меняется.
 
-import hgtext "github.com/oops1/headless-gui/v3/core/text"
+import hgtext "github.com/oops1/headless-gui/v4/core/text"
 
 // DefaultDPI — см. text.DefaultDPI.
 const DefaultDPI = hgtext.DefaultDPI

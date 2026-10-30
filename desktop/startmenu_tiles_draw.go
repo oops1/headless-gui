@@ -15,8 +15,8 @@ import (
 	"image/color"
 	"strings"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // startSnap — снимок состояния ввода для одного кадра.

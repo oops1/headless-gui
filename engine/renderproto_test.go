@@ -32,15 +32,15 @@ import (
 
 	"golang.org/x/image/font/gofont/goregular"
 
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
-	"github.com/oops1/headless-gui/v3/core/geom"
-	"github.com/oops1/headless-gui/v3/core/overlay"
-	hgraster "github.com/oops1/headless-gui/v3/core/raster"
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/internal/workpool"
-	"github.com/oops1/headless-gui/v3/output"
-	"github.com/oops1/headless-gui/v3/widget"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
+	"github.com/oops1/headless-gui/v4/core/geom"
+	"github.com/oops1/headless-gui/v4/core/overlay"
+	hgraster "github.com/oops1/headless-gui/v4/core/raster"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/workpool"
+	"github.com/oops1/headless-gui/v4/output"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // ─── Команды ─────────────────────────────────────────────────────────────────

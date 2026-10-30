@@ -19,7 +19,7 @@ package x11
 import (
 	"encoding/binary"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // Направления _NET_WM_MOVERESIZE (EWMH): углы и стороны считаются по часовой

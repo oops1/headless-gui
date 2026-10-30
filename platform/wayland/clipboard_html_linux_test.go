@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Оформленный текст (text/html) в буфере обмена Wayland и X11. Настоящий

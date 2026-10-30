@@ -15,7 +15,7 @@
 package base
 
 import (
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
 	"image"
 	"sync"
 	"sync/atomic"

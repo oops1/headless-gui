@@ -1,6 +1,6 @@
 package core
 
-import "github.com/oops1/headless-gui/v3/widget"
+import "github.com/oops1/headless-gui/v4/widget"
 
 // cornerRounder — бэкенд, который может сказать, скругляет ли ОС углы окна.
 // Бэкенд без интерфейса считается скругляющим (прежнее поведение).

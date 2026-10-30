@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v4/theme"
 )
 
 // Windows 2000 следует SetAccent: акцентные цвета профиля — ссылки на токены, а

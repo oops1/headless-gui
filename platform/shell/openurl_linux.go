@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/dbus"
+	"github.com/oops1/headless-gui/v4/platform/dbus"
 )
 
 // openCallTimeout — сколько ждём ответ портала или файлового менеджера.

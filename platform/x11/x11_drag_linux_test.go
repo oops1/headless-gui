@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // v3.34: перетаскивание файлов на X11 — приёмник (события) и источник XDND.

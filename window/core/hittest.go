@@ -1,6 +1,6 @@
 package core
 
-import "github.com/oops1/headless-gui/v3/platform/native"
+import "github.com/oops1/headless-gui/v4/platform/native"
 
 // hittest.go — какие области окна приложение считает заголовком и кнопками.
 //

@@ -3,9 +3,9 @@ package xaml_test
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
-	"github.com/oops1/headless-gui/v3/widget/chrome"
-	"github.com/oops1/headless-gui/v3/widget/xaml"
+	"github.com/oops1/headless-gui/v4/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/chrome"
+	"github.com/oops1/headless-gui/v4/widget/xaml"
 )
 
 func TestXAML_MenuItemChecked(t *testing.T) {

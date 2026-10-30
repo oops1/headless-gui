@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/clipimage"
-	"github.com/oops1/headless-gui/v3/internal/dib"
+	"github.com/oops1/headless-gui/v4/internal/clipimage"
+	"github.com/oops1/headless-gui/v4/internal/dib"
 )
 
 func testClipImage() *image.NRGBA {

@@ -3,7 +3,7 @@ package base
 import (
 	"sync/atomic"
 
-	"github.com/oops1/headless-gui/v3/internal/testhook"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
 )
 
 // Сброс языка для тестовых помощников соседних пакетов (internal/testreset).

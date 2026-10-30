@@ -7,7 +7,7 @@
 // (StartGridAliases), как и остальные строки рабочего стола.
 package desktop
 
-import "github.com/oops1/headless-gui/v3/widget"
+import "github.com/oops1/headless-gui/v4/widget"
 
 // Ключи строк меню «Пуск» Windows 11. «Закреплено» (StrStartPinned),
 // «Все приложения» (StrStartAllApps), подсказка поиска (StrSearchPlaceholder) и

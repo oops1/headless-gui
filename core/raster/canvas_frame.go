@@ -7,7 +7,7 @@ package raster
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 // AllTiles извлекает ВСЕ тайлы холста и синхронизирует front — полный кадр.

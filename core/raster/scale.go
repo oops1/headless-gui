@@ -17,7 +17,7 @@
 package raster
 
 import (
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
 	"image"
 	"math"
 )

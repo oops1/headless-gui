@@ -2,7 +2,7 @@
 
 package shell
 
-import "github.com/oops1/headless-gui/v3/platform/native"
+import "github.com/oops1/headless-gui/v4/platform/native"
 
 // wantShell — службы оболочки прочих ОС: только языки.
 func wantShell() native.Shell {

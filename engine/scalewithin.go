@@ -19,10 +19,10 @@ package engine
 // выходит из режима.
 
 import (
-	hgraster "github.com/oops1/headless-gui/v3/core/raster"
+	hgraster "github.com/oops1/headless-gui/v4/core/raster"
 	"math"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // SetScaleWithin задаёт масштаб интерфейса, сохраняя физический размер

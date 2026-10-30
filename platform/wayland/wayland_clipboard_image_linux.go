@@ -15,9 +15,9 @@ package wayland
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/internal/clipimage"
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/internal/clipimage"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 var _ base.ClipboardImageProvider = (*wlClipboard)(nil)

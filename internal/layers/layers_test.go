@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-const mod = "github.com/oops1/headless-gui/v3"
+const mod = "github.com/oops1/headless-gui/v4"
 
 // Возможности окна (ADR-0013 §3): их подключает window, ни ядро, ни бэкенды,
 // ни window/minimal их не тянут.

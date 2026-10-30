@@ -1,6 +1,6 @@
 package core
 
-import "github.com/oops1/headless-gui/v3/engine"
+import "github.com/oops1/headless-gui/v4/engine"
 
 // inheritMotionProfile даёт вторичному движку (диалог, плавающая панель)
 // профиль движения движка родительского окна. Профиль, сменённый у родителя

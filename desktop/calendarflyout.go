@@ -20,9 +20,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/calendar"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/calendar"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // ComponentCalendar — имя компонента для стилей темы.

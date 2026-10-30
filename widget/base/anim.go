@@ -28,8 +28,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/goid"
-	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v4/internal/goid"
+	"github.com/oops1/headless-gui/v4/theme"
 )
 
 // Easing определён в widget/easing.go (другой файл пакета):

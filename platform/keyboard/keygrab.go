@@ -2,7 +2,7 @@ package keyboard
 
 // keygrab.go — фильтр системных сочетаний при захвате клавиатуры.
 
-import "github.com/oops1/headless-gui/v3/platform/native"
+import "github.com/oops1/headless-gui/v4/platform/native"
 
 // Коды клавиш, которые различает фильтр. Совпадают с VK_* Windows и с
 // платформенно-независимыми VK_* пакета; левые/правые Ctrl и Alt — отдельные

@@ -20,9 +20,9 @@ package raster
 
 import (
 	"bytes"
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
-	"github.com/oops1/headless-gui/v3/internal/workpool"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
+	"github.com/oops1/headless-gui/v4/internal/workpool"
 	"image"
 	"image/color"
 	stdraw "image/draw"
@@ -36,8 +36,8 @@ import (
 	"golang.org/x/image/draw"
 	"golang.org/x/image/math/fixed"
 
-	"github.com/oops1/headless-gui/v3/internal/pixsimd"
-	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v4/internal/pixsimd"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 // Canvas — off-screen RGBA-холст: front — последний отданный кадр, back —

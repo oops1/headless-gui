@@ -6,8 +6,8 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/dbus"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/platform/dbus"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // AT-SPI: действия по узлам, радиокнопки, прокрутка, меню и диалог (v3.38).

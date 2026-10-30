@@ -6,7 +6,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // benchTextScene строит текстоёмкую сцену: сетка лейблов на панели.

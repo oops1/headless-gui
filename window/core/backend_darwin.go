@@ -5,8 +5,8 @@ package core
 // backend_darwin.go — бэкенд macOS для ядра: Cocoa (platform/cocoa).
 
 import (
-	"github.com/oops1/headless-gui/v3/platform/cocoa"
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/cocoa"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // CocoaWindow — реализация NativeWindow через Cocoa/AppKit (purego), без CGO.

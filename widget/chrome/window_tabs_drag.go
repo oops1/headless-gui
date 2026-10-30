@@ -17,7 +17,7 @@ package chrome
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // titleTabDragThreshold — на сколько точек нужно увести мышь, чтобы нажатие

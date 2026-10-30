@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/widget/diffview"
+	"github.com/oops1/headless-gui/v4/widget/diffview"
 )
 
 // diffview_edit.go — правка, история, буфер обмена, клавиатура и мышь.

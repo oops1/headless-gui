@@ -31,8 +31,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
-	"github.com/oops1/headless-gui/v3/widget/xaml"
+	"github.com/oops1/headless-gui/v4/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/xaml"
 )
 
 // xrStyle — оформление, наследуемое вложенными элементами (как в WPF).

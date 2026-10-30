@@ -3,8 +3,8 @@ package core
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Системное перемещение и ресайз подключались сами только там, где корень —

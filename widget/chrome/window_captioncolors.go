@@ -3,7 +3,7 @@ package chrome
 import (
 	"image/color"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // window_captioncolors.go — цвета кнопок заголовка widget.Window (не

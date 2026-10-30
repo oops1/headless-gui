@@ -38,7 +38,7 @@ package raster
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/internal/pixsimd"
+	"github.com/oops1/headless-gui/v4/internal/pixsimd"
 )
 
 // BlurRGBA размывает изображение целиком, на месте.

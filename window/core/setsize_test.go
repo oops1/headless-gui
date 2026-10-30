@@ -3,8 +3,8 @@ package core
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Window.SetSize (setsize.go): общий слой над бэкендом. Платформенные

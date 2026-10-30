@@ -8,11 +8,11 @@ package widget
 import (
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/widget/chrome"
-	"github.com/oops1/headless-gui/v3/widget/dock"
-	"github.com/oops1/headless-gui/v3/widget/richtext"
-	"github.com/oops1/headless-gui/v3/widget/text"
-	"github.com/oops1/headless-gui/v3/widget/xaml"
+	"github.com/oops1/headless-gui/v4/widget/chrome"
+	"github.com/oops1/headless-gui/v4/widget/dock"
+	"github.com/oops1/headless-gui/v4/widget/richtext"
+	"github.com/oops1/headless-gui/v4/widget/text"
+	"github.com/oops1/headless-gui/v4/widget/xaml"
 )
 
 var xamlOnce sync.Once

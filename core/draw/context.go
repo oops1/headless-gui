@@ -12,7 +12,7 @@ import (
 	"image"
 	"image/color"
 
-	"github.com/oops1/headless-gui/v3/core/geom"
+	"github.com/oops1/headless-gui/v4/core/geom"
 )
 
 // DefaultFontSizePt — размер шрифта по умолчанию (в пунктах) для DrawText.

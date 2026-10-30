@@ -14,7 +14,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 var docksizeTestColor = color.RGBA{R: 40, G: 40, B: 44, A: 255}

@@ -11,7 +11,7 @@ import (
 	"math"
 	"sync/atomic"
 
-	"github.com/oops1/headless-gui/v3/core/geom"
+	"github.com/oops1/headless-gui/v4/core/geom"
 )
 
 // Measurer — то, что рекордер спрашивает у холста движка.

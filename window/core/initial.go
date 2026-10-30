@@ -34,7 +34,7 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // initialState — начальные значения окна, заданные приложением до Run.

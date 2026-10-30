@@ -6,7 +6,7 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // backend_contract_windows_test.go — бэкенд Win32 удовлетворяет

@@ -10,7 +10,7 @@ import (
 
 	xdraw "golang.org/x/image/draw"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // dnd_drag.go — перетаскивание файлов, общая часть для всех бэкендов (v3.34):

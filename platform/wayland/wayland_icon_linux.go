@@ -27,7 +27,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Запросы xdg_toplevel_icon_manager_v1 и xdg_toplevel_icon_v1, wl_buffer.

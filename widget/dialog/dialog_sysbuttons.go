@@ -13,7 +13,7 @@ package dialog
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // sysBtnKind — какая из штатных кнопок.

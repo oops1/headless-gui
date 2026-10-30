@@ -5,7 +5,7 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // Буфер перед кадром не догоняет прошлый кадр там, где этот кадр рисует

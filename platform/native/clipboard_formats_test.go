@@ -3,7 +3,7 @@ package native
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // Имена типов, объявленных владельцем, переводятся в виды содержимого так же,

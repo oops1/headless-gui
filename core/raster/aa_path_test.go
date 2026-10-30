@@ -1,13 +1,13 @@
 package raster
 
 import (
-	"github.com/oops1/headless-gui/v3/core/geom"
+	"github.com/oops1/headless-gui/v4/core/geom"
 	"image"
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Сглаженные пути с дробными координатами — пункт 1 замечаний difftool.

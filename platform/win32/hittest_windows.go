@@ -2,7 +2,7 @@
 
 package win32
 
-import "github.com/oops1/headless-gui/v3/platform/native"
+import "github.com/oops1/headless-gui/v4/platform/native"
 
 // hittest_windows.go — ответы системе о зонах окна (Aero Snap и Snap Layouts).
 //

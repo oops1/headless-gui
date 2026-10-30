@@ -12,7 +12,7 @@ package testengine
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v4/engine"
 )
 
 // New создаёт движок и останавливает его по окончании теста. Stop идемпотентен

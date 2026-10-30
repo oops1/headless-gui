@@ -3,7 +3,7 @@ package pointer
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Win32: TrackMouseEvent(TME_LEAVE) одноразовый. Окно взводит его на первом

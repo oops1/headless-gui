@@ -7,7 +7,7 @@ import (
 	"golang.org/x/image/font/sfnt"
 	"golang.org/x/image/math/fixed"
 
-	"github.com/oops1/headless-gui/v3/widget/svg"
+	"github.com/oops1/headless-gui/v4/widget/svg"
 )
 
 // svgTextBridge — реализация svg.TextRasterizer поверх шрифтов движка: <text>

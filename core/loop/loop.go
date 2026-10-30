@@ -29,8 +29,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/goid"
-	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v4/internal/goid"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 // Host — что цикл берёт у движка. Методы зовутся без удержанных замков

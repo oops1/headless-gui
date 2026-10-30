@@ -26,7 +26,7 @@ import (
 	"encoding/binary"
 	"math/bits"
 
-	"github.com/oops1/headless-gui/v3/platform/keyboard"
+	"github.com/oops1/headless-gui/v4/platform/keyboard"
 )
 
 // Значения протокола.

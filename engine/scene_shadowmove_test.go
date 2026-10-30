@@ -5,8 +5,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Перетаскивание окна с тенью над однородным фоном: один перенос вместе с
@@ -21,6 +21,9 @@ func TestSceneShadowMove_WindowDragMovesShadow(t *testing.T) {
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 640, 480))
 	win := widget.NewWindow("Окно", 256, 192)
+	// Стиль заголовка — явно: по умолчанию он по ОС, и на macOS точка захвата
+	// пришлась бы на кнопки заголовка слева.
+	win.TitleStyle = widget.WindowTitleWin
 	win.SetShadow(testShadow)
 	win.SetBounds(image.Rect(128, 128, 384, 320))
 	root.AddChild(win)

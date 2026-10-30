@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/internal/calendar"
+	"github.com/oops1/headless-gui/v4/internal/calendar"
 )
 
 // datepicker_draw.go — геометрия и отрисовка поля даты и календаря.

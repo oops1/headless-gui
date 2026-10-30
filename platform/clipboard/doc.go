@@ -9,7 +9,7 @@
 // есть у всех программ на widget; программа на widget/base импортирует его
 // сама:
 //
-//	import _ "github.com/oops1/headless-gui/v3/platform/clipboard"
+//	import _ "github.com/oops1/headless-gui/v4/platform/clipboard"
 //
 // На ОС без реализации пакет пуст, и остаётся буфер в памяти.
 //

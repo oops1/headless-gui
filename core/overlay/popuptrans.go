@@ -24,9 +24,9 @@ import (
 	"math"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/core/raster"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/core/raster"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // popupTrans — параметры переходов кадра; dur 0 — переходов нет.

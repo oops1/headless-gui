@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // TestShaping_VisualSample рендерит мультиязычную сцену в PNG для ручной

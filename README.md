@@ -236,8 +236,8 @@ package main
 import (
     "image"
     "image/color"
-    "github.com/oops1/headless-gui/v3/engine"
-    "github.com/oops1/headless-gui/v3/widget"
+    "github.com/oops1/headless-gui/v4/engine"
+    "github.com/oops1/headless-gui/v4/widget"
 )
 
 func main() {
@@ -302,8 +302,8 @@ Coordinates inside containers are relative (standard WPF Canvas behavior).
 
 | Module | Dependency |
 |---|---|
-| `github.com/oops1/headless-gui/v3` | `golang.org/x/image` |
-| `github.com/oops1/headless-gui/v3/window` | `golang.org/x/sys/windows`, `github.com/ebitengine/purego` |
+| `github.com/oops1/headless-gui/v4` | `golang.org/x/image` |
+| `github.com/oops1/headless-gui/v4/window` | `golang.org/x/sys/windows`, `github.com/ebitengine/purego` |
 
 Go 1.22+. The `window/` module is optional — the core engine has zero CGO dependencies. The window module is also CGO-free on all platforms.
 

@@ -3,13 +3,13 @@ package raster
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
 	"image"
 	"image/color"
 	"os"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // Слой качества текста (TextQuality): хинтинг по вертикали, контраст, LCD.

@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // TestAA_VisualSample рендерит сцену с AA-примитивами в PNG для ручной

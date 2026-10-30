@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/widget/diffview"
+	"github.com/oops1/headless-gui/v4/widget/diffview"
 )
 
 // mergeview_edit.go — история, правка итога, буфер обмена, клавиатура и мышь.

@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // API слоя качества текста на уровне движка: режим, наследование шрифтами,

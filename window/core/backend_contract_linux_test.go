@@ -6,8 +6,8 @@ import (
 	"image"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/platform/wayland"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/wayland"
 )
 
 // backend_contract_linux_test.go — бэкенды X11 и Wayland удовлетворяют

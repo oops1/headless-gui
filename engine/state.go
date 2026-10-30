@@ -36,11 +36,11 @@ import (
 	"sync"
 	"sync/atomic"
 
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
-	"github.com/oops1/headless-gui/v3/core/overlay"
-	hgraster "github.com/oops1/headless-gui/v3/core/raster"
-	"github.com/oops1/headless-gui/v3/theme"
-	"github.com/oops1/headless-gui/v3/widget"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
+	"github.com/oops1/headless-gui/v4/core/overlay"
+	hgraster "github.com/oops1/headless-gui/v4/core/raster"
+	"github.com/oops1/headless-gui/v4/theme"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // sceneState — холст, дерево виджетов и сборка кадра: путь команд, тайловый

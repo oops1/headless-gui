@@ -14,7 +14,7 @@ package raster
 // Результат совпадает с Over побайтно, пока обещание непрозрачности верно.
 
 import (
-	"github.com/oops1/headless-gui/v3/internal/workpool"
+	"github.com/oops1/headless-gui/v4/internal/workpool"
 	"image"
 	stdraw "image/draw"
 	"runtime"

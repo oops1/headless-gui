@@ -14,7 +14,7 @@ import (
 	"image/color"
 	"math"
 
-	"github.com/oops1/headless-gui/v3/widget/svg"
+	"github.com/oops1/headless-gui/v4/widget/svg"
 )
 
 // ContextScale возвращает HiDPI-масштаб контекста рисования: физических

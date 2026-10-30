@@ -13,7 +13,7 @@
 // них 9 МБ в каждую программу незачем. Пакет подключается явно, поэтому
 // программы, которым он не нужен, не платят за него размером.
 //
-//	import "github.com/oops1/headless-gui/v3/assets/fonts"
+//	import "github.com/oops1/headless-gui/v4/assets/fonts"
 //
 //	if err := fonts.Register(eng); err != nil { ... }
 //	eng.SetDefaultFont("OpenSans")

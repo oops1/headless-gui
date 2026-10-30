@@ -1,6 +1,6 @@
 package overlay
 
-import "github.com/oops1/headless-gui/v3/widget"
+import "github.com/oops1/headless-gui/v4/widget"
 
 // ModalHost — хост, показывающий модальные виджеты в собственных нативных
 // окнах ОС. Реализуется пакетом window для бэкендов с поддержкой owner-окон

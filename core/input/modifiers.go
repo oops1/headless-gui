@@ -12,7 +12,7 @@
 
 package input
 
-import "github.com/oops1/headless-gui/v3/widget"
+import "github.com/oops1/headless-gui/v4/widget"
 
 // SetModifiers сообщает движку, какие модификаторы зажаты сейчас.
 //

@@ -12,7 +12,7 @@ package wayland
 // реализует): xdg_toplevel.set_parent принимает только окно того же
 // соединения, а у каждого окна своё; стек и место окна решает компоновщик.
 
-import "github.com/oops1/headless-gui/v3/platform/native"
+import "github.com/oops1/headless-gui/v4/platform/native"
 
 var _ native.Styler = (*WaylandWindow)(nil)
 

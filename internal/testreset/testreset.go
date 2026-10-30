@@ -17,9 +17,9 @@ import (
 	"image"
 	"testing"
 
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
-	"github.com/oops1/headless-gui/v3/internal/testhook"
-	"github.com/oops1/headless-gui/v3/widget"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Globals сбрасывает общее состояние процесса к исходному сейчас и после теста.

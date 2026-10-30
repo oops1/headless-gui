@@ -9,8 +9,8 @@ import (
 	"image"
 	"image/color"
 
-	"github.com/oops1/headless-gui/v3/core/raster"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/core/raster"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Translating сдвигает все координаты на -(dx,dy) и делегирует inner.

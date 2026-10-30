@@ -1,11 +1,11 @@
 package raster
 
 import (
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
 	"image"
 	"image/color"
 
-	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 var _ hgdraw.RotatedTextDrawer = (*Canvas)(nil)

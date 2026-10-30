@@ -5,7 +5,7 @@ package x11
 import (
 	"encoding/binary"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // XDND (X Drag-and-Drop, протокол v5) — приём файлов, перетащенных из ОС в

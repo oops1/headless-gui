@@ -13,7 +13,7 @@ package core
 // оболочки, возможность platform/shell (ADR-0013 §3). Без неё (window/minimal)
 // язык не задан.
 
-import "github.com/oops1/headless-gui/v3/platform/native"
+import "github.com/oops1/headless-gui/v4/platform/native"
 
 // SystemLanguages возвращает языки интерфейса ОС в порядке предпочтения, в
 // записи BCP-47 («ru-RU», «en-US», «sr-Latn-RS»): язык строчными, письменность

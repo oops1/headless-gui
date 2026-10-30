@@ -28,7 +28,7 @@ package wayland
 import (
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Запросы и события xdg_activation_v1 / xdg_activation_token_v1.

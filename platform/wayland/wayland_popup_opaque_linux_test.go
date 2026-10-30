@@ -7,7 +7,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/core/raster"
+	"github.com/oops1/headless-gui/v4/core/raster"
 )
 
 // Тень вынесенного меню не объявляется непрозрачной (замечание WinLine после

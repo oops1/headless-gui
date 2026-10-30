@@ -4,7 +4,7 @@ import (
 	"image/color"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/widget/svg"
+	"github.com/oops1/headless-gui/v4/widget/svg"
 )
 
 // SVGIcon — виджет темизируемой векторной иконки (подмножество SVG).

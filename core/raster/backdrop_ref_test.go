@@ -2,13 +2,13 @@ package raster
 
 import (
 	"bytes"
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
 	"image"
 	"image/color"
 	"math/rand"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // Уменьшение и растяжение подложки переписаны ради скорости; кадр обязан

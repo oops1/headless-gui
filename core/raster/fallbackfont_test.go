@@ -2,9 +2,9 @@ package raster
 
 import (
 	"bytes"
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
-	"github.com/oops1/headless-gui/v3/internal/testhook"
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 	"golang.org/x/image/font/gofont/gomono"
 	"image/color"
 	"os"

@@ -27,8 +27,8 @@ import (
 	"image"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/core/raster"
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/core/raster"
+	"github.com/oops1/headless-gui/v4/platform/native"
 
 	"golang.org/x/sys/unix"
 )

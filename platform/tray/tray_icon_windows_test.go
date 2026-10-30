@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/oops1/headless-gui/v3/platform/win32"
+	"github.com/oops1/headless-gui/v4/platform/win32"
 )
 
 // TestTrayIconAfterNotify проверяет судьбу HICON после Shell_NotifyIconW:

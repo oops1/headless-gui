@@ -5,7 +5,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/widget/datagrid"
+	"github.com/oops1/headless-gui/v4/widget/datagrid"
 )
 
 // Линии и контуры в ячейке таблицы — запрос GG-54.

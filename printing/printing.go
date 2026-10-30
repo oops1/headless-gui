@@ -12,7 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/oops1/headless-gui/v3/output/pdf"
+	"github.com/oops1/headless-gui/v4/output/pdf"
 )
 
 // Ошибки. Различимы через errors.Is: приложение показывает пользователю разные

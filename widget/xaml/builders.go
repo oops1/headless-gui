@@ -14,7 +14,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // Builder строит виджет по элементу разметки. Общее для всех тегов —

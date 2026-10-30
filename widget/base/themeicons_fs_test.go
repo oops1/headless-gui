@@ -4,8 +4,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/oops1/headless-gui/v3/theme"
-	svgPkg "github.com/oops1/headless-gui/v3/widget/svg"
+	"github.com/oops1/headless-gui/v4/theme"
+	svgPkg "github.com/oops1/headless-gui/v4/widget/svg"
 )
 
 func iconFSOf(files map[string]string) fstest.MapFS {

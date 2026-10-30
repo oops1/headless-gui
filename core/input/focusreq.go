@@ -10,8 +10,8 @@ package input
 import (
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/internal/focusreq"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/focusreq"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // focusLoan — фокус, взятый виджетом по просьбе: кто взял и у кого.

@@ -7,7 +7,7 @@ package input
 // щелчок) и горизонтальное колесо как есть. Здесь тот же маршрут доставки, но
 // с widget.WheelEvent; прежний путь не тронут и работает рядом.
 
-import "github.com/oops1/headless-gui/v3/widget"
+import "github.com/oops1/headless-gui/v4/widget"
 
 // SendMouseWheelRaw доставляет сырое событие колеса в точку (xPhys, yPhys —
 // физические пиксели окна/кадра, как у SendMouseWheelPixels). dx, dy — в

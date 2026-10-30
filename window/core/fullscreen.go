@@ -20,7 +20,7 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // fullscreenBackend — бэкенд умеет переключать окно в полный экран.

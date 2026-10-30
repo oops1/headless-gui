@@ -4,7 +4,7 @@ package desktop
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // drawAppIcon рисует значок приложения в логическом квадрате r. Если есть

@@ -19,14 +19,14 @@
 
 `go:embed` не видит родительские каталоги, поэтому потребитель из другого
 модуля не может вшить эту папку у себя. Для этого рядом с файлами лежит пакет
-`github.com/oops1/headless-gui/v3/assets/fonts` — в нём вшит **только Open Sans**
+`github.com/oops1/headless-gui/v4/assets/fonts` — в нём вшит **только Open Sans**
 (Light, Regular, SemiBold, Bold, Italic, BoldItalic и лицензия, ~0,8 МБ).
 Остальные шрифты остаются файлами: тащить 9 МБ в каждую программу незачем.
 Пакет подключается явно — программам, которым он не нужен, он размера не
 прибавляет.
 
 ```go
-import "github.com/oops1/headless-gui/v3/assets/fonts"
+import "github.com/oops1/headless-gui/v4/assets/fonts"
 
 eng := engine.New(1280, 800, 30)
 if err := fonts.Register(eng); err != nil { /* опечатка в embed */ }

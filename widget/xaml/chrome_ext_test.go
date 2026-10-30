@@ -9,9 +9,9 @@ package xaml_test
 // UseFakeField в fieldfake_test.go).
 
 import (
-	"github.com/oops1/headless-gui/v3/widget/chrome"
-	"github.com/oops1/headless-gui/v3/widget/dock"
-	"github.com/oops1/headless-gui/v3/widget/xaml"
+	"github.com/oops1/headless-gui/v4/widget/chrome"
+	"github.com/oops1/headless-gui/v4/widget/dock"
+	"github.com/oops1/headless-gui/v4/widget/xaml"
 )
 
 func init() {

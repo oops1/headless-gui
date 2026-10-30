@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // XAMLAttrs предоставляет доступ к атрибутам XAML-элемента.

@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/widget/diffview"
-	"github.com/oops1/headless-gui/v3/widget/mergeview"
+	"github.com/oops1/headless-gui/v4/widget/diffview"
+	"github.com/oops1/headless-gui/v4/widget/mergeview"
 )
 
 // mergeview.go — контрол трёхстороннего слияния: наше, база, их и итог.

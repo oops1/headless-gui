@@ -15,7 +15,7 @@ type Facade struct {
 // Widget — файлы фасада widget относительно корня модуля root. Каждый шаг
 // этапа 8 добавляет сюда свой подпакет.
 func Widget(root string) []Facade {
-	const mod = "github.com/oops1/headless-gui/v3/"
+	const mod = "github.com/oops1/headless-gui/v4/"
 	pkg := func(dir, alias string) Facade {
 		return Facade{
 			Config: Config{
@@ -55,7 +55,7 @@ func WindowMinimal(root string) []Facade { return windowFacades(root, "window/mi
 
 // windowFacades — фасад окна в каталоге dir с именем пакета pkg.
 func windowFacades(root, dir, pkgName string) []Facade {
-	const mod = "github.com/oops1/headless-gui/v3/"
+	const mod = "github.com/oops1/headless-gui/v4/"
 	pkg := func(src, alias string) Facade {
 		return Facade{
 			Config: Config{

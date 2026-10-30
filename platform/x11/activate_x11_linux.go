@@ -31,7 +31,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // x11Activation — состояние активации и свёрнутости окна.

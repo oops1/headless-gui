@@ -1,7 +1,7 @@
 package base
 
 import (
-	"github.com/oops1/headless-gui/v3/core/text"
+	"github.com/oops1/headless-gui/v4/core/text"
 	"image/color"
 	"strings"
 	"sync"

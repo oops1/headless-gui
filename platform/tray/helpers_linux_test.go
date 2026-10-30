@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/dbus"
+	"github.com/oops1/headless-gui/v4/platform/dbus"
 )
 
 // dialTestBus подключается к сессионной шине; без неё тест пропускается

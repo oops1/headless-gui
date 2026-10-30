@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/platform/native/contracttest"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native/contracttest"
 )
 
 // Контрактные сценарии бэкендов (ADR-0013 §7) на живых окнах Win32: окно

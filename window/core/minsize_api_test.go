@@ -3,7 +3,7 @@ package core
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Минимальный размер окна из приложения — вторая половина GG-18.

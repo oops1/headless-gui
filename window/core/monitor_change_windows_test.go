@@ -5,7 +5,7 @@ package core
 import (
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testhook"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
 )
 
 // Сообщения окна, которые будят подписчика на смену мониторов. wndProc зовётся

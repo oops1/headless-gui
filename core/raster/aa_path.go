@@ -9,8 +9,8 @@
 package raster
 
 import (
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
-	"github.com/oops1/headless-gui/v3/core/geom"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
+	"github.com/oops1/headless-gui/v4/core/geom"
 	"image"
 	"image/color"
 	"math"

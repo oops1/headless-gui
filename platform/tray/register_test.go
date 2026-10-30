@@ -4,7 +4,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Трей регистрирует init пакета там, где он есть: Windows и Linux (X11 и

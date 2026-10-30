@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/platform/pointer"
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/platform/pointer"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // X11: курсор из картинки — раскладка запросов RENDER и разбор ответов.

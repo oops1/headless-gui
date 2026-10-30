@@ -4,7 +4,7 @@ import (
 	"flag"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/facadegen"
+	"github.com/oops1/headless-gui/v4/internal/facadegen"
 )
 
 // Проверки фасада — internal/facadegen (verify.go); глобального состояния
@@ -28,7 +28,7 @@ func TestFacade_TypesIdentical(t *testing.T) {
 	if testing.Short() {
 		t.Skip("проверка типов из исходников")
 	}
-	facadegen.VerifyTypesIdentical(t, facadegen.Window(".."), "github.com/oops1/headless-gui/v3/window", 150)
+	facadegen.VerifyTypesIdentical(t, facadegen.Window(".."), "github.com/oops1/headless-gui/v4/window", 150)
 }
 
 var updateAPI = flag.Bool("update-api", false, "переписать testdata/api.txt по фасаду")

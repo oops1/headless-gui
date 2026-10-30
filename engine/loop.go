@@ -11,9 +11,9 @@ package engine
 import (
 	"time"
 
-	"github.com/oops1/headless-gui/v3/core/loop"
-	"github.com/oops1/headless-gui/v3/output"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/core/loop"
+	"github.com/oops1/headless-gui/v4/output"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Pacing — кто решает, когда готовится кадр.

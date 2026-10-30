@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // cliptext_bench_test.go — стоимость отрисовки текста под активным клипом

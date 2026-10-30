@@ -3,8 +3,8 @@ package dialog
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
-	"github.com/oops1/headless-gui/v3/widget/text"
+	"github.com/oops1/headless-gui/v4/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/text"
 )
 
 // InputDialog — модальный диалог ввода строки (замена OS prompt).

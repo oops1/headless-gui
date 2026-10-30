@@ -1,15 +1,15 @@
 package engine
 
 import (
-	"github.com/oops1/headless-gui/v3/core/overlay"
-	hgraster "github.com/oops1/headless-gui/v3/core/raster"
-	hgtext "github.com/oops1/headless-gui/v3/core/text"
+	"github.com/oops1/headless-gui/v4/core/overlay"
+	hgraster "github.com/oops1/headless-gui/v4/core/raster"
+	hgtext "github.com/oops1/headless-gui/v4/core/text"
 	"image"
 	"image/color"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // rotatedTextCanvas — белый холст логического размера (w, h) с масштабом scale.

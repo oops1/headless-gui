@@ -2,7 +2,7 @@
 
 package wayland
 
-import "github.com/oops1/headless-gui/v3/platform/native"
+import "github.com/oops1/headless-gui/v4/platform/native"
 
 // initial_wayland_linux.go — начальное положение и «развёрнуто» на Wayland
 // (window/core/initial.go). Положение окна задаёт компоновщик, поэтому x, y из

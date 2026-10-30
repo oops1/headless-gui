@@ -2,7 +2,7 @@
 
 package shell
 
-import "github.com/oops1/headless-gui/v3/platform/native"
+import "github.com/oops1/headless-gui/v4/platform/native"
 
 // wantShell — службы оболочки macOS: открытие и языки, темы пока нет
 // (register_darwin.go).

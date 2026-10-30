@@ -7,7 +7,7 @@
 //
 // Подключается пустым импортом (так делает фасад window):
 //
-//	import _ "github.com/oops1/headless-gui/v3/platform/shell"
+//	import _ "github.com/oops1/headless-gui/v4/platform/shell"
 //
 // init регистрирует службы в platform/native; window.OpenURL, OpenFile,
 // RevealFile, SystemLanguages, DetectSystemTheme, DetectSystemAccent и

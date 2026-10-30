@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // xiEventBytes собирает GenericEvent XI2 касания так, как его шлёт сервер:

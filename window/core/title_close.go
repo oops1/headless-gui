@@ -7,7 +7,7 @@
 // успевало — правки терялись вместе с окном.
 package core
 
-import "github.com/oops1/headless-gui/v3/widget"
+import "github.com/oops1/headless-gui/v4/widget"
 
 // poster — движок, умеющий выполнить функцию на своей горутине (engine.Post).
 type poster interface {

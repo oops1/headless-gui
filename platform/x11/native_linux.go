@@ -12,11 +12,11 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/oops1/headless-gui/v3/internal/clipimage"
-	"github.com/oops1/headless-gui/v3/platform/keyboard"
-	"github.com/oops1/headless-gui/v3/platform/native"
-	"github.com/oops1/headless-gui/v3/platform/pointer"
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/internal/clipimage"
+	"github.com/oops1/headless-gui/v4/platform/keyboard"
+	"github.com/oops1/headless-gui/v4/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/pointer"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // X11Window — реализация NativeWindow через X11 протокол.

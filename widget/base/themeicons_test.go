@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v4/theme"
 )
 
 const validSVG = `<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="#000"/></svg>`

@@ -9,7 +9,7 @@ import (
 	"image"
 	"reflect"
 
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
 )
 
 // InvalidateImageCache сбрасывает кэш масштабированных изображений

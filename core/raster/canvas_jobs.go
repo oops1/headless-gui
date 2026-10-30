@@ -6,8 +6,8 @@ package raster
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/internal/workpool"
-	"github.com/oops1/headless-gui/v3/output"
+	"github.com/oops1/headless-gui/v4/internal/workpool"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 // diffJob — дифф тайлов по полосам рядов [ty0..ty1]: часть i — ряды

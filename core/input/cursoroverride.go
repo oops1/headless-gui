@@ -18,7 +18,7 @@ import (
 	"image"
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // cursorOverride — состояние принудительного курсора. Нулевое значение готово

@@ -30,7 +30,7 @@ package base
 import (
 	"image/color"
 
-	"github.com/oops1/headless-gui/v3/theme"
+	"github.com/oops1/headless-gui/v4/theme"
 )
 
 var legacyBindings = []legacyBinding{

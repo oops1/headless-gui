@@ -3,7 +3,7 @@
 package shell
 
 import (
-	"github.com/oops1/headless-gui/v3/platform/native"
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Тема и акцент на macOS пока не реализованы: служб Theme, Accent, WatchTheme

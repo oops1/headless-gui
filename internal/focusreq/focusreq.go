@@ -18,7 +18,7 @@ package focusreq
 import (
 	"sync"
 
-	"github.com/oops1/headless-gui/v3/internal/goid"
+	"github.com/oops1/headless-gui/v4/internal/goid"
 )
 
 // Server — исполнитель запросов: движок.

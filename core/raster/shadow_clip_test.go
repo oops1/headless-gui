@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/internal/testreset"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 )
 
 // Буфер тени строился по всей фигуре, а не по видимой её части. В сравнении

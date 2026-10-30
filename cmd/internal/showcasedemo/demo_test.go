@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oops1/headless-gui/v3/cmd/internal/showcasestrings"
-	"github.com/oops1/headless-gui/v3/engine"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v4/cmd/internal/showcasestrings"
+	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/widget"
 )
 
 // Вкладки версий 3.27–3.29 оживляются кодом, поэтому проверяем их тем, чем

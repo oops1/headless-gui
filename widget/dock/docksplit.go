@@ -12,7 +12,7 @@ package dock
 import (
 	"image"
 
-	"github.com/oops1/headless-gui/v3/widget/base"
+	"github.com/oops1/headless-gui/v4/widget/base"
 )
 
 // DockStack — как показываются несколько панелей одной стороны.

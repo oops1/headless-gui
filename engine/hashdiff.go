@@ -18,8 +18,8 @@ package engine
 import (
 	"image"
 
-	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
-	"github.com/oops1/headless-gui/v3/output"
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
+	"github.com/oops1/headless-gui/v4/output"
 )
 
 // hashDiffSerialMax — до скольких нарисованных тайлов дифф идёт по их
