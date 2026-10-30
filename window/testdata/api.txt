@@ -163,6 +163,7 @@ type HitArea
 type LockKeys
 type Monitor
 type NativeWindow
+type Style
 type SystemAppearance
 type SystemTheme
 type WaylandWindow

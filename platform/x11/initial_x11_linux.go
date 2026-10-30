@@ -30,13 +30,13 @@ func x11ClampInt16(v int) int16 {
 	return int16(v)
 }
 
-// x11InitialStateData — значение свойства _NET_WM_STATE для окна, которое
-// должно появиться развёрнутым: список атомов (format 32) MAXIMIZED_VERT и
-// MAXIMIZED_HORZ. Чистая функция: раскладка проверяется тестом.
-func x11InitialStateData(maxH, maxV uint32) []byte {
-	b := make([]byte, 8)
-	binary.LittleEndian.PutUint32(b[0:4], maxV)
-	binary.LittleEndian.PutUint32(b[4:8], maxH)
+// x11AtomList — значение свойства-списка атомов (format 32), например
+// начального _NET_WM_STATE. Чистая функция: раскладка проверяется тестом.
+func x11AtomList(atoms ...uint32) []byte {
+	b := make([]byte, 0, 4*len(atoms))
+	for _, a := range atoms {
+		b = binary.LittleEndian.AppendUint32(b, a)
+	}
 	return b
 }
 
@@ -58,16 +58,28 @@ func (w *X11Window) applyInitialHints(x, y, width, height int) {
 		native.X11SizeHints(minW, minH, p, x, y, width, height))
 }
 
-// applyInitialState ставит окну начальное состояние «развёрнуто»: свойство
-// _NET_WM_STATE со значениями MAXIMIZED_VERT/HORZ до MapWindow — так EWMH
-// задаёт начальное состояние (ClientMessage годится только уже показанному
-// окну). IsMaximized отвечает true сразу; менеджер, не поддерживающий
-// состояние, перепишет свойство при показе, и PropertyNotify вернёт false.
+// applyInitialState ставит окну начальное состояние: «развёрнуто»
+// (MAXIMIZED_VERT/HORZ) и состояния стиля (SKIP_TASKBAR, SKIP_PAGER и
+// SKIP_SWITCHER у Style.Tool, x11_style_linux.go) — свойством _NET_WM_STATE до MapWindow, так
+// EWMH задаёт начальное состояние (ClientMessage годится только уже
+// показанному окну). IsMaximized отвечает true сразу; менеджер, не
+// поддерживающий состояние, перепишет свойство при показе, и PropertyNotify
+// вернёт false.
 func (w *X11Window) applyInitialState() {
-	if !w.initial.Maximized || w.atomNetWMState == 0 || w.atomWMStateMaxH == 0 || w.atomWMStateMaxV == 0 {
+	if w.atomNetWMState == 0 {
 		return
 	}
-	w.x11ChangeProperty(w.wid, w.atomNetWMState, 4 /*ATOM*/, 32,
-		x11InitialStateData(w.atomWMStateMaxH, w.atomWMStateMaxV))
-	w.maximized = true
+	maximize := w.initial.Maximized && w.atomWMStateMaxH != 0 && w.atomWMStateMaxV != 0
+	var atoms []uint32
+	if maximize {
+		atoms = append(atoms, w.atomWMStateMaxV, w.atomWMStateMaxH)
+	}
+	atoms = append(atoms, w.styleStateAtoms()...)
+	if len(atoms) == 0 {
+		return
+	}
+	w.x11ChangeProperty(w.wid, w.atomNetWMState, 4 /*ATOM*/, 32, x11AtomList(atoms...))
+	if maximize {
+		w.maximized = true
+	}
 }

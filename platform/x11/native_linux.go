@@ -206,6 +206,8 @@ type X11Window struct {
 	plock x11PtrLock
 	// resizable — разрешено ли пользователю менять размер (SetResizable).
 	resizable atomic.Bool
+	// style — стиль окна и владелец, заказанный до Create (x11_style_linux.go).
+	style x11Style
 	// rootX/rootY — последняя известная позиция указателя в координатах
 	// экрана: её просит _NET_WM_MOVERESIZE, а отдельного запроса делать
 	// незачем — она приходит в каждом событии мыши.
@@ -393,6 +395,7 @@ func (w *X11Window) Create(title string, width, height int) error {
 	w.atomNetWMName = w.x11InternAtom("_NET_WM_NAME")
 	w.atomNetWMIconName = w.x11InternAtom("_NET_WM_ICON_NAME")
 	w.atomMotifHints = w.x11InternAtom("_MOTIF_WM_HINTS")
+	w.internStyleAtoms()
 	// Умеет ли менеджер полный экран — до создания окна, пока на соединении
 	// нет событий и ответ читается напрямую.
 	w.x11DetectFullscreenSupport()
@@ -492,7 +495,12 @@ func (w *X11Window) Create(title string, width, height int) error {
 	// значка и перерисовывает заголовок вторым шагом.
 	w.applyPendingIcon()
 
-	// «Развёрнуто» с самого начала: _NET_WM_STATE ДО MapWindow.
+	// Владелец и признак Borderless (SetOwnerWindow, Style.Borderless) — ДО
+	// MapWindow.
+	w.applyStyleBeforeMap()
+
+	// «Развёрнуто» и состояния стиля с самого начала: _NET_WM_STATE ДО
+	// MapWindow.
 	w.applyInitialState()
 
 	// Map (show) window
@@ -1824,14 +1832,24 @@ func (w *X11Window) eventPumpLoop() {
 }
 
 // x11RaiseWindow поднимает окно на вершину стека (ConfigureWindow, stack-mode=Above).
-func (w *X11Window) x11RaiseWindow() {
+func (w *X11Window) x11RaiseWindow() { w.x11StackWindow(x11StackAbove) }
+
+// Режимы stack-mode ConfigureWindow.
+const (
+	x11StackAbove = 0
+	x11StackBelow = 1
+)
+
+// x11StackWindow переставляет окно в стеке (ConfigureWindow, stack-mode):
+// x11StackAbove — наверх, x11StackBelow — вниз.
+func (w *X11Window) x11StackWindow(mode uint32) {
 	buf := make([]byte, 16)
 	buf[0] = 12                                // ConfigureWindow
 	binary.LittleEndian.PutUint16(buf[2:4], 4) // length (16 байт)
 	binary.LittleEndian.PutUint32(buf[4:8], w.wid)
 	binary.LittleEndian.PutUint16(buf[8:10], 0x40) // value-mask: stack-mode
 	// buf[10:12] — паддинг
-	binary.LittleEndian.PutUint32(buf[12:16], 0) // Above
+	binary.LittleEndian.PutUint32(buf[12:16], mode)
 	w.x11Send(buf)
 }
 

@@ -318,10 +318,13 @@ func TestX11Initial_PositionWithoutSize(t *testing.T) {
 	}
 }
 
-func TestX11InitialStateData(t *testing.T) {
-	b := x11InitialStateData(7, 9)
+func TestX11AtomList(t *testing.T) {
+	b := x11AtomList(9, 7)
 	if len(b) != 8 || binary.LittleEndian.Uint32(b[0:4]) != 9 || binary.LittleEndian.Uint32(b[4:8]) != 7 {
 		t.Errorf("% x", b)
+	}
+	if len(x11AtomList()) != 0 {
+		t.Error("пустой список не пуст")
 	}
 }
 

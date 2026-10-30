@@ -5,6 +5,7 @@ package core
 import (
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/platform/wayland"
 )
 
@@ -57,6 +58,20 @@ var (
 	_ wheelRawSource      = (*X11Window)(nil)
 )
 
+// Стиль окна, владелец, Z-порядок и положение (style.go, шаг 9.7). У Wayland —
+// только стиль: владельца нет (xdg_toplevel.set_parent принимает только окно
+// того же соединения, а у каждого окна своё), Z-порядка и положения окна
+// xdg-shell не даёт (TestBackendContract_WaylandStyleOnly).
+var (
+	_ native.OwnerSetter = (*X11Window)(nil)
+	_ native.Positioner  = (*X11Window)(nil)
+	_ native.Stacker     = (*X11Window)(nil)
+	_ native.Styler      = (*X11Window)(nil)
+
+	_ cornerRounder = (*wayland.WaylandWindow)(nil)
+	_ native.Styler = (*wayland.WaylandWindow)(nil)
+)
+
 var (
 	_ activationNotifier    = (*wayland.WaylandWindow)(nil)
 	_ appIDSetter           = (*wayland.WaylandWindow)(nil)
@@ -105,5 +120,25 @@ func TestBackendContract_X11NoDragImage(t *testing.T) {
 	win := &Window{surface: surface{native: &X11Window{}, scale: 1}}
 	if win.DragImageSupported() {
 		t.Error("DragImageSupported true на X11")
+	}
+}
+
+// Окно Wayland отвечает на владельца, Z-порядок и положение честным false:
+// set_parent принимает только окно того же соединения, а у каждого окна своё.
+func TestBackendContract_WaylandStyleOnly(t *testing.T) {
+	var nw native.NativeWindow = &wayland.WaylandWindow{}
+	if _, ok := nw.(native.OwnerSetter); ok {
+		t.Error("WaylandWindow объявил владельца")
+	}
+	win := &Window{surface: surface{native: nw, scale: 1}}
+	owner := &Window{surface: surface{native: &wayland.WaylandWindow{}, scale: 1}}
+	if win.SetOwner(owner) || win.Raise() || win.Lower() || win.SetPosition(1, 1) {
+		t.Error("SetOwner, Raise, Lower или SetPosition на Wayland = true")
+	}
+	if _, _, ok := win.Position(); ok {
+		t.Error("Position на Wayland ok")
+	}
+	if win.SetStyle(native.Style{Tool: true}) || win.Style().Tool {
+		t.Error("Tool на Wayland принят")
 	}
 }

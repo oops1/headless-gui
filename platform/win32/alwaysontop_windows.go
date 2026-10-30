@@ -10,7 +10,10 @@ const (
 	swpAOTFlags   = 0x0001 | 0x0002 | 0x0010 // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
 )
 
-// SetAlwaysOnTop реализует alwaysOnTopBackend.
+// SetAlwaysOnTop реализует alwaysOnTopBackend. Ответ — по WS_EX_TOPMOST после
+// вызова: окно фонового процесса, оказавшееся под активным окном другого
+// процесса, Windows поверх всех молча не ставит, хотя SetWindowPos отвечает
+// успехом.
 func (w *Win32Window) SetAlwaysOnTop(on bool) bool {
 	if w.hwnd == 0 {
 		return false
@@ -20,7 +23,7 @@ func (w *Win32Window) SetAlwaysOnTop(on bool) bool {
 		after = hwndTopmost
 	}
 	r, _, _ := procSetWindowPos.Call(uintptr(w.hwnd), after, 0, 0, 0, 0, swpAOTFlags)
-	return r != 0
+	return r != 0 && w.IsAlwaysOnTop() == on
 }
 
 // IsAlwaysOnTop реализует alwaysOnTopBackend: WS_EX_TOPMOST в стиле окна.

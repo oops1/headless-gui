@@ -83,6 +83,7 @@ const (
 	wmNcmouseleave     = 0x02A2
 	wmGetminmaxinfo    = 0x0024
 	wmNcactivate       = 0x0086
+	wmShowwindow       = 0x0018
 	wmNcpaint          = 0x0085
 	wmSettingchange    = 0x001A // WM_SETTINGCHANGE: lParam — строка с названием области параметров
 	wmDpichanged       = 0x02E0
@@ -357,6 +358,9 @@ type Win32Window struct {
 	// (см. WM_NCHITTEST: у borderless-окна зоны рамки отдаём вручную).
 	resizable atomic.Bool
 
+	// style — стиль окна и владелец, заказанный до Create (style_windows.go).
+	style win32Style
+
 	// cornerRadius — радиус скругления углов окна (0 = прямые). Реализуется
 	// через регион окна (SetWindowRgn), переприменяется при resize.
 	cornerRadius int
@@ -559,14 +563,24 @@ func dropUICalls(hwnd uintptr) int {
 // WM_APP). Безопасно из любой горутины. Если вызвать с уже-UI-потока (изнутри
 // wndProc), fn выполнится после возврата из текущего сообщения.
 func (w *Win32Window) InvokeOnUIThread(fn func()) {
-	if fn == nil || w.hwnd == 0 {
-		return
+	if fn != nil {
+		w.postUICall(fn)
+	}
+}
+
+// postUICall — InvokeOnUIThread с ответом: false — окна нет или оно уже
+// мертво, и fn не выполнится.
+func (w *Win32Window) postUICall(fn func()) bool {
+	if w.hwnd == 0 {
+		return false
 	}
 	hwnd := uintptr(w.hwnd)
 	id := queueUICall(hwnd, fn)
 	if ret, _, _ := procPostMessageW.Call(hwnd, uintptr(wmApp), id, 0); ret == 0 {
 		takeUICall(id) // окно уже мертво — колбэк не доедет
+		return false
 	}
+	return true
 }
 
 // MarkSecondary помечает окно вторичным (noQuit) без смены владельца: его
@@ -587,6 +601,9 @@ func (w *Win32Window) SetOwner(parent native.NativeWindow) {
 		return
 	}
 	procSetWindowLongPtrW.Call(uintptr(w.hwnd), gwlpHwndParent, uintptr(pw.hwnd))
+	// Окно модального диалога гибнет вместе с владельцем: WM_CLOSE владельца
+	// его не освобождает (style_windows.go, releaseOwnedOnClose).
+	w.style.ownerSet.Store(false)
 }
 
 // SetEnabled включает/выключает окно (EnableWindow). Отключённое окно не
@@ -621,10 +638,16 @@ func (w *Win32Window) SetResizable(v bool) { w.resizable.Store(v) }
 func (w *Win32Window) Create(title string, width, height int) error {
 	// Borderless popup window с поддержкой resize и minimize/maximize.
 	style := uint32(wsPopup | wsVisible | wsMinimizebox | wsMaximizebox | wsThickframe | wsSysmenu | wsClipchildren)
-	exStyle := uint32(wsExAppwindow)
+	exStyle := w.createExStyle()
 	// Развёрнутое окно создаётся скрытым и первым же показом разворачивается
 	// (initial.go): положение — в createInternal (место создания).
 	_, _, style, show := native.Win32InitialCreate(w.initial, style, swShow, 0, 0)
+	if w.style.borderless.Load() {
+		// Borderless — тоже скрытым: DWM без неклиентской отрисовки должен
+		// получить окно до первого кадра, иначе мелькнут тень и скругление
+		// (показ — ShowWindow в createInternal, после applyBorderless).
+		style &^= wsVisible
+	}
 	if err := w.createInternal(title, width, height, style, exStyle, show, true); err != nil {
 		return err
 	}
@@ -750,6 +773,10 @@ func (w *Win32Window) createInternal(title string, width, height int, style, exS
 		x, y, _, _ = native.Win32InitialCreate(w.initial, 0, 0, x, y)
 	}
 
+	// Владелец, заказанный до Create (SetOwnerWindow): помечен, чтобы WM_CLOSE
+	// владельца снял его перед DestroyWindow, как у живого окна.
+	owner := w.createOwner()
+	w.style.ownerSet.Store(owner != 0)
 	hwnd, _, err := procCreateWindowExW.Call(
 		uintptr(exStyle),
 		uintptr(unsafe.Pointer(className)),
@@ -757,11 +784,12 @@ func (w *Win32Window) createInternal(title string, width, height int, style, exS
 		uintptr(style),
 		uintptr(x), uintptr(y),
 		uintptr(width), uintptr(height),
-		0, 0,
+		owner, 0,
 		uintptr(hInst),
 		0,
 	)
 	if hwnd == 0 {
+		w.style.ownerSet.Store(false)
 		win32Mu.Lock()
 		win32Creating = nil
 		win32Mu.Unlock()
@@ -775,6 +803,11 @@ func (w *Win32Window) createInternal(title string, width, height int, style, exS
 
 	// Значок, заданный до создания окна: SetIcon мог прийти раньше Run.
 	w.applyPendingIcon()
+
+	// Окно без тени и скругления (Style.Borderless) — до показа, без перехода.
+	if w.style.borderless.Load() {
+		w.applyBorderless(true)
+	}
 
 	// Слоистое окно (попап) без атрибутов невидимо — ставим до показа.
 	if exStyle&wsExLayered != 0 {
@@ -1262,8 +1295,9 @@ func (w *Win32Window) applyCorners() {
 	if w.hwnd == 0 {
 		return
 	}
-	if w.cornerRadius <= 0 || w.maximized || w.fs.on.Load() {
-		// Прямые углы (или развёрнутое окно): DWM → не скруглять, регион снять.
+	if w.cornerRadius <= 0 || w.maximized || w.fs.on.Load() || w.style.borderless.Load() {
+		// Прямые углы (или развёрнутое окно, или Style.Borderless — тени у
+		// него нет, applyBorderless): DWM → не скруглять, регион снять.
 		w.setDwmCorner(false)
 		procSetWindowRgn.Call(uintptr(w.hwnd), 0, 1)
 		return
@@ -1289,9 +1323,13 @@ type dwmMargins struct{ Left, Right, Top, Bottom int32 }
 
 // RoundsCorners — скруглены ли сейчас углы этого окна средствами ОС
 // (cornerRounder): только у окна со скруглением, не развёрнутого и не на весь
-// экран, и только на Windows 11 (DWMWA_WINDOW_CORNER_PREFERENCE). На Windows 10
-// и у окна с прямыми углами — нет: корпус тогда рисуется прямоугольным.
+// экран, и только на Windows 11 (DWMWA_WINDOW_CORNER_PREFERENCE). На Windows 10,
+// у окна с прямыми углами и у Style.Borderless — нет: корпус тогда рисуется
+// прямоугольным.
 func (w *Win32Window) RoundsCorners() bool {
+	if w.style.borderless.Load() {
+		return false
+	}
 	if w.hwnd == 0 {
 		return true
 	}
@@ -1404,6 +1442,11 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 
+	case wmShowwindow:
+		// Окно, спрятанное свёрнутым владельцем, запоминается
+		// (style_windows.go); показ и скрытие делает DefWindowProc.
+		w.noteShowWindow(wparam != 0, lparam)
+
 	case wmNcactivate:
 		// Перехватываем отрисовку non-client area при смене фокуса.
 		// Возвращаем TRUE (1) чтобы Windows считала, что мы обработали,
@@ -1419,16 +1462,19 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		if w.pendingClose {
 			// Close() был вызван из кода (напр. из OnClose виджета) —
 			// колбэк уже отработал, просто уничтожаем окно.
+			w.releaseOwnedOnClose() // окна SetOwnerWindow (style_windows.go)
 			procDestroyWindow.Call(hwnd)
 			return 0
 		}
 		// Закрытие от ОС (Alt+F4, taskbar, etc.) — спрашиваем колбэк.
 		if w.onClose != nil {
 			if w.onClose() {
+				w.releaseOwnedOnClose()
 				procDestroyWindow.Call(hwnd)
 			}
 			return 0
 		}
+		w.releaseOwnedOnClose()
 		procDestroyWindow.Call(hwnd)
 		return 0
 
@@ -1587,8 +1633,10 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 			// тащить окно (и привязывать его к краям экрана).
 			return htClient
 		}
-		// Borderless-окно: рамки ОС нет, зоны resize отдаём вручную.
+		// Borderless-окно: рамки ОС нет, зоны resize отдаём вручную (у окна
+		// со Style.Borderless их нет вовсе).
 		// lParam — ЭКРАННЫЕ координаты курсора (signed 16-bit слова).
+		resizable := w.resizable.Load() && !w.style.borderless.Load()
 		sx := int(int16(lparam & 0xFFFF))
 		sy := int(int16((lparam >> 16) & 0xFFFF))
 		var wr rect
@@ -1596,7 +1644,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 
 		// Края важнее кнопок: полоса ресайза идёт поверх заголовка, иначе
 		// верхний край окна с кнопками было бы не ухватить.
-		edge := w.resizable.Load() && !w.maximized &&
+		edge := resizable && !w.maximized &&
 			(sx-int(wr.Left) < ncResizeBorder || int(wr.Right)-sx <= ncResizeBorder ||
 				sy-int(wr.Top) < ncResizeBorder || int(wr.Bottom)-sy <= ncResizeBorder)
 		if !edge {
@@ -1605,7 +1653,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 				return area
 			}
 		}
-		if !w.resizable.Load() || w.maximized {
+		if !resizable || w.maximized {
 			break // → DefWindowProc (HTCLIENT и т.п.)
 		}
 		left := sx-int(wr.Left) < ncResizeBorder

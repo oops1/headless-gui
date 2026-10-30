@@ -21,11 +21,16 @@ func (w *X11Window) HideToTray() {
 }
 
 // RestoreFromTray показывает окно обратно и просит WM его активировать.
+// Спрятанное окно менеджер выводит из обращения и снимает его _NET_WM_STATE
+// (EWMH), поэтому окно-инструмент (Style.Tool) повторяет свои SKIP-состояния.
 func (w *X11Window) RestoreFromTray() {
 	if w.wid == 0 {
 		return
 	}
 	w.x11MapWindow(w.wid)
+	if w.style.tool.Load() {
+		w.sendSkipStates(netWMStateAdd)
+	}
 	w.x11RaiseWindow()
 	w.x11NetActiveWindow()
 }

@@ -309,6 +309,9 @@ type WaylandWindow struct {
 	// cornerR — скругление углов окна в логических точках (SetCornerRadius);
 	// не ноль — буфер ARGB с прозрачными углами (platform/native/cornermask.go).
 	cornerR atomic.Int32
+	// borderless — Style.Borderless (wayland_style_linux.go): ни маски углов,
+	// ни BeginResize.
+	borderless atomic.Bool
 	// poolARGB — пул создан в формате ARGB8888. Пишется в setupPool.
 	poolARGB bool
 
@@ -1844,13 +1847,14 @@ func (w *WaylandWindow) SetCornerRadius(r int) {
 	w.cornerR.Store(int32(r))
 }
 
-// wantARGB — окну нужен буфер с альфой.
-func (w *WaylandWindow) wantARGB() bool { return w.cornerR.Load() > 0 }
+// wantARGB — окну нужен буфер с альфой (Borderless-окно не скругляется).
+func (w *WaylandWindow) wantARGB() bool { return w.cornerR.Load() > 0 && !w.borderless.Load() }
 
 // maskRadius — радиус маски в пикселях буфера. Развёрнутое и полноэкранное
-// окно не скругляется: оно прилегает к краям экрана и непрозрачно целиком.
+// окно не скругляется: оно прилегает к краям экрана и непрозрачно целиком;
+// Borderless-окно — тоже (wayland_style_linux.go).
 func (w *WaylandWindow) maskRadius() int {
-	if w.maximized.Load() || w.fullscreen.Load() {
+	if w.maximized.Load() || w.fullscreen.Load() || w.borderless.Load() {
 		return 0
 	}
 	return int(float64(w.cornerR.Load())*w.scaleFactor() + 0.5)
@@ -1912,10 +1916,11 @@ func (w *WaylandWindow) BeginMove() bool {
 }
 
 // BeginResize просит компоновщик тянуть край окна (xdg_toplevel.resize).
-// edges — биты base.NativeEdge*. Реализует interactiveMover.
+// edges — биты base.NativeEdge*. Реализует interactiveMover. У окна со
+// Style.Borderless зон ресайза нет.
 func (w *WaylandWindow) BeginResize(edges int) bool {
 	serial := w.ptrButtonSerial.Load()
-	if w.toplevelID == 0 || w.seatID == 0 || serial == 0 || !w.resizable.Load() {
+	if w.toplevelID == 0 || w.seatID == 0 || serial == 0 || !w.resizable.Load() || w.borderless.Load() {
 		return false
 	}
 	e := wlResizeEdge(edges)

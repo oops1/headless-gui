@@ -51,9 +51,10 @@ func (w *X11Window) BeginMove() bool {
 }
 
 // BeginResize просит оконный менеджер тянуть край окна.
-// edges — биты base.NativeEdge*. Реализует interactiveMover.
+// edges — биты base.NativeEdge*. Реализует interactiveMover. У окна со
+// Style.Borderless зон ресайза нет (x11_style_linux.go).
 func (w *X11Window) BeginResize(edges int) bool {
-	if !w.resizable.Load() {
+	if !w.resizable.Load() || w.style.borderless.Load() {
 		return false
 	}
 	dir, ok := netWMResizeDirection(edges)

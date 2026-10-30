@@ -374,6 +374,8 @@ type Window struct {
 	fs fullscreenState
 	// aot — «поверх всех окон», заказанное до Run (alwaysontop.go).
 	aot alwaysOnTopState
+	// style — стиль окна ОС и владелец (style.go).
+	style styleState
 
 	// initial — положение, размер и «развёрнуто», заданные до Run
 	// (initial.go). Применяются при создании окна ОС один раз.
@@ -599,12 +601,15 @@ func (win *Window) SetContentFit(m ContentFitMode) *Window {
 
 // Close программно закрывает окно: Run() вернётся, приложение завершится
 // штатно (аналог нажатия ×). Безопасно вызывать из обработчиков UI;
-// до Run() — no-op.
+// до Run() — no-op. Окна, которыми это окно владеет (SetOwner), остаются
+// открытыми, уже без владельца.
 func (win *Window) Close() {
-	win.closeRequested.Store(true)
-	if win.native != nil {
-		win.native.Close()
+	if win.native == nil {
+		return
 	}
+	win.closeRequested.Store(true)
+	win.releaseOwned()
+	win.native.Close()
 }
 
 // SetCornerRadius задаёт скругление углов нативного окна (0 = прямые).
@@ -763,12 +768,18 @@ func (win *Window) bringUp() error {
 	// Начальное положение и «развёрнуто» (SetInitialBounds/SetInitialMaximized):
 	// тоже до Create — окно должно появиться сразу там и таким, как просили.
 	win.applyInitialPlacement()
+	// Стиль и владелец (SetStyle/SetOwner до Run) — тоже до Create: Tool и
+	// владелец закладываются в создание окна.
+	win.applyPendingStyle()
 	initMax := win.initial.maximized
 	win.initial = initialState{} // применяется один раз
 
 	if err := win.native.Create(win.title, pw, ph); err != nil {
 		return err
 	}
+	// Окно ОС есть: владельца с этих пор можно снимать у бэкенда, а снятый
+	// за время создания — снимаем сейчас (style.go).
+	win.settleOwner()
 	if fitInitial {
 		// Дизайн-размер прежний, окно — другого размера: подгоняем кадр так же,
 		// как при ресайзе.
@@ -989,12 +1000,14 @@ func (win *Window) setupWidgetWindow() {
 		win.native.SetPosition(x+dx, y+dy)
 	}
 
-	// Перемещение и ресайз силами системы, если бэкенд так умеет (Wayland).
-	// Бэкенд без этой способности (Win32, X11) оставляет хуки пустыми, и
-	// окно двигается прежним путём — через OnDragMove и SetPosition.
+	// Перемещение и ресайз силами системы, если бэкенд так умеет (Wayland,
+	// X11 — _NET_WM_MOVERESIZE). Бэкенд без этой способности (Win32)
+	// оставляет хуки пустыми, и окно двигается прежним путём — через
+	// OnDragMove и SetPosition. У окна со Style.Borderless зон ресайза нет
+	// (style.go).
 	if mv, ok := win.native.(interactiveMover); ok {
 		ww.OnNativeMove = mv.BeginMove
-		ww.OnNativeResize = mv.BeginResize
+		win.syncEdgeResize()
 	}
 
 	// Кнопка × → закрытие, если приложение не против (SetOnCloseRequest).
@@ -1052,6 +1065,8 @@ func (win *Window) setupResizeClose() {
 	win.native.SetOnClose(func() bool {
 		if !win.hasCloseHook() {
 			win.closeRequested.Store(true)
+			// Окна, которыми владеет это, — до уничтожения окна ОС (style.go).
+			win.releaseOwned()
 			return true // вопроса нет — закрываем, как и раньше
 		}
 		// Закрытие средствами ОС (Alt+F4, панель задач): окну ОС отвечаем
