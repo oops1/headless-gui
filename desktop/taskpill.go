@@ -254,7 +254,7 @@ func (m *attnMotion) factor(tm *theme.Manager, id any, r image.Rectangle, on boo
 	// Подложка идёт от полной силы вниз и обратно blinks раз; последний шаг
 	// приходит ровно в полную силу, поэтому переход к постоянной подсветке без
 	// скачка.
-	widget.AnimateOwned(m, tag, one*time.Duration(blinks), curve, func(t float64) {
+	blink := widget.AnimateOwned(m, tag, one*time.Duration(blinks), curve, func(t float64) {
 		m.mu.Lock()
 		if m.cells[id] != cell {
 			m.mu.Unlock()
@@ -268,6 +268,10 @@ func (m *attnMotion) factor(tm *theme.Manager, id any, r image.Rectangle, on boo
 		m.mu.Unlock()
 		widget.InvalidateRect(rect)
 	})
+	// Мигание — сигнал, а не украшение, и считает периоды по t: квантованное
+	// на три шага (профиль MotionRemote) оно попадало бы каждый раз в полную
+	// силу и не мигало вовсе.
+	blink.Clock = true
 	return 1
 }
 

@@ -6,12 +6,14 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // ─── StackPanel unit ────────────────────────────────────────────────────────
 
 func TestStackPanel_NewDefaults(t *testing.T) {
+	testreset.Globals(t)
 	sp := widget.NewStackPanel(widget.OrientationVertical)
 	if sp.Orientation != widget.OrientationVertical {
 		t.Fatalf("expected Vertical, got %d", sp.Orientation)
@@ -22,6 +24,7 @@ func TestStackPanel_NewDefaults(t *testing.T) {
 }
 
 func TestStackPanel_HorizontalLayout(t *testing.T) {
+	testreset.Globals(t)
 	sp := widget.NewStackPanel(widget.OrientationHorizontal)
 	sp.Spacing = 4
 	sp.Padding = 5
@@ -53,6 +56,7 @@ func TestStackPanel_HorizontalLayout(t *testing.T) {
 }
 
 func TestStackPanel_VerticalLayout(t *testing.T) {
+	testreset.Globals(t)
 	sp := widget.NewStackPanel(widget.OrientationVertical)
 	sp.Spacing = 2
 	sp.SetBounds(image.Rect(10, 10, 200, 300))
@@ -81,6 +85,7 @@ func TestStackPanel_VerticalLayout(t *testing.T) {
 }
 
 func TestStackPanel_DrawNoPanic(t *testing.T) {
+	testreset.Globals(t)
 	sp := widget.NewStackPanel(widget.OrientationHorizontal)
 	sp.SetBounds(image.Rect(0, 0, 200, 40))
 	b := widget.NewButton("OK")
@@ -98,6 +103,7 @@ func TestStackPanel_DrawNoPanic(t *testing.T) {
 // ─── StackPanel XAML ────────────────────────────────────────────────────────
 
 func TestStackPanel_XAML_Horizontal(t *testing.T) {
+	testreset.Globals(t)
 	xaml := []byte(`
 <Panel Width="600" Height="400" Background="Transparent">
     <StackPanel Orientation="Horizontal" Background="#2D2D30"
@@ -137,6 +143,7 @@ func TestStackPanel_XAML_Horizontal(t *testing.T) {
 }
 
 func TestStackPanel_XAML_Vertical(t *testing.T) {
+	testreset.Globals(t)
 	xaml := []byte(`
 <Panel Width="200" Height="300" Background="Transparent">
     <StackPanel Orientation="Vertical" Name="sp"
@@ -164,6 +171,7 @@ func TestStackPanel_XAML_Vertical(t *testing.T) {
 }
 
 func TestStackPanel_XAML_DefaultVertical(t *testing.T) {
+	testreset.Globals(t)
 	xaml := []byte(`
 <Panel Width="200" Height="300" Background="Transparent">
     <StackPanel Name="sp" Left="0" Top="0" Width="200" Height="300">

@@ -33,18 +33,18 @@ func TestEngineRequestFocus_OutsideEventDelivery(t *testing.T) {
 	defer e.Stop()
 
 	e.RequestFocus(bar)
-	if got := e.focus.get(); got != bar {
+	if got := e.in.Focused(); got != bar {
 		t.Fatalf("после RequestFocus фокус у %T", got)
 	}
 	e.ReturnFocus(bar)
-	if got := e.focus.get(); got != host {
+	if got := e.in.Focused(); got != host {
 		t.Fatalf("после ReturnFocus фокус у %T, ждали прежнего", got)
 	}
 	// Фокус передали дальше — ReturnFocus его не трогает.
 	e.RequestFocus(bar)
 	e.SetFocus(nil)
 	e.ReturnFocus(bar)
-	if got := e.focus.get(); got != nil {
+	if got := e.in.Focused(); got != nil {
 		t.Errorf("ReturnFocus отобрал чужой фокус: %T", got)
 	}
 	e.RequestFocus(nil) // не падает
@@ -65,18 +65,18 @@ func TestEngineRequestFocus_FromOtherGoroutine(t *testing.T) {
 	}()
 	<-done
 	e.Flush()
-	if got := e.focus.get(); got != bar {
+	if got := e.in.Focused(); got != bar {
 		t.Fatalf("фокус у %T, ждали строку меню", got)
 	}
 	go func() {
 		e.ReturnFocus(bar)
 	}()
 	deadline := time.Now().Add(2 * time.Second)
-	for e.focus.get() != host && time.Now().Before(deadline) {
+	for e.in.Focused() != host && time.Now().Before(deadline) {
 		e.Flush()
 		time.Sleep(5 * time.Millisecond)
 	}
-	if got := e.focus.get(); got != host {
+	if got := e.in.Focused(); got != host {
 		t.Fatalf("после ReturnFocus фокус у %T", got)
 	}
 }

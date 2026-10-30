@@ -396,13 +396,13 @@ func (m *StartMenu) placeCaretAt(x int) {
 	rel := x - left
 	best := 0
 	for i := 1; i <= len(text); i++ {
-		if measureUI(string(text[:i]), size) > rel {
+		if measureUIFor(m, string(text[:i]), size) > rel {
 			break
 		}
 		best = i
 	}
 	if best < len(text) {
-		lo, hi := measureUI(string(text[:best]), size), measureUI(string(text[:best+1]), size)
+		lo, hi := measureUIFor(m, string(text[:best]), size), measureUIFor(m, string(text[:best+1]), size)
 		if rel > (lo+hi)/2 {
 			best++
 		}

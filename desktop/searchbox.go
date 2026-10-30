@@ -514,15 +514,15 @@ func (b *SearchBox) caretAt(x int) int {
 	size := b.fontSize(b.style(theme.StateNormal))
 	best := 0
 	for i := 1; i <= len(b.text); i++ {
-		if widget.MeasureUIText(string(b.text[:i]), size) > rel {
+		if widget.MeasureTextFor(b, string(b.text[:i]), size) > rel {
 			break
 		}
 		best = i
 	}
 	// Щелчок правее середины символа ставит каретку за ним.
 	if best < len(b.text) {
-		lo := widget.MeasureUIText(string(b.text[:best]), size)
-		hi := widget.MeasureUIText(string(b.text[:best+1]), size)
+		lo := widget.MeasureTextFor(b, string(b.text[:best]), size)
+		hi := widget.MeasureTextFor(b, string(b.text[:best+1]), size)
 		if rel > (lo+hi)/2 {
 			best++
 		}

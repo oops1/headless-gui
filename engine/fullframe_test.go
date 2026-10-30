@@ -112,7 +112,7 @@ func settledEqual(t *testing.T, e *Engine, s *slowConsumer) {
 	for {
 		e.frameMu.Lock()
 		e.mu.RLock()
-		front := e.canvas.front
+		front := e.canvas.Front()
 		e.mu.RUnlock()
 		s.mu.Lock()
 		same := front.Rect == s.cur.Rect && bytes.Equal(front.Pix, s.cur.Pix)

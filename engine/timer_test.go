@@ -44,9 +44,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 
 // timersLeft — сколько таймеров числится в реестре движка.
 func timersLeft(e *Engine) int {
-	e.timersMu.Lock()
-	defer e.timersMu.Unlock()
-	return len(e.timers)
+	return e.lp.TimerCount()
 }
 
 func TestTimer_AfterRunsOnEngineGoroutine(t *testing.T) {
@@ -57,7 +55,7 @@ func TestTimer_AfterRunsOnEngineGoroutine(t *testing.T) {
 	var onLoop atomic.Bool
 	done := make(chan struct{})
 	tm := e.After(10*time.Millisecond, func() {
-		onLoop.Store(e.loopGID.Load() == curGoroutineID())
+		onLoop.Store(e.lp.GoroutineID() == curGoroutineID())
 		close(done)
 	})
 
@@ -137,9 +135,7 @@ func TestTimer_CancelAfterQueued(t *testing.T) {
 	var calls atomic.Int32
 	tm := e.After(0, func() { calls.Add(1) })
 	waitFor(t, "вызов встал в очередь", func() bool {
-		e.postMu.Lock()
-		defer e.postMu.Unlock()
-		return len(e.posted) > 0
+		return e.Stats().PostQueue > 0
 	})
 	tm.Stop()
 	e.Flush()
@@ -340,6 +336,9 @@ func TestTimer_NoGoroutineLeak(t *testing.T) {
 	testreset.Globals(t)
 	// Даём завершиться горутинам, оставшимся от предыдущих тестов.
 	time.Sleep(100 * time.Millisecond)
+	// Пул воркеров (workpool.go) один на процесс и живёт до его конца: если
+	// он стартует впервые посреди замера, его воркеры сойдут за утечку.
+	startWorkPool()
 	before := runtime.NumGoroutine()
 
 	for round := 0; round < 3; round++ {

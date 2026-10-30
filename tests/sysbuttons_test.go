@@ -4,6 +4,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -46,6 +47,7 @@ func sysBtnDialog(t *testing.T) *widget.Dialog {
 
 // Три кнопки стоят в полосе справа налево и не налезают друг на друга.
 func TestWindowButtons_ThreeInARow(t *testing.T) {
+	testreset.Globals(t)
 	d := sysBtnDialog(t)
 	if !d.HasWindowButtons() {
 		t.Fatal("кнопки не появились")
@@ -76,6 +78,7 @@ func TestWindowButtons_ThreeInARow(t *testing.T) {
 
 // Кнопки зовут свои действия — их ставит нативный хост окна.
 func TestWindowButtons_CallHooks(t *testing.T) {
+	testreset.Globals(t)
 	d := sysBtnDialog(t)
 
 	min, maxRestore := 0, 0
@@ -98,6 +101,7 @@ func TestWindowButtons_CallHooks(t *testing.T) {
 
 // Закрытие осталось на ✕: кнопки добавились рядом, а не вместо неё.
 func TestWindowButtons_CloseStillCloses(t *testing.T) {
+	testreset.Globals(t)
 	eng := newDialogEngine()
 	d := widget.NewDialog("Настройки", 700, 400)
 	d.SetWindowButtons(true)
@@ -113,6 +117,7 @@ func TestWindowButtons_CloseStillCloses(t *testing.T) {
 
 // Развёрнутое окно рисует «восстановить» вместо «развернуть».
 func TestWindowButtons_MaximizedGlyph(t *testing.T) {
+	testreset.Globals(t)
 	scene := func(maximized bool) *image.RGBA {
 		d := widget.NewDialog("Настройки", 300, 200)
 		d.SetWindowButtons(true)
@@ -133,6 +138,7 @@ func TestWindowButtons_MaximizedGlyph(t *testing.T) {
 
 // Между начинкой приложения и кнопками остаётся свободная полоска.
 func TestTitleBar_LeavesDragHandle(t *testing.T) {
+	testreset.Globals(t)
 	d := sysBtnDialog(t)
 	search := widget.NewTextInput("Поиск настроек...")
 	d.SetTitleBarContent(search)
@@ -145,6 +151,7 @@ func TestTitleBar_LeavesDragHandle(t *testing.T) {
 
 // И за эту полоску диалог действительно тащится.
 func TestTitleBar_DragHandleMovesDialog(t *testing.T) {
+	testreset.Globals(t)
 	d := sysBtnDialog(t)
 	search := widget.NewTextInput("Поиск настроек...")
 	d.SetTitleBarContent(search)
@@ -165,6 +172,7 @@ func TestTitleBar_DragHandleMovesDialog(t *testing.T) {
 
 // Кнопки занимают место: начинка ужимается, а не залезает под них.
 func TestTitleBar_ContentShrinksForButtons(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDialog("Настройки", 700, 400)
 	d.SetBounds(image.Rect(0, 0, 700, 400))
 	search := widget.NewTextInput("Поиск...")
@@ -209,6 +217,7 @@ func titleBarWindow(t *testing.T, style widget.WindowTitleStyle) (*widget.Window
 }
 
 func TestWindowTitleBar_KeepsThreeButtons(t *testing.T) {
+	testreset.Globals(t)
 	w, search := titleBarWindow(t, widget.WindowTitleWin)
 
 	closeR, minR, maxR := w.CloseBtnRect(), w.MinBtnRect(), w.MaxBtnRect()
@@ -229,6 +238,7 @@ func TestWindowTitleBar_KeepsThreeButtons(t *testing.T) {
 // подпись центрирована, и виджет приложения пришлось бы втискивать между ними —
 // такой полосы в macOS нет ни у одного окна.
 func TestWindowTitleBar_MacHasNoBarContent(t *testing.T) {
+	testreset.Globals(t)
 	w, search := titleBarWindow(t, widget.WindowTitleMac)
 
 	if r := w.TitleBarContentBounds(); !r.Empty() {
@@ -256,6 +266,7 @@ func TestWindowTitleBar_MacHasNoBarContent(t *testing.T) {
 // Та же полоса в Windows-раскладке начинку принимает — проверка, что запрет
 // касается именно mac, а не выключил режим целиком.
 func TestWindowTitleBar_WinHasBarContent(t *testing.T) {
+	testreset.Globals(t)
 	_, search := titleBarWindow(t, widget.WindowTitleWin)
 
 	if search.Bounds().Empty() {

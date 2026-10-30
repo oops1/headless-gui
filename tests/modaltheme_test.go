@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	"github.com/oops1/headless-gui/v3/widget/datagrid"
 )
@@ -46,6 +47,7 @@ func themedModalScene(t *testing.T, th *widget.Theme) (*engine.Engine, *widget.D
 
 // Таблица в диалоге, показанном после смены темы, красится этой темой.
 func TestShowModal_AppliesCurrentTheme(t *testing.T) {
+	testreset.Globals(t)
 	th := widget.Win11LightTheme()
 	_, grid := themedModalScene(t, th)
 
@@ -56,6 +58,7 @@ func TestShowModal_AppliesCurrentTheme(t *testing.T) {
 
 // То же в тёмной теме: проверка не привязана к одному набору цветов.
 func TestShowModal_AppliesDarkTheme(t *testing.T) {
+	testreset.Globals(t)
 	th := widget.Win11DarkTheme()
 	_, grid := themedModalScene(t, th)
 
@@ -66,6 +69,7 @@ func TestShowModal_AppliesDarkTheme(t *testing.T) {
 
 // Поддерево со своей темой диалог не перекрашивает — как и SetTheme.
 func TestShowModal_KeepsOwnThemeScope(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(widget.Theme{}.WindowBG)
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 400, 300))

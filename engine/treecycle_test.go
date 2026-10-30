@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/core/input"
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -34,24 +36,28 @@ func TestTreeCycle_DoesNotHang(t *testing.T) {
 	w := &cyclicWidget{b: image.Rect(0, 0, 200, 200), overlay: true}
 
 	e := New(200, 200, 20)
+	// Без Stop приёмник переносов движка с циклическим деревом оставался
+	// подписан на весь процесс, и перетаскивание окна в следующем тесте
+	// обходило это дерево.
+	defer e.Stop()
 	e.SetTooltipsEnabled(false)
 	e.SetRoot(w)
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if p := hitTestPath(w, 5, 5); len(p) > maxTreeDepth {
-			t.Errorf("путь hit-test длиннее предела: %d", len(p))
-		}
-		hitTest(w, 5, 5)
-		findOverlayAt(w, 5, 5)
-		findCapturer(w, 5, 5, widget.MouseEvent{})
-		dismissOutside(w, nil, 5, 5)
-		broadcastMouseMove(w, 0, 0, 5, 5)
+		// Обходы ввода (hit-тест, захватчик, оверлей, рассылка движения) —
+		// core/input/treecycle_test.go.
+		input.DismissOutside(w, nil, 5, 5)
 		injectCaptureManager(w, e)
 		drawOverlays(w, e.canvas, false)
 		e.renderFrame()
 		e.SendMouseMove(5, 5)
+		// Объявление о переносе чужого виджета: поиск его в дереве.
+		if widgetInTree(w, &cyclicWidget{}) {
+			t.Error("чужой виджет найден в циклическом дереве")
+		}
+		e.noteMove(widget.MoveNotice{Widget: &cyclicWidget{}, Rect: image.Rect(0, 0, 10, 10)})
 	}()
 
 	select {
@@ -65,7 +71,7 @@ func TestTreeCycle_DoesNotHang(t *testing.T) {
 func TestTreeCycle_CollectPopupsBounded(t *testing.T) {
 	testreset.Globals(t)
 	w := &cyclicWidget{b: image.Rect(0, 0, 200, 200), overlay: true}
-	items := collectPopups(nil, w, 0)
+	items := overlay.CollectPopups(nil, w, 0)
 	if len(items) != maxTreeDepth {
 		t.Fatalf("собрано %d оверлеев, ожидалось %d", len(items), maxTreeDepth)
 	}

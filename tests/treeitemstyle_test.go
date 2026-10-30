@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	"github.com/oops1/headless-gui/v3/widget/treeview"
 )
@@ -57,6 +58,7 @@ func diffCount(a, b *image.RGBA) int {
 
 // Свой цвет текста узла виден на экране.
 func TestTreeItem_ForegroundIsDrawn(t *testing.T) {
+	testreset.Globals(t)
 	eng, _, items := treeScene(t)
 
 	before := frameOf(eng)
@@ -77,6 +79,7 @@ func TestTreeItem_ForegroundIsDrawn(t *testing.T) {
 
 // Жирное начертание рисуется другим шрифтом, а не тем же самым.
 func TestTreeItem_BoldIsDrawn(t *testing.T) {
+	testreset.Globals(t)
 	eng, _, items := treeScene(t)
 
 	before := frameOf(eng)
@@ -91,6 +94,7 @@ func TestTreeItem_BoldIsDrawn(t *testing.T) {
 // Колбэк перекрывает поля узла: он знает о состоянии приложения то, чего узел
 // не знает.
 func TestTreeItem_StyleCallbackWins(t *testing.T) {
+	testreset.Globals(t)
 	eng, tw, items := treeScene(t)
 
 	items[2].Foreground = color.RGBA{R: 0, G: 255, B: 0, A: 255}
@@ -116,6 +120,7 @@ func TestTreeItem_StyleCallbackWins(t *testing.T) {
 
 // Узлы без оформления рисуются как прежде: ни поле, ни колбэк их не трогают.
 func TestTreeItem_UntouchedNodesLookTheSame(t *testing.T) {
+	testreset.Globals(t)
 	eng, tw, items := treeScene(t)
 
 	before := frameOf(eng)

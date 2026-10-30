@@ -18,7 +18,7 @@ func TestShaping_VisualSample(t *testing.T) {
 	}
 	eng := New(560, 320, 20)
 	c := eng.canvas
-	c.blitBackground()
+	c.BlitBackground()
 
 	white := color.RGBA{R: 235, G: 235, B: 235, A: 255}
 	green := color.RGBA{R: 120, G: 220, B: 120, A: 255}
@@ -39,6 +39,6 @@ func TestShaping_VisualSample(t *testing.T) {
 		y += 46
 	}
 
-	savePNG(c.back, out)
+	savePNG(c.Back(), out)
 	t.Logf("сцена сохранена: %s", out)
 }

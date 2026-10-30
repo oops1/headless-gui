@@ -1,6 +1,7 @@
 // surface.go — рисование в буфер, предоставленный потребителем, вместо
 // собственного back-буфера канваса (см. ROTATION NOTE ниже — ротация
 // нескольких буферов НЕ реализована, только один буфер за раз).
+
 package engine
 
 import "fmt"
@@ -35,7 +36,8 @@ import "fmt"
 func (e *Engine) SetSurface(pix []byte, stride int, f PixelFormat) error {
 	if pix == nil {
 		e.frameMu.Lock() // буфер меняется — ждём конца текущего кадра
-		e.canvas.useOwnBack()
+		e.surfaces.drop()
+		e.canvas.UseOwnBack()
 		e.frameMu.Unlock()
 		e.Invalidate()
 		return nil
@@ -68,7 +70,8 @@ func (e *Engine) SetSurface(pix []byte, stride int, f PixelFormat) error {
 			len(pix), w, h, stride, need)
 	}
 
-	e.canvas.setExternalBack(pix, stride, f)
+	e.surfaces.drop() // один буфер — без очереди и подтверждений
+	e.canvas.SetExternalBack(pix, stride, f)
 	e.frameMu.Unlock()
 	e.Invalidate() // новый буфер не совпадает с front ни одним байтом — перерисовать всё
 	return nil

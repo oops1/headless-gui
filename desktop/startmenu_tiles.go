@@ -234,6 +234,8 @@ type startView struct {
 
 	// Подписки на время открытости.
 	unsubs []func()
+	// Живые плитки (livetile.go): свой замок, Draw читает показанное.
+	live liveSet
 
 	focused atomic.Bool
 	popup   *widget.PopupMenu
@@ -565,6 +567,9 @@ func (m *StartMenu) SetTileGroups(groups []TileGroup) {
 	v.groups = cloneGroups(groups)
 	v.tilesRev++
 	v.mu.Unlock()
+	if m.IsOpen() {
+		m.liveAttach()
+	}
 	m.Invalidate()
 }
 
@@ -914,7 +919,9 @@ func (m *StartMenu) tileRectAbs(id TileID) image.Rectangle {
 	}
 	l := m.layoutTiles(g)
 	m.v.mu.Lock()
-	scroll := m.v.tileScroll
+	// Прокрутка зажата так же, как в отрисовке (drawTiles): после смены
+	// плиток на меньший набор сырая прокрутка указывала бы мимо плитки.
+	scroll := clampScroll(m.v.tileScroll, l.height+m.dragExtraLocked(), tilesViewHeight(g))
 	m.v.mu.Unlock()
 	for _, t := range l.tiles {
 		if t.id == id {
@@ -943,8 +950,12 @@ type fadeBar struct {
 	alpha float64
 	last  time.Time
 	timer *time.Timer
-	live  bool
-	anim  *widget.Animation
+	// timerGen — поколение таймера паузы: срабатывание старого таймера,
+	// которое ждало замка, пока pin или hide его останавливали (Stop уже
+	// не успел), узнаёт себя устаревшим и ничего не делает.
+	timerGen uint64
+	live     bool
+	anim     *widget.Animation
 	// pinned — полоса удерживается на виду (бегунок тянут или над дорожкой
 	// курсор): затухание не стартует, пока флаг не снят.
 	pinned bool
@@ -973,7 +984,9 @@ func (f *fadeBar) poke(inval func()) {
 	prev := f.anim
 	f.anim = nil
 	if f.timer == nil {
-		f.timer = time.AfterFunc(thinBarHold, func() { f.expire(inval) })
+		f.timerGen++
+		gen := f.timerGen
+		f.timer = time.AfterFunc(thinBarHold, func() { f.expire(gen, inval) })
 	}
 	f.mu.Unlock()
 	if prev != nil {
@@ -986,10 +999,15 @@ func (f *fadeBar) poke(inval func()) {
 	}
 }
 
-// expire зовётся по таймеру: если пауза не истекла (был свежий poke), заводит
-// таймер на остаток, иначе запускает затухание.
-func (f *fadeBar) expire(inval func()) {
+// expire зовётся по таймеру поколения gen: если пауза не истекла (был свежий
+// poke), заводит таймер на остаток, иначе запускает затухание. Таймер чужого
+// поколения или уже снятый (pin, hide) — устаревшее срабатывание: выходим.
+func (f *fadeBar) expire(gen uint64, inval func()) {
 	f.mu.Lock()
+	if f.timer == nil || gen != f.timerGen {
+		f.mu.Unlock()
+		return
+	}
 	if f.pinned {
 		f.timer = nil
 		f.mu.Unlock()

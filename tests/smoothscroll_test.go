@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -28,6 +29,7 @@ func stepInertia(t0 time.Time, n int) {
 // TestSmoothScroll_PixelDeltaReachesScrollView: одиночная пиксельная дельта
 // доезжает целиком (маховик интегрирует импульс: путь ≈ dy), плавно.
 func TestSmoothScroll_PixelDeltaReachesScrollView(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -57,6 +59,7 @@ func TestSmoothScroll_PixelDeltaReachesScrollView(t *testing.T) {
 // ─── ScrollView: инерция затухает и останавливается ─────────────────────────
 
 func TestSmoothScroll_InertiaDecaysAndStops(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -110,6 +113,7 @@ func TestSmoothScroll_InertiaDecaysAndStops(t *testing.T) {
 // ─── ScrollView: инерция прерывается новым вводом/кликом ─────────────────────
 
 func TestSmoothScroll_InertiaInterruptedByClick(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -149,6 +153,7 @@ func TestSmoothScroll_InertiaInterruptedByClick(t *testing.T) {
 // ─── ListView: пиксельная дельта прокручивает попиксельно ───────────────────
 
 func TestSmoothScroll_ListViewPixelDelta(t *testing.T) {
+	testreset.Globals(t)
 	items := make([]string, 100)
 	for i := range items {
 		items[i] = "item"
@@ -174,6 +179,7 @@ func TestSmoothScroll_ListViewPixelDelta(t *testing.T) {
 // ─── TextBox: пиксельная дельта + субпиксельное накопление ──────────────────
 
 func TestSmoothScroll_TextBoxPixelDelta(t *testing.T) {
+	testreset.Globals(t)
 	tb := widget.NewTextBox("")
 	tb.SetText(strings.Repeat("line\n", 60))
 	tb.SetBounds(image.Rect(0, 0, 200, 120))
@@ -224,6 +230,7 @@ func (s *wheelTickSpy) OnMouseButton(e widget.MouseEvent) bool {
 // TestSmoothScroll_EngineRoutesToScrollView: engine.SendMouseWheelPixels
 // доставляет точную дельту виджету под курсором (ScrollView).
 func TestSmoothScroll_EngineRoutesToScrollView(t *testing.T) {
+	testreset.Globals(t)
 	widget.StopAllAnimations()
 	defer widget.StopAllAnimations()
 
@@ -246,6 +253,7 @@ func TestSmoothScroll_EngineRoutesToScrollView(t *testing.T) {
 // TestSmoothScroll_EngineFallbackToTicks: если под курсором виджет без точного
 // обработчика — движок синтезирует эквивалентные тики (старый путь не ломается).
 func TestSmoothScroll_EngineFallbackToTicks(t *testing.T) {
+	testreset.Globals(t)
 	spy := &wheelTickSpy{}
 	spy.SetBounds(image.Rect(0, 0, 300, 300))
 

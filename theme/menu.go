@@ -67,6 +67,40 @@ const (
 	// наведении, мс. Нет — подменю раскрывается сразу. Нажатие и клавиши
 	// задержкой не затрагиваются.
 	KeyMenuSubmenuDelay Key = "menu.submenu.delay"
+	// KeyMenuOpenOffset — на сколько точек всплывающее меню выезжает при
+	// появлении (и уезжает при исчезновении) по анимации AnimMenuOpen: от
+	// точки привязки, вниз у меню под ней и вверх у меню над ней. Нет —
+	// меню только проявляется, без сдвига.
+	KeyMenuOpenOffset Key = "menu.open.offset"
+)
+
+// Анимации меню и панелей (AnimSpec: длительность и кривая). Все
+// декоративные: при «меньше движения» и профилях движения
+// MotionReduced/MotionOff — мгновенно. Таблица значений по профилям —
+// profiles_motion.go.
+const (
+	// AnimMenuOpen — появление всплывающего меню; и исчезновение, если
+	// профиль не объявил AnimMenuClose.
+	AnimMenuOpen Key = "menu.open"
+	// AnimMenuClose — исчезновение всплывающего меню; не объявлено — по
+	// AnimMenuOpen.
+	AnimMenuClose Key = "menu.close"
+	// AnimSubmenuOpen — проявление каскадного подменю (PopupMenu).
+	AnimSubmenuOpen Key = "submenu.open"
+	// AnimStartOpen — выезд и уход «Пуска»; не объявлено — по
+	// AnimFlyoutOpen, затем AnimMenuOpen.
+	AnimStartOpen Key = "start.open"
+	// AnimFlyoutOpen — выезд и уход всплывающих панелей (календарь, центр
+	// уведомлений, быстрые настройки); не объявлено — по AnimMenuOpen.
+	AnimFlyoutOpen Key = "flyout.open"
+	// AnimTileCycle — переход живой плитки меню «Пуск» от одного состояния
+	// источника к другому (ADR-0010). Декоративная: при «меньше движения» и
+	// профилях MotionReduced/MotionOff — мгновенно. Не объявлено — по
+	// AnimFlyoutOpen.
+	AnimTileCycle Key = "tile.cycle"
+	// KeyTileCycleKind — вид перехода живой плитки: 0 — сдвиг (новое въезжает
+	// снизу), 1 — переворот вокруг горизонтальной оси. Не объявлено — 0.
+	KeyTileCycleKind Key = "tile.cycle.kind"
 )
 
 // FlagMenuIconTint — одноцветные значки пунктов (глифы) рисуются цветом текста

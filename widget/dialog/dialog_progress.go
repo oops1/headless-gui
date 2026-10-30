@@ -1,0 +1,164 @@
+package dialog
+
+import (
+	"fmt"
+	"image"
+	"math"
+	"sync/atomic"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
+)
+
+// ProgressDialog — модальный диалог хода операции. Управляется из кода
+// (в т.ч. из фоновой горутины: сеттеры потокобезопасны и самоинвалидируются).
+//
+// Компоновка — принятый дизайн-мокап: основная строка статуса, под ней
+// приглушённая строка деталей (SetDetail), полоса прогресса и процент
+// справа под ней; кнопка «Отмена» — в правом нижнем углу.
+//
+// Поддерживает определённый прогресс (0..1) и неопределённый режим
+// (бегущая полоса — ProgressBar сам анимирует indeterminate).
+type ProgressDialog struct {
+	eng    ModalShower
+	dlg    *Dialog
+	status *base.Label
+	detail *base.Label
+	pct    *base.Label
+	bar    *base.ProgressBar
+	closed atomic.Bool
+
+	onCancel func() // вызывается по кнопке Отмена / Escape / ✕ (может быть nil)
+}
+
+// ShowProgress показывает диалог прогресса.
+//
+//	title    — заголовок (пустой → локализованный "Выполнение операции");
+//	status   — начальная строка статуса;
+//	onCancel — колбэк отмены (nil → кнопки Отмена нет).
+func (mb *MessageBox) ShowProgress(title, status string, onCancel func()) *ProgressDialog {
+	const (
+		dlgW   = 420
+		padX   = dlgPad
+		titleH = dlgTitleH
+		barH   = 10
+		btnH   = 30
+		btnPad = 12
+	)
+	if title == "" {
+		title = base.Tr("dlg.title.progress")
+	}
+	statusY := titleH + 12
+	detailY := statusY + 20
+	barY := detailY + 26
+	pctY := barY + barH + 6
+	dlgH := pctY + 18 + btnH + btnPad
+	if onCancel == nil {
+		dlgH = pctY + 18 + btnPad
+	}
+
+	dlg := NewDialog(title, dlgW, dlgH)
+	// SetShowCloseButton — без отмены операция незакрываема; метод сразу
+	// синхронизирует видимость ✕, не дожидаясь первого Draw диалога.
+	dlg.SetShowCloseButton(onCancel != nil)
+
+	lbl := base.NewLabel(status, base.ActiveTheme().LabelText)
+	lbl.FontSize = 11
+	lbl.SetBounds(image.Rect(padX, statusY, dlgW-padX, statusY+18))
+	dlg.AddChild(lbl)
+
+	det := newMutedLabel("")
+	det.FontSize = 10
+	det.SetBounds(image.Rect(padX, detailY, dlgW-padX, detailY+16))
+	dlg.AddChild(det)
+
+	bar := base.NewProgressBar()
+	bar.SetValue(0)
+	bar.SetBounds(image.Rect(padX, barY, dlgW-padX, barY+barH))
+	dlg.AddChild(bar)
+
+	pct := newMutedLabel("")
+	pct.FontSize = 10
+	pct.SetBounds(image.Rect(dlgW-padX-44, pctY, dlgW-padX, pctY+14))
+	dlg.AddChild(pct)
+
+	pd := &ProgressDialog{eng: mb.eng, dlg: dlg, status: lbl, detail: det, pct: pct, bar: bar, onCancel: onCancel}
+
+	if onCancel != nil {
+		btnY := dlgH - btnPad - btnH
+		cw := mbBtnWidth(base.Tr("dlg.cancel"))
+		cancelBtn := trBtn("dlg.cancel", false)
+		cancelBtn.SetBounds(image.Rect(dlgW-padX-cw, btnY, dlgW-padX, btnY+btnH))
+		cancelBtn.OnClick = pd.cancel
+		dlg.AddChild(cancelBtn)
+		dlg.OnLanguageChange(func() { cancelBtn.SetText(base.Tr("dlg.cancel")) })
+		dlg.CancelAction = pd.cancel
+	}
+
+	mb.eng.ShowModal(dlg)
+	return pd
+}
+
+// SetProgress задаёт определённый прогресс 0..1 (потокобезопасно).
+// Обновляет и подпись процента под полосой.
+func (pd *ProgressDialog) SetProgress(v float64) {
+	pd.bar.SetIndeterminate(false)
+	pd.bar.SetValue(v)
+	// В диалоге ожидания (ShowBusy) процента и деталей нет — там всё по
+	// центру и без цифр, поэтому подписи могут отсутствовать.
+	if pd.pct != nil {
+		pd.pct.SetText(fmt.Sprintf("%d%%", int(math.Round(base.Max01(v)*100))))
+	}
+}
+
+// SetIndeterminate включает/выключает неопределённый режим (бегущая полоса).
+// В неопределённом режиме процент скрывается.
+func (pd *ProgressDialog) SetIndeterminate(on bool) {
+	pd.bar.SetIndeterminate(on)
+	if on && pd.pct != nil {
+		pd.pct.SetText("")
+	}
+}
+
+// Bounds возвращает прямоугольник корпуса диалога (после центрирования
+// движком). Нужен приложениям, которые дорисовывают что-то рядом, и тестам.
+func (pd *ProgressDialog) Bounds() image.Rectangle { return pd.dlg.Bounds() }
+
+// Progress возвращает текущее значение полосы [0,1] (потокобезопасно).
+func (pd *ProgressDialog) Progress() float64 { return pd.bar.Value() }
+
+// IsIndeterminate сообщает, идёт ли полоса в неопределённом режиме.
+func (pd *ProgressDialog) IsIndeterminate() bool { return pd.bar.IsIndeterminate() }
+
+// SetStatus обновляет основную строку статуса (потокобезопасно).
+func (pd *ProgressDialog) SetStatus(s string) {
+	if pd.status != nil {
+		pd.status.SetText(s)
+	}
+}
+
+// SetDetail обновляет приглушённую строку деталей под статусом
+// («34 из 120 файлов · 61,4 МБ/с · осталось 0:42»). Потокобезопасно.
+func (pd *ProgressDialog) SetDetail(s string) {
+	if pd.detail != nil {
+		pd.detail.SetText(s)
+	}
+}
+
+// Close закрывает диалог (идемпотентно; безопасно из любой горутины).
+func (pd *ProgressDialog) Close() {
+	if pd.closed.Swap(true) {
+		return
+	}
+	pd.eng.CloseModal(pd.dlg)
+}
+
+// cancel — обработчик кнопки Отмена / Escape: закрывает и уведомляет.
+func (pd *ProgressDialog) cancel() {
+	if pd.closed.Swap(true) {
+		return
+	}
+	pd.eng.CloseModal(pd.dlg)
+	if pd.onCancel != nil {
+		pd.onCancel()
+	}
+}

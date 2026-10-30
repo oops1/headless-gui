@@ -6,6 +6,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -47,6 +48,7 @@ const epsilon = 1e-9
 
 // TestEasingBoundaries проверяет f(0)==0 и f(1)==1 для каждой кривой.
 func TestEasingBoundaries(t *testing.T) {
+	testreset.Globals(t)
 	for _, nc := range allCurves() {
 		t.Run(nc.name, func(t *testing.T) {
 			if got := nc.curve(0); math.Abs(got-0) > epsilon {
@@ -61,6 +63,7 @@ func TestEasingBoundaries(t *testing.T) {
 
 // TestEasingClamp проверяет, что вход вне [0,1] зажимается до применения кривой.
 func TestEasingClamp(t *testing.T) {
+	testreset.Globals(t)
 	for _, nc := range allCurves() {
 		t.Run(nc.name, func(t *testing.T) {
 			if got := nc.curve(-1); math.Abs(got-0) > epsilon {
@@ -77,6 +80,7 @@ func TestEasingClamp(t *testing.T) {
 // при возрастании t. Back/Elastic/Bounce намеренно исключены (выбросы,
 // колебания — это их суть, а не баг).
 func TestEasingMonotone(t *testing.T) {
+	testreset.Globals(t)
 	const steps = 200
 	for _, nc := range allCurves() {
 		if !nc.monotone {
@@ -101,6 +105,7 @@ func TestEasingMonotone(t *testing.T) {
 // неограниченным выбросом/колебанием. Нижняя граница -0.2 общая для всех;
 // верхняя — nc.rangeMax (см. комментарий в allCurves про EaseOutElastic).
 func TestEasingRange(t *testing.T) {
+	testreset.Globals(t)
 	const rangeMin = -0.2
 	for _, nc := range allCurves() {
 		t.Run(nc.name, func(t *testing.T) {
@@ -117,6 +122,7 @@ func TestEasingRange(t *testing.T) {
 
 // TestLerpF проверяет базовую линейную интерполяцию чисел.
 func TestLerpF(t *testing.T) {
+	testreset.Globals(t)
 	cases := []struct {
 		a, b, tt, want float64
 	}{
@@ -135,6 +141,7 @@ func TestLerpF(t *testing.T) {
 
 // TestLerpInt проверяет округление (а не усечение) при интерполяции целых.
 func TestLerpInt(t *testing.T) {
+	testreset.Globals(t)
 	// 0 + (10-0)*0.5 = 5 — ровно, без эффекта округления.
 	if got := widget.LerpInt(0, 10, 0.5); got != 5 {
 		t.Errorf("LerpInt(0, 10, 0.5) = %d, хотим 5", got)
@@ -154,6 +161,7 @@ func TestLerpInt(t *testing.T) {
 
 // TestLerpRect проверяет покомпонентную интерполяцию прямоугольника.
 func TestLerpRect(t *testing.T) {
+	testreset.Globals(t)
 	a := image.Rect(0, 0, 10, 20)
 	b := image.Rect(10, 20, 30, 60)
 	got := widget.LerpRect(a, b, 0.5)
@@ -173,6 +181,7 @@ func TestLerpRect(t *testing.T) {
 // TestLerpColor проверяет покомпонентную интерполяцию premultiplied-цвета,
 // в т.ч. случай, где альфа тоже интерполируется (полупрозрачный цвет).
 func TestLerpColor(t *testing.T) {
+	testreset.Globals(t)
 	a := color.RGBA{0, 0, 0, 0}
 	b := color.RGBA{100, 50, 200, 255}
 	got := widget.LerpColor(a, b, 0.5)

@@ -1,0 +1,79 @@
+package xaml
+
+import (
+	"image/color"
+	"strconv"
+	"strings"
+
+	"github.com/oops1/headless-gui/v3/widget/base"
+)
+
+// colorpicker.go — теги <ColorPicker> и <Swatch> в разметке.
+//
+//	<ColorPicker x:Name="accent" Value="#0078D7" FontSize="10"
+//	             Palette="#000000,#FFFFFF,#0078D7"
+//	             ValueChangedCommand="{Binding Accent}"/>
+//	<Swatch Color="#C42B1C" Width="18" Height="18" CornerRadius="3"/>
+//
+// Цвет — тем же синтаксисом, что и остальные цвета разметки (ParseColor):
+// «#RRGGBB», «#AARRGGBB» и имена. Своя палитра перечисляется через запятую:
+// цвета редактора темы у каждого приложения свои, а набор по умолчанию —
+// общий.
+
+func buildXAMLColorPicker(el Element) base.Widget {
+	p := base.NewColorPicker()
+	if v := el.Attr("Value", "Color", "SelectedColor"); v != "" {
+		if c, err := ParseColor(v); err == nil {
+			p.SetValue(c)
+		}
+	}
+	if v := el.Attr("Palette", "Colors"); v != "" {
+		if cols := parseXAMLColorList(v); len(cols) > 0 {
+			p.SetPalette(cols)
+		}
+	}
+	if fs := el.Attr("FontSize"); fs != "" {
+		if v, err := strconv.ParseFloat(fs, 64); err == nil && v > 0 {
+			p.FontSize = v
+		}
+	}
+	return p
+}
+
+func buildXAMLSwatch(el Element) base.Widget {
+	s := base.NewSwatch(color.RGBA{A: 255})
+	if v := el.Attr("Color", "Value", "Fill", "Background"); v != "" {
+		if c, err := ParseColor(v); err == nil {
+			s.Color = c
+		}
+	}
+	if v := el.Attr("BorderBrush", "Border"); v != "" {
+		if c, err := ParseColor(v); err == nil {
+			s.Border = c
+		}
+	}
+	if v := el.Attr("CornerRadius"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			s.CornerRadius = n
+		}
+	}
+	return s
+}
+
+// parseXAMLColorList разбирает список цветов через запятую. Нераспознанные
+// пропускаются молча — как и всюду в разметке: одна опечатка не должна
+// оставлять контрол вовсе без палитры.
+func parseXAMLColorList(s string) []color.RGBA {
+	parts := strings.Split(s, ",")
+	out := make([]color.RGBA, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if c, err := ParseColor(part); err == nil {
+			out = append(out, c)
+		}
+	}
+	return out
+}

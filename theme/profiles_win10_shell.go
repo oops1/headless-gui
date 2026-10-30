@@ -229,6 +229,8 @@ func declareWin10StartMenu(p *Profile) {
 		SetMetric("tile.group.header", 32).
 		SetMetric("tile.group.header.gap", 5).
 		SetMetric("tile.group.gap", 4).
+		// Вид перехода живой плитки (AnimTileCycle): 0 — сдвиг.
+		SetMetric(KeyTileCycleKind, 0).
 		// Тонкая полоса прокрутки списков меню.
 		SetMetric("scrollbar.thin.width", 4).
 		SetMetric("scrollbar.thin.hover.width", 8).

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -23,6 +24,7 @@ func makeSplit(orient widget.Orientation, r image.Rectangle) (*widget.SplitPanel
 // ─── Раскладка по доле ──────────────────────────────────────────────────────
 
 func TestSplitPanel_LayoutByFraction(t *testing.T) {
+	testreset.Globals(t)
 	// Horizontal: панели слева/справа, вертикальная полоса.
 	sp, a, b := makeSplit(widget.OrientationHorizontal, image.Rect(0, 0, 200, 100))
 	sp.SetPosition(0.5)
@@ -49,6 +51,7 @@ func TestSplitPanel_LayoutByFraction(t *testing.T) {
 // ─── Перетаскивание мышью через движок ──────────────────────────────────────
 
 func TestSplitPanel_DragMovesBoundary(t *testing.T) {
+	testreset.Globals(t)
 	sp, a, b := makeSplit(widget.OrientationHorizontal, image.Rect(0, 0, 200, 100))
 	sp.SetPosition(0.5)
 
@@ -76,6 +79,7 @@ func TestSplitPanel_DragMovesBoundary(t *testing.T) {
 // ─── Клэмп минимальных размеров ─────────────────────────────────────────────
 
 func TestSplitPanel_MinClampOnDrag(t *testing.T) {
+	testreset.Globals(t)
 	sp, a, _ := makeSplit(widget.OrientationHorizontal, image.Rect(0, 0, 200, 100))
 	sp.MinFirst = 50
 	sp.MinSecond = 50
@@ -105,6 +109,7 @@ func TestSplitPanel_MinClampOnDrag(t *testing.T) {
 // ─── Двойной клик: коллапс / восстановление (уровень виджета) ────────────────
 
 func TestSplitPanel_DoubleClickCollapseRestore(t *testing.T) {
+	testreset.Globals(t)
 	sp, a, b := makeSplit(widget.OrientationHorizontal, image.Rect(0, 0, 200, 100))
 	sp.SetPosition(0.5)
 	wantFirst := a.Bounds().Dx() // 97
@@ -148,6 +153,7 @@ func TestSplitPanel_DoubleClickCollapseRestore(t *testing.T) {
 // TestSplitPanel_DoubleClickViaEngine проверяет коллапс сквозь диспетчер
 // движка (WantsCapture → capture → OnMouseButton) end-to-end.
 func TestSplitPanel_DoubleClickViaEngine(t *testing.T) {
+	testreset.Globals(t)
 	sp, a, _ := makeSplit(widget.OrientationHorizontal, image.Rect(0, 0, 200, 100))
 	sp.SetPosition(0.5)
 
@@ -178,6 +184,7 @@ func TestSplitPanel_DoubleClickViaEngine(t *testing.T) {
 // ─── Вложенный сплит (SplitPanel в SplitPanel) ──────────────────────────────
 
 func TestSplitPanel_Nested(t *testing.T) {
+	testreset.Globals(t)
 	outer := widget.NewSplitPanel(widget.OrientationHorizontal)
 	inner := widget.NewSplitPanel(widget.OrientationVertical)
 	inner.AddChild(widget.NewPanel(tcPanel)) // top
@@ -207,6 +214,7 @@ func TestSplitPanel_Nested(t *testing.T) {
 // ─── Ресайз контейнера сохраняет долю ───────────────────────────────────────
 
 func TestSplitPanel_ResizePreservesFraction(t *testing.T) {
+	testreset.Globals(t)
 	sp, a, _ := makeSplit(widget.OrientationHorizontal, image.Rect(0, 0, 200, 100))
 	sp.SetPosition(0.25)
 
@@ -232,6 +240,7 @@ func TestSplitPanel_ResizePreservesFraction(t *testing.T) {
 // взводит drag: раньше любой клик по SplitPanel включал dragging, и полоса
 // «прыгала» за мышью даже без зажатой кнопки.
 func TestSplitPanel_PressOutsideBarIgnored(t *testing.T) {
+	testreset.Globals(t)
 	sp, a, _ := makeSplit(widget.OrientationHorizontal, image.Rect(0, 0, 200, 100))
 	sp.SetPosition(0.5)
 
@@ -257,6 +266,7 @@ func TestSplitPanel_PressOutsideBarIgnored(t *testing.T) {
 // скрыта из Children). Движок обязан инжектнуть менеджер в момент захвата —
 // иначе после первого drag'а захват залипал и весь ввод шёл сплиттеру.
 func TestSplitPanel_CaptureReleasedInsideTab(t *testing.T) {
+	testreset.Globals(t)
 	sp, _, _ := makeSplit(widget.OrientationHorizontal, image.Rect(0, 0, 200, 80))
 	sp.SetPosition(0.5)
 
@@ -300,6 +310,7 @@ func TestSplitPanel_CaptureReleasedInsideTab(t *testing.T) {
 // растягиваться перекладкой Window.SetBounds: после смены темы (ApplyTheme →
 // SetBounds) закрытое меню размером во всё окно съедало весь ввод.
 func TestWindow_ThemeChangeWithAttachedMenuKeepsInput(t *testing.T) {
+	testreset.Globals(t)
 	widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
 	defer widget.ApplyGlobalTheme(widget.ThemeByName("Win10 Dark"))
 

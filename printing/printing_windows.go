@@ -2,7 +2,7 @@
 
 // printing_windows.go — печать на Windows: системный диалог PrintDlgEx
 // (comdlg32) и печать страниц-картинок через GDI (StartDoc, StretchDIBits,
-// EndPage, EndDoc). Всё без CGO: lazy-загрузка DLL, как в window/native_windows.go.
+// EndPage, EndDoc). Всё без CGO: lazy-загрузка DLL, как в platform/win32/native_windows.go.
 //
 // Раскладка страницы и полос — в rasterprint.go, разбор DEVNAMES/DEVMODE — в
 // winparse.go; здесь только вызовы системы.

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	"github.com/oops1/headless-gui/v3/widget/treeview"
 )
@@ -61,6 +62,7 @@ func rootNames(tw *widget.TreeViewWidget) []string {
 
 // Бросок в середину строки кладёт узел ВНУТРЬ неё.
 func TestTreeDrag_DropInsideMakesChild(t *testing.T) {
+	testreset.Globals(t)
 	eng, tw, items := dragScene(t)
 
 	drag(eng, rowCenter(1), rowCenter(0)) // repo-a внутрь группы
@@ -81,6 +83,7 @@ func TestTreeDrag_DropInsideMakesChild(t *testing.T) {
 
 // Бросок в верхнюю треть строки ставит узел ПЕРЕД ней.
 func TestTreeDrag_DropBeforeReorders(t *testing.T) {
+	testreset.Globals(t)
 	eng, tw, _ := dragScene(t)
 
 	drag(eng, rowCenter(2), rowTop(0)) // repo-b перед группой
@@ -93,6 +96,7 @@ func TestTreeDrag_DropBeforeReorders(t *testing.T) {
 // Узел нельзя положить внутрь собственного потомка: дерево перестало бы быть
 // деревом, а поддерево потерялось бы вместе с узлом.
 func TestTreeDrag_CannotDropIntoOwnChild(t *testing.T) {
+	testreset.Globals(t)
 	_, tw, items := dragScene(t)
 
 	parent, child := items[0], items[1]
@@ -114,6 +118,7 @@ func TestTreeDrag_CannotDropIntoOwnChild(t *testing.T) {
 
 // Дрожь руки — не перетаскивание: порог не пройден, узел просто выбран.
 func TestTreeDrag_TinyMoveIsAClick(t *testing.T) {
+	testreset.Globals(t)
 	eng, tw, items := dragScene(t)
 
 	y := rowCenter(1)
@@ -131,6 +136,7 @@ func TestTreeDrag_TinyMoveIsAClick(t *testing.T) {
 
 // Выключенное перетаскивание не меняет прежнего поведения.
 func TestTreeDrag_OffByDefault(t *testing.T) {
+	testreset.Globals(t)
 	eng, tw, _ := dragScene(t)
 	tw.Tree.CanUserDragNodes = false
 
@@ -144,6 +150,7 @@ func TestTreeDrag_OffByDefault(t *testing.T) {
 // Приложение вправе взять перенос на себя: возврат true означает «справился
 // сам», и дерево не переставляет узлы за его спиной.
 func TestTreeDrag_HandlerCanTakeOver(t *testing.T) {
+	testreset.Globals(t)
 	eng, tw, items := dragScene(t)
 
 	var gotDragged, gotTarget *treeview.TreeViewItem
@@ -165,6 +172,7 @@ func TestTreeDrag_HandlerCanTakeOver(t *testing.T) {
 
 // CanDropNode запрещает конкретный перенос.
 func TestTreeDrag_CanDropNodeVetoes(t *testing.T) {
+	testreset.Globals(t)
 	eng, tw, _ := dragScene(t)
 	tw.Tree.CanDropNode = func(*treeview.TreeViewItem, *treeview.TreeViewItem, treeview.DropPosition) bool {
 		return false
@@ -179,6 +187,7 @@ func TestTreeDrag_CanDropNodeVetoes(t *testing.T) {
 
 // Место вставки видно на экране, пока узел тащат.
 func TestTreeDrag_IndicatorIsDrawn(t *testing.T) {
+	testreset.Globals(t)
 	eng, _, _ := dragScene(t)
 
 	eng.Invalidate()

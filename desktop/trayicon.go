@@ -93,7 +93,7 @@ func (t *TrayIcon) SetImageSource(src func(size int) image.Image) {
 // SetSVG задаёт значок SVG-данными. При ошибке разбора прежний значок
 // сохраняется, ошибка возвращается.
 func (t *TrayIcon) SetSVG(data []byte) error {
-	doc, err := svg.Parse(data)
+	doc, err := svg.ParseWith(data, svg.ParseOptions{Text: widget.TextRasterizerFor(t)})
 	if err != nil {
 		return err
 	}

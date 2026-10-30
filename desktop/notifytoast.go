@@ -74,6 +74,7 @@ func NewNotificationToast(tm *theme.Manager, ns Notifications) *NotificationToas
 		culture:    func() DateCulture { return t.Culture },
 		now:        t.now,
 	})
+	t.view.owner = t
 	t.Content = t.draw
 	t.Size = t.size
 	t.Place = t.place

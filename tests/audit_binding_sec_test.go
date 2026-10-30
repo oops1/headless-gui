@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	dg "github.com/oops1/headless-gui/v3/widget/datagrid"
 )
@@ -92,6 +93,7 @@ type itemRow struct{ Name string }
 // ─── SEC-1 ─────────────────────────────────────────────────────────────────
 
 func TestXAMLBinding_DoesNotInvokeCommand(t *testing.T) {
+	testreset.Globals(t)
 	vm := &secretVM{}
 	const xaml = `<Canvas xmlns="clr">
 		<TextBlock Name="lbl" Text="{Binding Save}"/>
@@ -117,6 +119,7 @@ func TestXAMLBinding_DoesNotInvokeCommand(t *testing.T) {
 
 // Строгий режим отсекает и те команды, что по сигнатуре выглядят геттерами.
 func TestXAMLBinding_StrictModeBlocksGetterShapedCommand(t *testing.T) {
+	testreset.Globals(t)
 	const xaml = `<Canvas xmlns="clr">
 		<TextBlock Name="lbl" Text="{Binding Reload}"/>
 	</Canvas>`
@@ -157,6 +160,7 @@ func (v *showcaseVMShape) GetUsername() string  { return v.username }
 func (v *showcaseVMShape) SetUsername(s string) { v.username = s }
 
 func TestXAMLBinding_ShowcaseGetterPatternStillWorks(t *testing.T) {
+	testreset.Globals(t)
 	vm := &showcaseVMShape{username: "Аня"}
 	const xaml = `<Canvas xmlns="clr">
 		<TextBox Name="tb" Text="{Binding Username, Mode=TwoWay}"/>
@@ -182,6 +186,7 @@ func TestXAMLBinding_ShowcaseGetterPatternStillWorks(t *testing.T) {
 // ─── SEC-2 / SEC-3 ─────────────────────────────────────────────────────────
 
 func TestXAMLBinding_TwoWayUnexportedFieldIsSafe(t *testing.T) {
+	testreset.Globals(t)
 	vm := &secretVM{password: "s3cret"}
 	const xaml = `<Canvas xmlns="clr">
 		<TextBox Name="tb" Text="{Binding password, Mode=TwoWay}"/>
@@ -207,6 +212,7 @@ func TestXAMLBinding_TwoWayUnexportedFieldIsSafe(t *testing.T) {
 }
 
 func TestXAMLBinding_TwoWayTypeMismatchIsSafe(t *testing.T) {
+	testreset.Globals(t)
 	vm := &secretVM{Age: 33}
 	const xaml = `<Canvas xmlns="clr">
 		<TextBox Name="tb" Text="{Binding Age, Mode=TwoWay}"/>
@@ -225,6 +231,7 @@ func TestXAMLBinding_TwoWayTypeMismatchIsSafe(t *testing.T) {
 }
 
 func TestXAMLBinding_BadPathsDoNotPanic(t *testing.T) {
+	testreset.Globals(t)
 	vm := &secretVM{}
 	const xaml = `<Canvas xmlns="clr">
 		<TextBlock Name="a" Text="{Binding Inner.Missing.Deep}"/>
@@ -244,6 +251,7 @@ func TestXAMLBinding_BadPathsDoNotPanic(t *testing.T) {
 // ─── SEC-13 ────────────────────────────────────────────────────────────────
 
 func TestXAMLBinding_StringFormatDoesNotLeakInternals(t *testing.T) {
+	testreset.Globals(t)
 	vm := &secretVM{Age: 33, Inner: innerData{Name: "Аня", Token: "t0ken"}}
 	const xaml = `<Canvas xmlns="clr">
 		<TextBlock Name="dump" Text="{Binding Inner, StringFormat=%#v}"/>
@@ -282,6 +290,7 @@ func TestXAMLBinding_StringFormatDoesNotLeakInternals(t *testing.T) {
 // ─── SEC-11 ────────────────────────────────────────────────────────────────
 
 func TestBindingScope_DisposeUnsubscribesCollection(t *testing.T) {
+	testreset.Globals(t)
 	oc := dg.NewObservableCollectionFrom([]interface{}{
 		&itemRow{Name: "Аня"}, &itemRow{Name: "Боб"},
 	})
@@ -319,6 +328,7 @@ func TestBindingScope_DisposeUnsubscribesCollection(t *testing.T) {
 }
 
 func TestBindingScope_DisposeUnsubscribesLegacyNotifier(t *testing.T) {
+	testreset.Globals(t)
 	vm := &legacyVM{Value: 42}
 	const xaml = `<Canvas xmlns="clr">
 		<Slider Name="s" Value="{Binding Value}" Minimum="0" Maximum="100"/>
@@ -340,6 +350,7 @@ func TestBindingScope_DisposeUnsubscribesLegacyNotifier(t *testing.T) {
 }
 
 func TestBindingScope_SetDataContextUnsubscribesLegacy(t *testing.T) {
+	testreset.Globals(t)
 	a := &legacyVM{Value: 1}
 	b := &legacyVM{Value: 2}
 	const xaml = `<Canvas xmlns="clr">

@@ -6,11 +6,13 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // TestTextBox_SetCaretPosition_InsertAtCaret — issue #8.
 func TestTextBox_SetCaretPosition_InsertAtCaret(t *testing.T) {
+	testreset.Globals(t)
 	tb := widget.NewTextBox("")
 	tb.SetBounds(image.Rect(0, 0, 200, 30))
 	tb.SetText("абвгд")

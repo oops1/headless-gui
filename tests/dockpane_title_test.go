@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -40,6 +41,7 @@ func titleScene(t *testing.T) (*engine.Engine, *widget.DockManager, *widget.Dock
 
 // Активность панели видна снаружи.
 func TestDockPane_IsActiveIsExported(t *testing.T) {
+	testreset.Globals(t)
 	_, _, a, b := titleScene(t)
 
 	if !a.IsActive() && !b.IsActive() {
@@ -52,6 +54,7 @@ func TestDockPane_IsActiveIsExported(t *testing.T) {
 
 // Заголовок активной панели можно покрасить отдельно.
 func TestDockPane_TitleTextActive(t *testing.T) {
+	testreset.Globals(t)
 	eng, _, a, b := titleScene(t)
 
 	active := a
@@ -98,6 +101,7 @@ func TestDockPane_TitleTextActive(t *testing.T) {
 // О смене активной панели сообщают: без этого цвет, вычисленный из фона,
 // пересчитать не по чему.
 func TestDockPane_ActiveChangeIsReported(t *testing.T) {
+	testreset.Globals(t)
 	_, m, a, b := titleScene(t)
 
 	seen := map[string]int{}

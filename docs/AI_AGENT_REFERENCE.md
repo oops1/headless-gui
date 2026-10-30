@@ -65,8 +65,8 @@ README_RU.md, GUIDE.md / GUIDE_EN.md; roadmap: TODO.md.
 - **Translucent colors — the premultiplied trap:** Go's `color.RGBA` is
   alpha-premultiplied. A color with channels above alpha (e.g.
   `{0,120,215,90}`) overflows during Over blending and turns magenta on
-  light backgrounds. Build such colors via `premulAlpha(base, alpha)`
-  (widget/textbox.go). Also: `FillRoundRect` with A<255 takes a legacy
+  light backgrounds. Build such colors via `base.PremulAlpha(c, alpha)`
+  (widget/base/textutil.go; skip-marked, not in the facade). Also: `FillRoundRect` with A<255 takes a legacy
   Src path (does NOT blend) — use `FillRectAlpha` for real blending.
 - **Modal dialogs:** `engine.ShowModal` centers the dialog and shifts its
   children; Enter/Escape/Ctrl+C flow through
@@ -3065,7 +3065,7 @@ ww.OnNativeResize = func(edges int) bool { return true } // widget.NativeEdgeTop
 |---|---|---|---|
 | Модалка в своём окне (`ModalHost`) | нативно | нативно | in-canvas фолбэк |
 | Popup-оверлей в своём окне (`PopupSink`) | нативно | нативно | Wayland — `xdg_popup`, macOS — in-canvas |
-| Трей / balloon / превью | да | трей — StatusNotifierItem по D-Bus (`tray_sni_linux.go`, меню — dbusmenu), balloon — `org.freedesktop.Notifications`; превью нет | Wayland — трей и balloon как на X11 (`HideToTray` — no-op); macOS/headless — no-op (ошибка/false) |
+| Трей / balloon / превью | да | трей — StatusNotifierItem по D-Bus (`platform/tray/sni_linux.go`, меню — dbusmenu), balloon — `org.freedesktop.Notifications`; превью нет | Wayland — трей и balloon как на X11 (`HideToTray` — no-op); macOS/headless — no-op (ошибка/false) |
 | Перетащить / растянуть окно | `SetPosition` | `_NET_WM_MOVERESIZE` (`BeginMove`/`BeginResize`, с v3.26) | Wayland — просит компоновщик, macOS — нет |
 | Свернуть / развернуть | да | да | Wayland — да (`set_minimized`/`set_maximized`) |
 | Форма курсора | да | да (шрифт «cursor») | Wayland — да (`cursor_shape` или своя картинка) |
@@ -3134,7 +3134,7 @@ type OverlayBoundsProvider interface { OverlayBounds() image.Rectangle } // аб
 
 Публичный API на `*window.Window`. Можно вызывать до `Run()` (состояние
 буферизуется и применяется при создании окна) или из обработчиков UI. На Linux
-(X11 и Wayland) трей — StatusNotifierItem по D-Bus (`window/tray_sni_linux.go`:
+(X11 и Wayland) трей — StatusNotifierItem по D-Bus (`platform/tray/sni_linux.go`:
 нужен `StatusNotifierWatcher` на шине, в GNOME — расширение AppIndicator; меню
 рисует панель, одиночный клик вместо двойного), balloon —
 `org.freedesktop.Notifications` без иконки в трее; превью в панели задач — только
@@ -3188,7 +3188,11 @@ win.Run()
 если WM_PRINTCLIENT окажется недостаточно на конкретной системе.
 
 Идентификаторы сообщений: `InvokeOnUIThread` занимает `WM_APP` (0x8000);
-callback иконки трея — `WM_APP+1` (`wmTrayCallback`).
+callback иконки трея — `WM_APP+1` (`wmTrayCallback`, ловит возможность
+`platform/tray` через `win32.AddMessageHook`). Трей и уведомления — возможность
+`platform/tray`: в `window/minimal` их нет (`SetTrayIcon` после `Run` и
+`ShowBalloon` — `native.ErrTrayUnsupported`), а `HideToTray`/`RestoreFromTray`
+— операции окна — работают и там. Иконка снимается при закрытии окна.
 
 ---
 
@@ -3234,7 +3238,7 @@ type wheelPixelHandler interface {
 
 ### SplitPanel — контейнер двух панелей с разделителем
 
-`widget/splitpanel.go`. Держит ДВУХ детей (первые два `AddChild` → First/Second),
+`widget/base/splitpanel.go`. Держит ДВУХ детей (первые два `AddChild` → First/Second),
 раскладывает по обе стороны перетаскиваемой полосы. Позиция — доля `0..1`, так что
 ресайз сохраняет соотношение.
 
@@ -3287,7 +3291,7 @@ XAML (первые два дочерних элемента — панели):
 
 ### SVG-иконки — пакет `widget/svg` + виджет `SVGIcon`
 
-`widget/svgicon.go` рендерит темизируемую векторную иконку, растеризуя документ
+`widget/base/svgicon.go` рендерит темизируемую векторную иконку, растеризуя документ
 под размер bounds с сохранением пропорций (центрирование).
 
 ```go
@@ -3484,7 +3488,7 @@ API нет — работает само в общем текстовом пут
   **региональные флаги** (буквенные лигатуры) — известный пробел;
   **COLRv1-градиенты аппроксимируются средним** цветом (сплошная заливка).
 - **Headless/нативно:** одинаково (растеризация в буфер; окно не нужно,
-  см. `engine/emoji_test.go`).
+  см. `core/text/emoji_test.go`).
 - **Лицензии:** эмодзи-шрифт НЕ встроен в движок — глифы берутся из шрифта ОС
   во время работы (`systemFallbackFontPaths`: `seguiemj.ttf` на Windows и т.п.),
   как и прочие системные фолбэки. В строках — Unicode-кодпоинты, не артворк;
@@ -3504,7 +3508,7 @@ API нет — работает само в общем текстовом пут
 
 ### Docking (DockManager/DockPane)
 
-`widget/dockmanager.go` + `widget/dockpane.go`. A Visual Studio Toolbox-style
+`widget/dock/dockmanager.go` + `widget/dock/dockpane.go`. A Visual Studio Toolbox-style
 docking zone: a central document area (`Center`) surrounded by up to 4
 dockable sides (Left/Top/Bottom/Right), each holding a stack of `DockPane`
 panels. `DockManager` owns layout, resize-by-dragging-the-gutter, tabbed
@@ -3678,8 +3682,9 @@ meaningful when `state==2`).
 
 A root `<Window>` can declare its system-tray icon, tooltip and context menu
 right in XAML — no imperative `SetTrayIcon`/`SetTrayMenu` needed for the basic
-case. The tray itself works only on Windows (Shell_NotifyIcon); on other
-platforms the declaration parses fine and is simply a no-op at run time.
+case. The tray itself works on Windows (Shell_NotifyIcon) and Linux
+(StatusNotifierItem) through the `platform/tray` capability; on macOS and in
+`window/minimal` the declaration parses fine and is simply a no-op at run time.
 
 ```xml
 <Window Title="Моё приложение" Width="900" Height="600"
@@ -3711,7 +3716,7 @@ platforms the declaration parses fine and is simply a no-op at run time.
   `<MenuItem Text="…"/>` items and `<Separator/>` (or `<MenuItem Separator="True"/>`).
   It is stored in the `widget.Window.TrayMenu` **field**, not added to the widget
   tree (a `PopupMenu` as a direct `Window` child is unsafe — `Window.SetBounds`
-  skips `*PopupMenu`); `window.attachTrayMenu` inserts it into the tree correctly
+  skips `*PopupMenu`); `attachTrayMenu` (`window/core/tray.go`) inserts it into the tree correctly
   at `Run()`. Give it a `Name` so code can find it (registered in the XAML
   registry under that name).
 
@@ -3823,7 +3828,7 @@ Style keys in JSON are `"component.part:state"`; colors are `#RGB`, `#RRGGBB`,
 
 ### Bridge to the old presets
 
-`widget/theme_bridge.go` + `widget/theme_bindings.go`: one binding table walked
+`widget/base/theme_bridge.go` + `widget/base/theme_bindings.go`: one binding table walked
 in both directions, so they cannot drift.
 
 ```go
@@ -4169,8 +4174,9 @@ the default and byte-for-byte what shipped before.
 `SetSurface` hands the engine the consumer's own memory as the back buffer,
 removing two copies of the frame. `stride` may exceed `w*4` (DIB alignment).
 The **front** buffer stays internal — the diff needs a private copy of the
-previous frame to compare against. Buffer rotation (`SetSurfaces` with
-per-buffer damage age, the equivalent of `EGL_buffer_age`) is not implemented.
+previous frame to compare against. Buffer rotation (several consumer buffers
+with per-buffer damage, the equivalent of `EGL_buffer_age`) is `SetSurfaces`
+in v4.0 — see "scene and external surfaces" at the end of this reference.
 
 `DirtyTile.Data` follows the chosen format: with `FormatBGRX` those bytes are
 BGRX, which is what the caller asked for.
@@ -4450,7 +4456,7 @@ they do not exist for other themes, existing flat panels are untouched):
 Parts already drop the inherited border/shadow/elevation (`flat`). A presenter
 asks `GetStyle("startmenu", "row", state)` and never branches on a theme name.
 
-Tests: `theme/accent_test.go`, `desktop/accent_test.go`, `engine/noise_test.go`.
+Tests: `theme/accent_test.go`, `desktop/accent_test.go`, `core/raster/noise_test.go`.
 `TestGolden_Windows10Acrylic` writes dark and light bar PNGs when `GOLDEN_OUT`
 is set.
 
@@ -4471,7 +4477,7 @@ Painting is one function: `widget.PaintMaterial(ctx, rect, corner, spec) bool`
 `translatingContext`) and `widget.ShadowParamDrawer`. No `MicaDrawer`, or it
 returns false (no wallpaper) → solid `Fallback` (else `Tint`).
 
-*Mica = blurred WALLPAPER, not content.* `engine/mica.go`: wallpaper
+*Mica = blurred WALLPAPER, not content.* `core/raster/mica.go`: wallpaper
 (`Canvas.bgImage`, or `Engine.SetWallpaperSource(img)` which overrides it; nil
 clears) is box-averaged by 16, blurred (3 passes) once per (wallpaper, radius)
 and cached; a layer bilinearly stretches the small image into its rect
@@ -4537,7 +4543,7 @@ window) per monitor; the bar-per-monitor logic and the scale per monitor are the
 consumer's.
 
 Tests: `theme/materials_test.go`, `engine/mica_test.go`,
-`engine/window_shadow_test.go`, `widget/backdrop_material_test.go`,
+`engine/window_shadow_test.go`, `widget/base/backdrop_material_test.go`,
 `desktop/reducemotion_test.go`, `desktop/materials_visual_test.go`
 (`MAT_OUT=dir` writes Solid/Mica/MicaAlt/soft-shadow PNGs).
 
@@ -4673,12 +4679,12 @@ left); indeterminate progress; badge on the Start button; the clock plate is not
 
 ### Physical-size SVG, tray icons from the theme set, thin scrollbar — v3.31
 
-- `widget/physical.go`: `ContextScale(ctx)` (1 for contexts without `Scale()`),
+- `widget/base/physical.go`: `ContextScale(ctx)` (1 for contexts without `Scale()`),
   `PhysicalRect(ctx, r)` (edge-rounded like `Canvas.sRect`), `DrawSVG(ctx, doc,
   rect, current, tint)` rasterises at physical size and hands the engine an image
   of exactly the receiver's physical size. `Canvas.DrawImageScaled` blits an
   `*image.RGBA` of that size as is (no resample, no cache copy);
-  `engine/popupcontext.go` forwards `Scale()` so popups see the scale too.
+  `core/overlay/popupcontext.go` forwards `Scale()` so popups see the scale too.
   `SVGIcon.Draw` uses it when the scale is not 1 (scale 1 path unchanged).
 - `desktop/trayglyph.go`: network/volume/power ask `tm.GetIcon(key, physicalSide)`
   with keys from most specific to general (`tray.network.wifi.N`, `tray.volume.N`,
@@ -4713,7 +4719,7 @@ left); indeterminate progress; badge on the Start button; the clock plate is not
   physical side. Strings (`ShowDesktop`, `NotificationCenter`,
   `NoNewNotifications`, `NewNotificationsCount`) are `widget.Tr` keys registered
   for EN/RU in `traystrings.go`.
-- `widget/scrollbar_thin.go`: `ScrollbarThin` is an overlay (`reserve()==0`),
+- `widget/base/scrollbar_thin.go`: `ScrollbarThin` is an overlay (`reserve()==0`),
   hidden at rest (`alpha`), shown by `thinPoke()` on mouse move / any scroll,
   hidden by a single pause timer that re-arms itself for the remainder instead of
   being recreated per event. `animateQuiet` is `AnimateOwned` without the full
@@ -5818,7 +5824,7 @@ type ContentOffsetter interface {
 ```
 
 `ScrollView` implements it. Hit testing builds a path with a frame per step
-(`engine/frames.go`); presses, moves, wheel, file drops, cursor, tooltips, the
+(`core/input/frames.go`); presses, moves, wheel, file drops, cursor, tooltips, the
 mouse-capture owner and `ContextMenuAt` receive the point in their widget's
 frame; `Base` remembers its parent (set in `AddChild`, also by
 `TabControl.AddTab` and `DockManager`) and translates repaint areas up the
@@ -5894,7 +5900,7 @@ their own canvas, so the page is exact; measurement OUTSIDE `Draw` by widgets
 of an offscreen engine is answered by the process's measurer (the window), so a
 font known only to the job falls back to the default there.
 
-The named-font registry of a canvas is now under a lock (`engine/fonttable.go`)
+The named-font registry of a canvas is now under a lock (`core/text/fonttable.go`)
 and `fontRev` is atomic: `RegisterFont` from the application's goroutine while
 another goroutine measures or draws is no longer a data race (it was, under
 `-race`, in Notepad's PDF export).
@@ -6096,7 +6102,7 @@ files.
 The gnome format is read first when offered — it is the only one carrying
 `cut`, with the same URIs. URIs are percent-encoded like `g_filename_to_uri`.
 Pure helpers: `window/clipboard_files.go` (uri-list, gnome format),
-`widget/clipboard_files.go` (DROPFILES, DropEffect). macOS has no provider —
+`widget/base/clipboard_files.go` (DROPFILES, DropEffect). macOS has no provider —
 the text fallback applies. Verified on Windows in both directions against
 Windows PowerShell `Get-Clipboard -Format FileDropList` / `Set-Clipboard
 -Path`; Wayland and X11 on the wire (fake compositor and X server).
@@ -6559,7 +6565,7 @@ looked like an ordinary first one.
 
 `MouseEvent.Clicks` now carries the number of the press in the series: 1, 2, 3
 and on. The engine counts it once for the whole tree (`countClick` in
-`engine/events.go`); a series is broken by another button, a cursor farther than
+`core/input/events.go`); a series is broken by another button, a cursor farther than
 four points, or a pause longer than the interval. A release carries the number
 of its own press, so a release handler sees the same series as the press.
 
@@ -6571,7 +6577,7 @@ system-wide value in the protocol itself — it lives in desktop settings
 
 `Clicks == 0` means the event did not come from the engine (a direct
 `OnMouseButton` call from a test or an application with its own dispatch): the
-widget then counts the series itself through `clicksOf` (`widget/clicks.go`),
+widget then counts the series itself through `ClicksOf` (`widget/base/clicks.go`, skip-marked),
 exactly as before. First use: a triple click selects the line in `TextBox` and
 the whole field in `TextInput`.
 
@@ -6906,7 +6912,7 @@ with paragraphs joined by `\n`. A vertical scrollbar appears when the content
 is taller than the widget; wheel/PgUp/PgDn/Home/End scroll. Mouse: drag, double
 click = word, triple click = paragraph; Ctrl+C/Ctrl+A. Hand cursor over links
 (`CursorProvider`). Role `RoleDocument`. Layout is pure
-(`widget/richtext_layout.go`, testable with a fake measurer). Not done:
+(`widget/richtext/richtext_layout.go`, testable with a fake measurer). Not done:
 bullets/tables/images, per-run baseline shift, virtualization of very
 long documents (layout is recomputed whole when width or content changes).
 
@@ -7050,7 +7056,7 @@ window now has an 18 px bar, 16×14 buttons, frame 5, content starts at
 `frame + 18`. The locale badge (`ShowLocaleIndicator`) is one pixel taller on bars
 under 20 px (`bar-3`, was `bar-4`) so its text no longer touches the bottom border.
 
-**Window icon and system menu** (`widget/window_icon.go`).
+**Window icon and system menu** (`widget/chrome/window_icon.go`).
 
 ```go
 win.SetIcon(img)                 // image.Image, scaled to the metric size; nil removes
@@ -7082,7 +7088,7 @@ a host that can move a window by the OS (Wayland) — elsewhere they stay grey a
 the window is dragged by its caption. The default list is rebuilt on every open;
 a list you set is yours (its `Disabled` flags are not recomputed).
 
-**Who owns a press on the title bar** (the unobvious part, `widget/titlebar_hit.go`).
+**Who owns a press on the title bar** (the unobvious part, `widget/chrome/titlebar_hit.go`).
 `Window.WantsCapture` answers true to every left press in the bar — the window
 drags itself by it — and the engine looks for a capturer from the DEEPEST child up
 to the root. A child lying over the bar therefore gets the press only if its own
@@ -7254,13 +7260,13 @@ of 60. `n <= 0` removes the cap.
 - The statement that `KeyEvent.Repeat` marks a repeat "on every platform" was false for X11
   (the field was always false there); it is true since this version.
 
-Tests: `engine/imageround_test.go` (round clip: every drawing path, scales 1 and 2,
+Tests: `core/raster/imageround_test.go` (round clip: every drawing path, scales 1 and 2,
 RGBA and BGRX, opaque and translucent, partial overlap, unchanged frame without rounding),
 `engine/imagecache_engine_test.go` (finalizer-based retention test, forged key, engine
 invalidation of main and popup canvases, journal overflow, concurrency, popup wrapper),
-`engine/imagerect_test.go` (full-scale reference for 3 filters × 6 source types × 6
+`core/raster/imagerect_test.go` (full-scale reference for 3 filters × 6 source types × 6
 geometries, ×1000 destination, work proportional to the clip, `sr` clamp, round clip and
-BGRX, agreement with `DrawImageScaled` at scales 1, 1.5, 2), `widget/imagerect_test.go`
+BGRX, agreement with `DrawImageScaled` at scales 1, 1.5, 2), `widget/base/imagerect_test.go`
 (fallback, `ClampImageRect`, ScrollView wrapper), `engine/maxfps_test.go`,
 `window/maxfps_test.go`, `window/x11_keyrepeat_linux_test.go`.
 
@@ -7525,7 +7531,7 @@ images (copy in, copy out; text/HTML/files and the image displace each other).
   dropped after 30 s. Receiving collects chunks on `PropertyNotify`. Text
   paste from an `INCR` owner works too now (it used to return the 4-byte size).
 - Pure helpers: `internal/dib` (DIB/BMP), `internal/clipimage` (type choice,
-  PNG, clone), `window/clipboard_image.go` (lazy PNG), `widget/clipboard_image.go`.
+  PNG, clone), `window/clipboard_image.go` (lazy PNG), `widget/base/clipboard_image.go`.
 - WinLine note: `cliprdr` carries only text and files, so an image does not reach
   the RDP client until WinLine adds `CF_DIB` there; `image/png` works for ordinary desktops.
 - Limitations: no `image/bmp` is offered (only read); macOS has no provider.
@@ -7749,7 +7755,9 @@ source allows; the target chooses one.
 - Return `true`: the drag was started (it is carried by the OS asynchronously or in a
   modal OS loop). `false`: it cannot be started — no button held / no press serial,
   the backend cannot (macOS; Wayland compositor older than `wl_data_device_manager`
-  v3), empty list or mask, another drag is running. Relative paths are made absolute.
+  v3), drag and drop is not wired (`window/minimal`: no `platform/dnd`, the window is
+  not a drop target either), empty list or mask, another drag is running. Relative
+  paths are made absolute.
 - The end is reported once to `SetOnDragFinished(effect)`: the action chosen by the
   target (`DragEffectCopy|Move|Link`), `0` — cancelled or refused (Esc, drop on
   nothing, target refused, the pointer grab failed, X11 target silent for 10 s).
@@ -7895,7 +7903,7 @@ Touch is a separate kind of input, not "a mouse with a finger": there are severa
 fingers, each with its own history. Everything below is **additive**; an app that
 knows nothing about touch behaves exactly as before.
 
-### Widget API (`widget/touch.go`, `widget/gesture.go`)
+### Widget API (`widget/base/touch.go`, `widget/base/gesture.go`)
 
 ```go
 type TouchPhase int // TouchBegan, TouchMoved, TouchEnded, TouchCancelled
@@ -7997,7 +8005,7 @@ v.OnGesture = func(g widget.Gesture) { switch g := g.(type) { case widget.Pinch:
 ⇒ no swipe), `SwipeAxisRatio` 1.5 (≈34° from the axis). Pure logic, no platform.
 Events without `Time` cannot give tap duration or swipe speed.
 
-Tests: `widget/gesture_test.go` (synthetic sequences), `engine/touch_test.go` (capture by
+Tests: `widget/base/gesture_test.go` (synthetic sequences), `engine/touch_test.go` (capture by
 ID, two fingers, bubbling, overlay, modal, HiDPI + scroll frame, pinch through the engine),
 `window/touch_test.go` (opt-in, mouse emulation, long press ⇒ right button with an injected clock), `window/touch_windows_test.go`
 (struct layout, phases, pressure/contact by `TouchMask`, live `InjectTouchInput` with `HEADLESS_GUI_TOUCH_E2E=1` — checks pressure 32/1024 and a 4×4 contact arrive),
@@ -8187,7 +8195,7 @@ alpha, the translucent shadow included — both as the input region and as
   region from `OpaqueBands` as before (a click on the shadow still belongs to
   the menu).
 
-Tests: `engine/solidbands_test.go`, `window/wayland_popup_opaque_linux_test.go`
+Tests: `core/raster/solidbands_test.go`, `window/wayland_popup_opaque_linux_test.go`
 (on the wire: a shadow pixel is in the input region but not in the opaque one,
 the menu bodies are opaque, the gap between levels is in neither).
 
@@ -8349,7 +8357,8 @@ frame is fitted at once as on a resize).
 
 Applied once, in `bringUp` before `Create` (`initialPlaceBackend`, an optional
 backend interface like `fullscreenBackend`); after `Run` the setters change
-nothing, and `Native().SetPosition/SetSize` work as before. Together with
+nothing; a running window is moved by `Window.SetPosition` (v4.0, `Position`
+reports it) and resized by `Window.SetSize`. Together with
 `SetFullscreen` before `Run`: the window is created with the bounds, goes
 full screen after `Create`, and leaving it returns exactly the initial bounds
 and the "maximized" state. After a maximized start `IsMaximized` is `true`,
@@ -8450,10 +8459,10 @@ blending and looked dirty on light titles); the hovered close button is red
 same glyph colour. The golden `window_win11_light.png` was updated on purpose:
 only the caption glyphs changed (grey → black active, dark grey inactive).
 
-Tests: `desktop/trayglyph_pady_test.go`, `widget/themeicons_fs_test.go`,
-`widget/popupmenu_profile_test.go`, `desktop/menu_profile_v338_test.go`,
-`tests/popupmenu_builtin_profiles_test.go`, `widget/popupmenu_delay_test.go`,
-`desktop/trayvolume_nodevice_test.go`, `widget/window_captioncolors_test.go`,
+Tests: `desktop/trayglyph_pady_test.go`, `widget/base/themeicons_fs_test.go`,
+`widget/base/popupmenu_profile_test.go`, `desktop/menu_profile_v338_test.go`,
+`tests/popupmenu_builtin_profiles_test.go`, `widget/base/popupmenu_delay_test.go`,
+`desktop/trayvolume_nodevice_test.go`, `widget/chrome/window_captioncolors_test.go`,
 `tests/window_captionglyph_test.go`.
 
 ---
@@ -8503,7 +8512,7 @@ widget.DrawImageRect(ctx, img, sr, dr, f)    // 1:1 (sr size == dr size in physi
 
 Tests: `engine/blit_opaque_test.go` (byte-equal to `Over` for RGBA/NRGBA/YCbCr/Gray/
 sub-image, both pixel formats, clip, round clip, small and parallel sizes; the `Src`
-semantics are proven by a translucent source declared opaque), `widget/opaqueimage_test.go`.
+semantics are proven by a translucent source declared opaque), `widget/base/opaqueimage_test.go`.
 
 ### Recycled frame buffers: `Engine.SetFrameRecycling`, `Frame.Release` (E15)
 
@@ -8604,7 +8613,8 @@ type AccessActionHandler interface {
   goroutine (`callOnLoop`) and refuses a hidden/disabled owner. Before
   `AccessInvoke/Focus/Select` it moves input focus to the owner if the owner is
   `Focusable` and not an `OverlayDrawer` (a menu would be closed by it).
-- `Window.accessibilityNodeAction(node, kind)` is the single entry the bridges
+- `accessibilityNodeAction(host, node, kind)` in `platform/a11y/a11y.go`
+  (`host` is the window's `native.AccessHost`) is the single entry the bridges
   use. A node with an `ActionID` whose owner implements the interface gets the
   action from it, and the owner's answer is final (no fallback click). Anything
   else behaves as before: Focus → focus the widget; Invoke/Select/Toggle →
@@ -8713,11 +8723,13 @@ accent colour, which on an accent button (OK) was the colour of its fill.
 - Scroll windows clip by the container's bounds, scroll bars included.
 - A radio button group is not published (no UIA `SelectionContainer`).
 
-Tests: `widget/accessibility_nodes_test.go`, `widget/focusring_test.go`,
+Tests: `widget/base/accessibility_nodes_test.go`, `widget/base/focusring_test.go`,
 `engine/accessibility_action_test.go`, `engine/focusring_test.go`,
-`window/a11y_node_test.go` (all platforms), `window/a11y_nodes_windows_test.go`
-(UIA through the vtables), `window/a11y_nodes_linux_test.go`,
-`window/a11y_nodes_live_linux_test.go` (AT-SPI, the second on the real bus).
+`platform/a11y/a11y_node_test.go` (all platforms),
+`platform/a11y/a11y_nodes_windows_test.go` (UIA through the vtables),
+`platform/a11y/a11y_nodes_linux_test.go`,
+`platform/a11y/a11y_nodes_live_linux_test.go` (AT-SPI, the second on the real
+bus).
 
 ## v3.38.1: Windows 10 — a large window no longer stays blank
 
@@ -8876,7 +8888,7 @@ areas outside; empty / nil / zero-size buffer; buffer smaller and larger than th
 `Swap`; scale 2 and 1.25; foreign damage over the surface; `OpaqueRegion`; `Src` vs
 `Over`; a writer goroutine plus engine frames and a `Swap` goroutine under `-race`;
 `Canvas.BlitPixels` with clip, scale 2, `BGRX`; popup and scroll contexts),
-`widget/pixelblit_test.go` (the fallback of `widget.BlitPixels`), benchmarks in
+`widget/base/pixelblit_test.go` (the fallback of `widget.BlitPixels`), benchmarks in
 `engine/externalsurface_bench_test.go`.
 
 ---
@@ -9188,14 +9200,15 @@ are separate things.
   from a `.app`.
 
 Pure functions `normalizeLanguageTag` and `systemLanguagesFromEnv` are covered
-by `window/syslang_test.go` on every platform.
+by `platform/shell/syslang_test.go` on every platform.
 
 ### System appearance: theme and accent colour (E12)
 
 `SetOnSystemThemeChanged` and `DetectSystemTheme` already existed (Windows:
 `WM_SETTINGCHANGE` "ImmersiveColorSet" re-reading `AppsUseLightTheme`; Linux, X11
 and Wayland alike: the `SettingChanged` signal of the Settings portal; macOS:
-`SystemThemeUnknown`, no watching — see `window/systheme_darwin.go`). v3.39 adds
+`SystemThemeUnknown`, no watching — not implemented yet, `platform/shell` registers no
+theme there, see `platform/shell/register_darwin.go`; the same holds in `window/minimal`). v3.39 adds
 the accent colour:
 
 ```go
@@ -9539,12 +9552,12 @@ Cost: a glyph mask is built once and cached; a cache miss costs about 1.5 us
 with hinting (0.8 us before), 2 us with LCD; drawing a line with the contrast
 table is about 8 % slower, LCD about 2x (scalar blend, no SIMD).
 
-Tests: `engine/textquality_test.go` (client acceptance numbers, rows of lowercase
+Tests: `core/raster/textquality_test.go` (client acceptance numbers, rows of lowercase
 letters across sizes and across a line, measurement independence, off-mode
 byte equality, mask hashes pinned for windows/linux),
-`engine/textquality_paths_test.go` (contrast tables, engine API and inheritance,
+`core/raster/textquality_paths_test.go` (contrast tables, engine API and inheritance,
 named fonts, shaper path, rotated text, HiDPI, LCD order and BGRX buffer, clip),
-`engine/textquality_bench_test.go` (glyph rasterization and line drawing).
+`core/raster/textquality_bench_test.go` (glyph rasterization and line drawing).
 
 ---
 
@@ -9650,9 +9663,9 @@ widget.ClipboardSetVirtualFiles(files, remoteOpen, // remoteOpen: for Windows
     widget.WithRelease(func() { os.RemoveAll(dir) }))
 ```
 
-Tests: `widget/clipboard_virtual_test.go` (names, `FILEGROUPDESCRIPTORW` byte by
+Tests: `widget/base/clipboard_virtual_test.go` (names, `FILEGROUPDESCRIPTORW` byte by
 byte, `FILETIME`, the in-memory provider),
-`widget/clipboard_virtual_windows_test.go` (vtable layout, `QueryInterface`/
+`platform/clipboard/clipboard_virtual_windows_test.go` (vtable layout, `QueryInterface`/
 `AddRef`/`Release`, `GetData`/`QueryGetData`, the enumerator, `IStream` read in
 parts / `Seek` / `Stat` / `CopyTo`; **live clipboard** — `OleGetClipboard` from
 another thread as Explorer does, `open` is called only on the first read;
@@ -9868,7 +9881,11 @@ are brought anyway.
   other keys are brought. The request has no reply, so its error is checked separately
   (`x11SyncCheck`: GetInputFocus) and then the state is read back, so `true` means "the
   server now shows what was asked".
-- **Wayland, macOS.** `false` (a Wayland client may not change the keyboard state).
+- **Wayland** (since v3.44.1 — see the section below). Through
+  `zwp_virtual_keyboard_manager_v1` when the compositor advertises it; without it, or
+  without keyboard focus, `false` and no requests. (v3.44.0 answered `false` always: a
+  Wayland client may not change the keyboard state through the core protocol.)
+- **macOS.** `false`.
 
 ### Compatibility
 
@@ -9900,9 +9917,608 @@ Not verified live: Mutter, KWin and the WinLine compositor (only Weston in WSLg 
 protocol-level fakes); an X server other than XWayland (a native Xorg, Xvfb with
 non-standard indicator names); a Japanese keyboard for Kana Lock; macOS.
 
+## v3.44.1: `SetLockKeys` on Wayland — a virtual keyboard (RDP client Tandem 1.7.1)
+
+A fix of an existing method, no new public API. v3.44.0 answered `false` on Wayland
+(the core protocol lets a client read the toggle state but not change it), so a Caps Lock
+turned on by the server (Set Keyboard Indicators) never lit the user's lamp. Now
+`Window.SetLockKeys` uses `zwp_virtual_keyboard_manager_v1` (virtual-keyboard-unstable-v1)
+when the compositor advertises it (`window/wayland_lockkeys_set_linux.go`).
+
+- **The global** is bound lazily (version 1), like the other optional ones
+  (`gVirtualKeyboard`, an `atomic.Uint32` because a registry event may come later on the
+  event loop while `SetLockKeys` reads it elsewhere). No manager — `false`, no requests.
+- **Preconditions** (else `false` and **not one request**): the manager is advertised,
+  the window has a seat, the keyboard state is known (`wl_keyboard.modifiers` came for the
+  current focus: no focus, after `leave`, before the first `modifiers` — unknown) and the
+  compositor's keymap was received (`wl_keyboard.keymap`, xkb_v1). The keymap is needed
+  before any `modifiers` — otherwise the compositor raises `no_keymap`, a fatal error.
+- **The request**, once per window and then reused: `create_virtual_keyboard(seat, id)`;
+  `keymap(xkb_v1, fd, size)` — **the compositor's own keymap**, the copy saved while parsing
+  `wl_keyboard.keymap` (cut at the first NUL and NUL-terminated, since compositors parse
+  the file as a C string), through a new `memfd`, size with the trailing NUL; then
+  `modifiers(depressed, latched, locked', group)`: depressed, latched and group are those
+  of the last `wl_keyboard.modifiers` (they travel untouched), `locked'` is the last
+  `mods_locked` with the toggle bits set or cleared — Caps (index Lock), Num Lock (index
+  from `modifier_map`), Scroll Lock only if the keymap bound it to a modifier. Other
+  locked bits are left alone. The keymap is sent again only if the compositor sent a
+  *different* one. **No `key` request is ever sent**: Caps is "pressed" by a bit, not by a
+  key, so the compositor sends the windows no `wl_keyboard.key` and the application sees
+  no KeyDown/KeyUp (no loop "server asked for Caps -> client pressed Caps -> sent to the
+  server"). `Close` sends `destroy` of the virtual keyboard.
+- **Kana Lock** is never touched (it is not in `mods_locked`): if asked, the answer is
+  `false`, the rest is applied. The same for Scroll Lock when the keymap has no modifier
+  for it (as on X11). Nothing differs from what was asked (the bits are already such) —
+  `true`, no requests (and no virtual keyboard is created).
+- **The answer.** `true` — a `wl_keyboard.modifiers` arrived whose `mods_locked`, on the
+  affected bits, is what was asked, no later than 300 ms (`lkVirtTimeout`) after the
+  request. A `modifiers` that left the toggle bits as they were (the user pressed Shift)
+  does not end the wait. Focus lost (`leave`) or the window closed during the wait —
+  `false` at once. Otherwise `false` after 300 ms: a compositor that applies the virtual
+  keyboard's `modifiers` only to its own events leaves the seat unchanged, and "false" is
+  the honest answer (a compositor-side matter, outside the engine).
+- **Waiting and goroutines.** The confirmation arrives on the Wayland event loop, so the
+  call cannot wait there. The state is under `lk.mu`; a waiter takes a channel that
+  `lkNoteModifiers` / `lkNoteLeave` / `Close` close (a broadcast, `wlLockState.changed`),
+  re-checks the condition under the lock, and waits on that channel and a 300 ms timer.
+  Whole calls are serialized by `vk.callMu` (two callers must not confuse "the next
+  `modifiers`"); `Close` takes only `vk.mu` and does not wait for a caller. Requests go
+  through `send` (under `w.mu`), as everywhere in the package: the socket is written
+  from any goroutine, a message at a time. **A call from the event loop** (e.g. from a
+  `SetOnKeyDown` handler, which runs on it) is detected — `RunEventLoop` remembers its
+  goroutine id (`internal/goid`, as the engine does) — and then the request is sent but
+  nothing is awaited and the answer is `false`; that cannot deadlock (a wait there would
+  only burn the 300 ms). The normal caller is an application/RDP goroutine.
+- **Protocol errors — a risk, not removable.** An error on the virtual keyboard objects
+  (`unauthorized` at `create_virtual_keyboard`, `no_keymap`, a bad keymap) is sent by the
+  compositor as `wl_display.error` and **the connection is terminated**. The engine
+  handles `wl_display.error` as fatal: it prints the message and marks the window closed
+  (`handleEvent`), so the event loop ends and the window dies — there is no "survive and
+  retry". Therefore: `no_keymap` is excluded by the order of requests (keymap is never
+  skipped, the virtual keyboard is not used without it); nothing is created at all unless
+  the compositor itself advertised the manager. What the client cannot know in advance is
+  whether *this* client is authorized: the protocol lets a compositor answer
+  `create_virtual_keyboard` with `unauthorized` (a compositor that restricts the
+  interface normally just does not advertise the global to such clients, but nothing
+  obliges it to). The protocol offers no safe probe, so on a compositor that advertises
+  the manager yet refuses the client, the first `SetLockKeys` that has something to
+  change would close the window. The compositor owner decides: advertise the global only
+  to clients that may use it.
+- **Compatibility.** Only a behaviour of an existing method changes (`false` ->
+  `true`/`false` as above, only where the compositor offers the global). New
+  unexported identifiers only. The frame tests did not change.
+
+Tests (`window/wayland_lockkeys_set_linux_test.go`, a fake compositor over a socket
+pair, `lkvk*` helpers): the exact bytes of bind / `create_virtual_keyboard` / `keymap`
+(the fd content equals the compositor's keymap + NUL, size with the NUL) /
+`modifiers` and their order, no `key`, the application gets no keys, `true` after the
+compositor's `modifiers` and `LockKeys()` shows it, `false` after 300 ms of silence,
+a foreign `modifiers` does not end the wait, a second call reuses the keyboard (no new
+`keymap`, fresh depressed/latched/group), clearing the extra toggles with other bits kept,
+"already as asked" sends nothing, refusals send nothing (no manager, `leave`, no state,
+no keymap, no seat), Kana and a Scroll Lock without a modifier, masks from the keymap
+(Num Lock on Mod3, Scroll Lock on Mod5), the keymap is re-sent only when it changed,
+NUL-termination, `Close` -> `destroy` (and nothing without a keyboard), `Close` and
+`leave` wake a waiter, a call from the event loop (a direct one and from a key handler of
+a real `RunEventLoop`) does not wait, a race test (`-race`), the registry global.
+
+Mutations: 40 one-line breakages of the implementation (the order and content of the
+requests, each of depressed / latched / group / locked, the NUL, the waits and their
+wake-ups, the event-loop check, `Close`, every refusal, the masks) — all caught.
+
+Live: Weston in WSLg **does not advertise** `zwp_virtual_keyboard_manager_v1`
+(`TestWaylandLockKeysE2E` logs that and checks `false` without requests), so the real
+exchange with a compositor was **not** run. Verified on the wire against a fake only.
+Not verified: wlroots-based compositors, the WinLine compositor, and whether a given
+compositor applies a virtual keyboard's `modifiers` to the whole seat.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): engine statistics and the draw contract check
+
+Stage 0 of the 4.0 plan. Additive only: nothing existing changed behaviour. The
+numbers this work is measured against are in `docs/BENCHMARKS.md`.
+
+```go
+s := eng.Stats()             // engine.Stats; safe from any goroutine, takes no locks
+s.Frames, s.FramesSkipped, s.FramesLost
+s.Tiles, s.Moves
+s.DrawNanos, s.DiffNanos, s.DeliverNanos
+s.Posted, s.PostedRun, s.PostQueue
+
+eng.SetDrawContractCheck(true) // debugging only: slows frames down
+eng.DrawContractCheck()        // bool
+```
+
+- **Counters** only grow from the engine's creation. A rate is the difference of
+  two snapshots. `FramesSkipped` counts loop ticks that produced no frame because
+  nothing changed; wake-ups by `Post` are not counted. `FramesLost` counts frames
+  dropped from the `Frames()` channel because the consumer was slow; a `FrameSink`
+  never loses a frame. `PostQueue = Posted − PostedRun`.
+- **Times** come from `time.Now`. On Windows the clock steps by about half a
+  millisecond, so a single frame can read as zero; sums over many frames are right
+  on average.
+- **Draw contract check.** While it is on, a widget that calls `Invalidate`,
+  `InvalidateRect`, `SetBounds`, `AddChild` or `RemoveChild` from inside `Draw` (on
+  the render goroutine) produces one log line per widget for the engine's lifetime,
+  with the widget type and its path from the root:
+  `engine: контракт Draw нарушен: Invalidate из Draw у *x.Y (Panel > Taskbar > Y)`.
+  Notifications from other goroutines are not violations. Starting an animation
+  from `Draw` is not one either: rule 2 of the contract (GUIDE, «Контракт
+  отрисовки») forbids a frame counter inside `Draw`, not `widget.Animate` called
+  lazily on first appearance or in response to the change that caused this `Draw`.
+- **Stop** turns the check off: the trace is shared by the whole process.
+- **Container authors.** A container that walks its children with its own loop,
+  instead of `DrawChildren`, should call `widget.DrawTraced(child, ctx)` instead of
+  `child.Draw(ctx)`, and `widget.DrawOverlayTraced` for overlays. Without it the
+  path in the message stops at the container. `DrawChildren` does this already.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): failure policy
+
+Decision record: `docs/adr/0001-failure-policy.md`. A panic in widget or consumer code no
+longer kills the process by default; the engine catches it at its own boundary.
+
+```go
+eng.SetFailurePolicy(engine.FailureIsolate)   // default outside go test
+eng.SetFailurePolicy(engine.FailurePropagate) // old behaviour: the panic goes on
+eng.FailurePolicy()                           // current policy
+eng.SetOnPanic(func(info engine.PanicInfo) {} ) // every caught panic
+eng.Stats().Panics                            // count of caught panics
+
+widget.MarkBroken(w) / widget.ClearBroken(w) / widget.IsBroken(w)
+widget.BrokenWidgets() []widget.Widget
+widget.ClearAllBroken()                       // tests only
+```
+
+- **Boundaries.** Frame drawing (`Draw`, overlays, modals, popup windows), the `Post`
+  queue (each function separately), timers (`After`, `Every`), animation ticks, input
+  handlers (`SendKeyEvent`, `SendMouseMove`, `SendMouseButton`, `SendMouseWheelPixels`,
+  `SendMouseWheelRaw`, `SendTouch`, `SendFilesDropped`, `SendPointerLeave`,
+  `ActivateAccessible`, `AccessAction`) and `FrameSink.Present`.
+- **Input panics** release mouse capture, forget the press consumer and cancel touches;
+  focus is not changed.
+- **Draw panics.** With the contract check off, the first panic turns the trace of drawing
+  widgets on and asks for a full frame; the second names the widget, marks it broken and
+  turns the trace off. With `SetDrawContractCheck(true)` the culprit is named at once. A
+  broken widget is replaced by a grey rectangle with a red border and a diagonal cross;
+  its overlays are not drawn.
+- **PanicInfo** fields: `Where` (boundary name), `Widget`, `Path`, `Value`, `Stack`.
+  Without `SetOnPanic` the engine logs once per boundary and widget; later panics there
+  only count in `Stats().Panics`.
+- **Under `go test`** the default is `FailurePropagate` (`testing.Testing()`).
+- **Not covered.** A hung widget is not interrupted; a modal whose `Draw` failed is not
+  closed by the engine; state changed before the panic is not rolled back; the OS event
+  pump in `window` is not protected until stage 9.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): scene and external surfaces
+
+Decision record: `docs/adr/0002-scene.md`. The scene is the widget tree itself: a foreign
+window is a `widget.ExternalSurface` node, and its Z order is the child order.
+
+```go
+surf := widget.NewExternalSurface()
+surf.SetBuffer(img, opaque)                 // img *image.RGBA, RGBA pixels; Swap/Update as before
+surf.SetInput(widget.SurfaceInput{Move, Leave, Button, Wheel, Key, Touch, Focus, Cursor})
+surf.SetInput(widget.SurfaceInput{})        // no input again
+surf.SetOpaqueRegion(rects)                 // buffer coordinates; nil clears
+surf.SetContentHint(widget.ContentUnknown)  // ContentStatic, ContentVideo
+surf.SurfaceID()                            // stable number of the surface
+surf.ContentHint()
+
+widget.PointerOwnersActive()                // any PointerOwner registered in the process
+// widget.PointerOwner: PointerOver(x, y) and PointerOut(), implemented by ExternalSurface
+
+base.ChildIndex(w) int
+base.RaiseChild(w) bool / base.LowerChild(w) bool
+base.InsertChildAt(i, w)                    // Canvas versions keep the attached properties
+
+engine.VideoRate   // 12 updates per second: video threshold
+engine.VideoHold   // 5 s below VideoRate/2 before a surface stops being video
+eng.SetShadowCache(on bool) / eng.ShadowCache() bool
+
+// Frame
+Frame.Videos []output.VideoRegion   // ID, Rect (physical), Cover (physical)
+output.RegionVideo                  // Region.Kind for tiles fully inside a visible video window
+Region.VideoID uint32               // the window's ID, set when Kind == RegionVideo
+widget.VideoCandidates() int        // surfaces currently tracked (update recently or hinted)
+```
+
+- **Input routing.** A `SurfaceInput` callback receives coordinates in the surface's own
+  logical units. A left press over a surface with `Button` captures the mouse until release
+  (`CaptureRequester`). A surface with `Key` answers `AcceptsTab`, so Tab reaches its key
+  callback. `TabIndex()` is -1: the surface is outside the shell's Tab order.
+- **Pointer owner.** `Engine` routes motion to the topmost `PointerOwner` under the pointer
+  (hit test, not bounds). The previous owner gets `PointerOut` when the owner changes. While no
+  owner is registered the search is skipped. Capture owners get the motion wherever the pointer
+  is.
+- **Video detection.** Update stamps are kept in a ring of 64 per surface; a surface is video
+  while its count in the last second is at least `VideoRate` and stays video until its rate is
+  below half of `VideoRate` for `VideoHold`. `ContentStatic` and `ContentVideo` override the rate.
+  A surface that is not video and has been idle beyond `VideoHold` plus one second leaves the
+  registry; the next update brings it back.
+- **Cover.** `Cover` holds the siblings above each surface on its path to the root (their
+  `SubtreeRect` intersected with the surface), plus open overlays and the modal dimming (the whole
+  canvas when the dim colour is not transparent, otherwise the modal's subtree).
+- **Modal keys.** `SendKeyEvent` delivers keys only to a focused widget inside the top modal; the
+  focus owner outside it is kept, not cleared.
+- **Shadows.** `DrawShadow` blurs a silhouette once per (corner, radius, colour) and assembles
+  larger shadows from the template (9-slice). Up to 64 templates per canvas, least recently used
+  evicted. `SetShadowCache(false)` restores the direct blur.
+- **Moves.** `Window` announces a move with its `DrawMargin` included (`notifyMoved`).
+- **Output buffers.** `Engine.SetSurfaces(bufs [][]byte, stride int, f PixelFormat) error`
+  takes 2–4 consumer buffers of one size and format; the engine draws into a free one and
+  reports it in `Frame.Surface` (numbered from 1; 0 — own or single buffer).
+  `ReleaseSurface(n)` returns a buffer; `Surfaces()` reports the count. With no free buffer the
+  frame is skipped (`Stats.FramesSkipped`) and damage is kept; before drawing, the engine copies
+  from front into the buffer the areas changed while the consumer held it (up to 64 rects, then
+  their bounding box), except what this frame redraws anyway. A resolution or scale change drops
+  the set. One buffer — the old `SetSurface`.
+- **Frames without tile bytes.** `Engine.SetFrameTileData(false)` / `FrameTileData()`: tiles are
+  change locations with `Data == nil`; front is synchronized as before.
+- **BGRA buffers.** `ExternalSurface.SetBGRA(on)`: the buffer's bytes are B,G,R,A (`wl_shm`
+  ARGB8888, Windows DIB); on a `FormatBGRX` canvas its rows are copied as is.
+  `widget.BlitPixelsBGRA` / `PixelBlitterBGRA` for custom contexts.
+- **Overlapping damage** is merged before the diff (one area per overlapping group).
+- **Not implemented yet.** A `ShadowCaster` interface (2.5 uses `DrawShadow` directly); the
+  `core/scene` package (stage 7). The WinLine session runs on the scene behind a switch. RAIL is
+  outside the scene.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): UI scale at a fixed frame size
+
+```go
+eng.SetScaleWithin(k float64)              // keep physical W×H, logical = ⌈W/k⌉×⌈H/k⌉
+eng.SetPhysicalResolution(pw, ph int)      // change the frame size, keep the scale; turns the mode on
+eng.ScaleWithin() bool                     // the mode is on
+```
+
+- `SetScale(k)` keeps the logical size and grows the physical one (OS-window HiDPI).
+  `SetScaleWithin` is the opposite, for a frame size dictated from outside (remote desktop).
+- In the mode, `SetScale` also keeps the physical size; `SetResolution` (logical) leaves the mode.
+- k ≤ 0 means 1. The canvas is recreated: `SetSurface`/`SetSurfaces` buffers must be set again,
+  sized to `PhysicalSize()`.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): engine motion profile
+
+```go
+type MotionProfile = theme.MotionProfile  // MotionFull, MotionReduced, MotionOff, MotionRemote
+eng.SetMotionProfile(p MotionProfile)     // any goroutine, on the fly; unknown value → MotionFull
+eng.MotionProfile() MotionProfile
+const RemoteMotionSteps = 3               // states per transition under MotionRemote
+```
+
+- `MotionReduced` — like `theme.FlagMotionReduce` but per engine: `widget.MotionDur` and
+  `theme.Manager.GetAnimation` give reduced durations. `MotionOff` — functional animations are
+  zero too, and `stepAnimations` finishes any non-loop animation with a tick on its next step
+  (loops and tick-less timers run). `MotionRemote` — durations unchanged, progress quantized to
+  `RemoteMotionSteps` per phase, the same step is never ticked twice.
+- The profile is found by goroutine: `widget.BindAnimationLoop(e)` on the engine loop; input entry
+  points, `renderFrame` and the `Post` queue of a non-started engine bind the calling goroutine
+  while any engine has a non-Full profile. `widget.CurrentMotionProfile()`,
+  `theme.CallerMotionProfile()`; `theme.(*Theme|*Manager).ReducesMotion()` = theme flag OR profile
+  Reduced/Off (`MotionReduced()` stays the flag only).
+- `Animation.Clock` — a tick that measures time (scroll inertia, attention blink): never
+  quantized or finished early. Scroll wheel under `MotionOff`/`MotionRemote` scrolls at once.
+- `window` modal and dock hosts copy the parent engine's profile on creation.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): overlay and popup transitions
+
+```go
+eng.SetOverlayTransitions(on bool)        // off by default; OverlayTransitions()
+eng.SetPopupFade(on bool)                 // the popup host understands PopupFrame.Transition; PopupFade()
+
+type PopupFrame struct { ID uintptr; Rect image.Rectangle; Img *image.RGBA; Transition *PopupTransition }
+type PopupTransition struct {
+	Opacity float64     // 0…1, whole window
+	Offset  image.Point // logical points from Rect
+	Closing bool        // overlay already closed: keep the window while the ID is in frames, no input
+}
+```
+
+- Tokens: `theme.AnimMenuOpen` (`menu.open`), `theme.AnimMenuClose` (`menu.close`, falls back to
+  `menu.open`), metric `theme.KeyMenuOpenOffset` (`menu.open.offset`). The theme comes from the
+  engine's last `ApplyThemeProfile`/`SetThemeProfile`; without it there are no transitions.
+- In-canvas overlays (`OverlayDrawer` + `OverlayBoundsProvider`): a pair of snapshots of the
+  overlay area (plus `widget.DefaultOverlayMargin()` or `OverlayMarginer.OverlayMargin()`), taken
+  only from a fully redrawn area; a step blends them (mask = pixels the overlay touched, plus
+  `OverlayRects`/`OverlayBounds` as opaque). A step with no other damage is a frame that blends into
+  the buffer and diffs only that area — unless the transition is under a modal layer or overlaps
+  another overlay or the tooltip, then the step declares damage. The final frame is drawn directly.
+  Closing is detected when the owner is met with `HasOverlay() == false`; an owner gone from the
+  tree removes the overlay at once.
+- Opt-outs and hints: `widget.SelfAnimatedOverlay` (`desktop.Flyout`), `widget.OverlayMarginer`,
+  `widget.OverlayAnchorer` (`PopupMenu.OverlayAnchor()` = the `Show` point; a menu above it slides
+  up).
+- Hosted popups need both switches: `SetOverlayTransitions(true)` and `SetPopupFade(true)` (the
+  `window` package sets the latter for its popup hosts, so an application turns on only the
+  former). The same cached `Img` comes with `Transition` on every step; steps reach only
+  `renderPopups`. `window.popupHost` applies it with an idempotent `reconcile` (order-independent):
+  Win32 popups are `WS_EX_LAYERED` (`SetLayeredWindowAttributes`, alpha set before show); X11 with
+  a 32-bit visual and compositor blits a premultiplied copy × opacity; otherwise (and on Wayland,
+  `childPopups`) the window shows at once and a `Closing` popup is closed at once. Input over a
+  closing popup is forwarded at its current position.
+- Motion tokens of the built-in profiles (ms; closing and panels out-cubic; Windows 2000 declares
+  them all as 0): `menu.open` 200 out-back / 150 / 180; `menu.close` 120 / 100 / 150;
+  `submenu.open` 150 / 120 / 120; `start.open` 250 / 200 / 200; `flyout.open` 200 / 150 / 180 for
+  Windows 11 / Windows 10 / macOS. `desktop.StartMenu` uses `start.open` → `flyout.open` →
+  `menu.open`, other flyouts `flyout.open` → `menu.open` (`theme.Manager.GetAnimationFirst`).
+  `PopupMenu.SubMenuFade` / `SubMenuFadeCurve` come from `submenu.open` (`MenuStyle.SubMenuOpenMS`).
+- Soft shadows under `shadow.soft` (`shadow.color` token): Windows 11 popups blur 20 / offset 8,
+  window and dialog 32 / 12; Windows 10 8 / 4 and 16 / 6; macOS 16 / 6 and 28 / 10; Windows 2000
+  none.
+- **Not implemented yet.** Popup window transitions on Wayland (single popup buffer); a separate
+  engine-level transition for submenus; tooltips and modals by the same mechanism.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): package layout and the shared glyph cache
+
+Stages 4.1 and 4.2 of the 4.0 plan. Behaviour is unchanged: frames are byte-identical and
+consumer code does not change.
+
+**Packages (4.1).** `core/draw` — `DrawContext` and its optional capabilities (standard
+library and `core/geom` only). `core/geom` — geometry, image filters. `core/text` — fonts, glyph
+cache, shaping, text quality (no `widget`, no `engine`). `core/raster` — the engine's canvas
+`Canvas`: tiles, diff, shadows, blur, Mica, canvas text (no `widget`, no `engine`).
+`internal/workpool` — the process worker pool shared by raster and the engine.
+`widget.DrawContext` is an alias of `draw.DrawContext`. In `engine` the old names are aliases:
+`Canvas = raster.Canvas`, `FontCache = text.FontCache`, `TextQuality`, `LCDOrder`,
+`PixelFormat`, the constants and wrappers. `engine.Canvas` has more exported methods — the
+accessors the engine uses for its own state (`Back`, `Front`, `SetPixelFormat`, `DefaultFont`,
+`SetFrameOptions` and others). Application code should not call them.
+
+**Shared glyph cache (4.2).** Two levels:
+
+- L1, per `FontCache` (one view per canvas): key — size, rune, subpixel phase. `SetDPI`,
+  `SetSubpixel` and `SetQuality` clear it.
+- L2, per process: fonts are interned by content, not by pointer. The first copy is kept;
+  a later registration with the same bytes is compared and dropped. Per font and size there is
+  a shard with masks keyed by DPI, subpixel mode and `TextQuality`. Shaper masks and colour
+  glyphs are kept per font and pixel size, keyed by glyph id and hinting.
+- Budget: `engine.SetGlyphCacheBudget(n int64)` (also `text.SetGlyphCacheBudget`); `n <= 0`
+  restores `engine.DefaultGlyphCacheBudget` (64 MiB). Above the budget, whole shards are
+  evicted least-recently-used first until the total is at most half the budget. Eviction does
+  not change output: a glyph evicted and drawn again is identical.
+- `Engine.Stop` does not touch the cache.
+- At most 256 fonts are in the index. Beyond that the least recently used font leaves the index;
+  its shards are no longer charged to the budget and are bounded only by per-shard record limits.
+- Measuring goes through the cache: `FontCache.Advance`, `Kern` and `VMetricsFull`. Do not call
+  `FontCache.Face` from application code: the `font.Face` it returns belongs to one view and is
+  not safe for concurrent use.
+- Registration paths: `RegisterFontDir` reads through the process file cache
+  (`text.ReadFontFile`); `RegisterFontFile` (`text.LoadFontFile`) and `RegisterFontFS` read the
+  file on every call. For several engines that share a font, prefer `RegisterFontDir`.
+- Cost: rasterising a glyph that misses L2 is about 15–25 % slower than with a per-engine cache
+  (microbenchmarks `GlyphRasterLegacy`, `GlyphRasterHinting`). Hits (`DrawText`,
+  `TextInputDrawCached`) are unchanged.
+- Diagnostics and tests: `text.GlyphCacheStatsNow()` returns fonts, shards, entries and bytes;
+  `text.ResetGlyphCache()` drops the entries and keeps the index.
+
+**Where the code lives now (4.1).** The Mica, font-table, shaper, emoji and text-quality code is in
+`core/raster` and `core/text`. Pointers to `engine/...` files in the sections above were updated; the
+entries themselves are unchanged.
+
 ## End of Reference
 
 This document covers the essential API for AI code generation with headless-gui. For detailed implementation examples, refer to:
 - `cmd/showcase/main.go` — example application
 - `tests/` directory — unit tests with usage patterns
 - GUIDE.md and GUIDE_EN.md — user documentation
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): command path, tiled raster, hash diff and one frame buffer
+
+Frames record drawing commands (`core/draw`), rasterise changed 64×64 tiles in a
+worker pool and send only the changed tiles to the consumer. All four parts are
+on by default; the picture is identical on every path, which the tests compare
+byte for byte.
+
+```go
+eng.SetCommandPath(bool)  // default true; false — each Draw straight into the canvas
+eng.CommandPath() bool
+eng.SetTiledRaster(bool)  // default true; NewOffscreen — false; false — one goroutine
+eng.TiledRaster() bool
+eng.SetHashDiff(bool)     // default true; tile hash over the commands that touch it
+eng.HashDiff() bool
+eng.SetSingleBuffer(bool) // default true; the back buffer is a window over front
+eng.SingleBuffer() bool
+eng.Stats().BufferBytes   // bytes of the frame buffers after the last frame
+```
+
+Rules that follow from the design:
+
+- A tile is neither rasterised nor compared when its commands, image generations and
+  blur content keys did not change since it was last drawn. A frame without changes
+  draws no tile.
+- Frames without a declared damage (`RenderOnce`, render every tick) re-record the
+  whole tree. This is the main cost of an unchanged frame; it is not avoided yet.
+- A partial frame from `Engine.InvalidateRect` re-records the tree under the area
+  (unclaimed damage). It costs about twice the direct path (about 50 against 25
+  microseconds on a 1280×800 text scene); `SetCommandPath(false)` restores the direct path.
+- Overlays, modal windows and the tooltip are commands. Under
+  `SetOverlayTransitions(true)` an open menu under a transition, and everything above
+  it, is drawn after the rasterisation on every frame; with transitions off there is no such cost.
+- A consumer that renders into its own buffer (`SetSurface`, `SetSurfaces`) gets a full
+  output buffer, including tiles the hash diff skipped.
+- `Engine.Stats()` adds `Recorded`, `Retained`, `TiledFrames`, `BlurHits`, `BlurMisses`,
+  `TilesSkipped`, `BufferBytes` to the earlier fields.
+
+Invalidation beyond the widget bounds:
+
+```go
+w.InvalidateArea(r)               // widget system; neighbours under r are not redrawn
+w.MarkDirty()                     // state changed without a setter; the widget itself redraws
+widget.InvalidateSubtree(w)       // the whole subtree (theme change of the area)
+w.SetDirtyOnChildInvalidate(true) // draws from its children's state (focus frame over buttons)
+widget.InvalidateRect(r)          // unclaimed area: every widget under it is redrawn
+```
+
+- `InvalidateArea` and `MarkDirty` cost less than `widget.InvalidateRect`.
+- A container that draws children outside `Children()` implements
+  `widget.ExtraChildrenLister` (`ExtraChildren() []widget.Widget`), so that
+  `Invalidate` of the container reaches them.
+- An image rewritten in place is shown only after `eng.InvalidateImageCache(img)`
+  (`nil` — the whole cache) or `widget.InvalidateImageCache(ctx, img)` from `Draw`.
+  A `BlitPixels` buffer is re-read in every frame where it is drawn.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): tree owner, measuring services, popup arena
+
+Each widget tree belongs to the engine it was handed to (`SetRoot`, and
+`ShowModal` for a modal dialog inside the canvas). A widget change wakes only that
+engine; `Stop` releases the ownership and finishes the animations of its loop
+without `OnDone`.
+
+```go
+eng.SetRoot(root)  // root and children belong to eng; a subtree moved here leaves its previous owner
+eng.ShowModal(dlg) // in-canvas modal belongs to eng
+eng.Stop()         // ownership released; loop animations finish without OnDone
+```
+
+Rules that follow from the design:
+
+- A tree not yet handed to an engine, and a widget not yet inserted into a tree,
+  notify every engine (broadcast), as before.
+- `widget.InvalidateRect` still broadcasts (unclaimed area); declare own areas with
+  `Base.InvalidateArea`, use `MarkDirty` for changes made without setters.
+- The root layout measures with the fonts, DPI and scale of its engine.
+- Services for widgets of a tree (`widget` package): `MeasureTextFor(w, text, pt)`,
+  `MeasureTextFontFor`, `MeasureRunePositionsFor`, `FontMetricsFor`. Without an
+  owner they fall back to the global measurer (`MeasureUIText` and friends).
+- `PopupMenu.SetHost(w)`: a menu that is not a child of the tree measures and
+  reports changes through the host widget's engine.
+- `widget.AnimateOwned(w, …)`: stepped by the loop of the engine of w's tree. An
+  engine that is not running (only `RenderOnce`) does not step its animations.
+- `widget.TextRasterizerFor(w)` and SVG icons in a tree: `<text>` uses the fonts of
+  the tree's engine when the icon is already in it.
+- Advanced types for code that implements its own services: `widget.Owner` (a
+  comparable key with the marker method `TreeOwner()`), `widget.BindOwner`,
+  `widget.OwnerOf`, `widget.RegisterUINotifierFor`, `widget.RegisterMoveSinkFor`,
+  `widget.StopAnimationsFor`, `widget.NewMeasureSet`.
+- Popup arena: all open popups of a host (`SetPopupSink`) render into one scratch
+  canvas of the engine. `Stats().PopupBytes` is the arena buffers plus the images of
+  open and fading popups; zero when no popup is open.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): live tiles of the Start menu
+
+- `desktop.TileSource` (`Subscribe(fn func(TileContent)) (unsubscribe func())`),
+  `desktop.TileSourceFunc`, `desktop.LiveTile{Source, Queue, Period}`, the field
+  `Tile.Live`, `StartMenu.Post func(func())`, `desktop.DefaultTileCycle` (6 s).
+- Subscriptions exist only while a tiled Start menu is open. A closed menu makes no
+  source calls and wakes no frames.
+- The transition token `tile.cycle` is `theme.AnimTileCycle` (Windows 10: 300 ms,
+  `out-cubic`; Windows 11 and macOS 250 ms; Windows 2000 zero). The kind metric is
+  `theme.KeyTileCycleKind` (0 slide, 1 flip). In `desktop` they are `AnimTileCycle`
+  and `KeyTileCycleKind`. The token is decorative: instant under reduced motion and
+  `MotionOff`; `MotionRemote` makes it instant through a separate check in
+  `desktop.beginTransition`.
+- Rules that follow from the design: a repeat of the same content, and the first
+  state of a new subscription, start no transition.
+- `desktop.NewFakeTileSource(initial...)` with `Set` and `Current`: a fake source.
+  Its deliveries carry version numbers, so an out-of-order delivery is dropped.
+- `widget.PostFor(w, fn)` runs `fn` on the thread of the engine of the tree of `w`
+  (`widget.OwnerPoster`); `core/draw.OffscreenRenderer` (alias `widget.OffscreenRenderer`)
+  draws into a separate picture outside the frame. `Canvas.RenderOffscreen` implements
+  it.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): input, frame loop and overlays as packages
+
+Where the engine's parts live now (ADR-0011):
+
+- `core/input` — `input.Dispatcher`, reached through `Engine.in`. It holds focus, mouse
+  capture, touches, IME, the cursor override and hit testing. Its dependencies come through
+  `input.Host` (root, modal windows, scale, invalidation, `Post`, `InLoop`, failure guard,
+  tooltip, capture manager). The engine's public input methods (`SendMouseMove`,
+  `SendKeyEvent`, `SetFocus`, `SendTouch`, IME, cursor) are wrappers over it.
+- `core/loop` — `loop.Loop`, reached through `Engine.lp`: the frame goroutine, pacing and
+  frame sink, damage and render on demand, the `Post` queue, `Flush`, timers. Dependencies
+  come through `loop.Host` (`RenderFrame`, `StepAnimations`, `BindLoop`, `AnimationNeeded`
+  (frame needed without invalidation), `FullFramePending`, `GuardCall`, `MotionScope`,
+  `Scale`, and `OnInvalidateAll`, the hook before a full invalidation that bumps the
+  command-recording generation). `Timer`, `Pacing`, `FrameSink` are aliases.
+- `core/overlay` — `overlay.Manager`, reached through `Engine.ov`: host popups with the
+  arena and transitions, the native modal host and its close subscribers, the tooltip,
+  and the `Translating` context that draws a popup into its own buffer. Dependencies come
+  through `overlay.Host`. `PopupFrame`,
+  `PopupTransition`, `ModalHost` are aliases. Modal windows inside the canvas, overlay
+  transitions inside the canvas, the deferred layers of a frame and `CloseAllOverlays` stay
+  in `engine`.
+- Lock order: `frameMu` of the engine is the root; every other lock is a leaf in its package.
+  `internal/lockcheck` checks this in the tests; a call through a field into another package
+  (`e.in.X()`, `e.lp.X()`, `e.ov.X()`, `m.host.X()`) counts as taking that package's locks,
+  resolved against the other package's model where one is given. Calls through interfaces
+  and function literals are not seen by the check.
+- Stable public API: nothing a consumer imports changed. Code inside `engine` reaches the
+  moved parts through the fields above and through the package functions and types
+  (`input.DismissOutside`, `input.ContentShift`, `input.OverlayHitRect`, `overlay.WidgetID`,
+  `overlay.Translating`, `overlay.CollectPopups`), not through the old file names.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): widget packages
+
+Where widget code lives now (ADR-0012):
+
+- `widget` is a generated facade (`widget/*_gen.go`, `go run ./internal/facadegen/cmd/facadegen`):
+  type aliases, function wrappers with copied docs, consts and vars for every exported name of
+  `widget/base`, `widget/xaml`, `widget/text`, `widget/richtext`, `widget/chrome`,
+  `widget/dock`, `widget/dialog`. Handwritten facade files: `doc.go`, `loader.go` (JSON
+  loader, `UINode`), `xaml_register.go` (`registerXAML`, called first by every
+  `LoadUIFromXAML*` wrapper), `clipboard.go` (blank import of `platform/clipboard`).
+  Edit code in the subpackages, then regenerate; `widget/facade_test.go` fails on a stale
+  facade, a missing name, a type mismatch or an API change against `widget/testdata/api.txt`.
+- `widget/base` — the core (Widget, Base, DrawContext, events, themes, layouts, controls,
+  accessibility, portable clipboard). It imports no widget package above it.
+  Capability interfaces replace type switches on subpackage types: `TextEditor`,
+  `DefaultSizer`, `AccessDescriber`, `ChildLayouter`, `BackgroundColorer`, plus
+  `InputBindingList()` on `Canvas` and `Window`; `IMEComposer` (older) moved to `base`
+  too, since `RichText` implements it.
+- Names `base` exports only for sibling packages carry `//facadegen:skip` (e.g.
+  `NotifyUIChanged`, `ActiveTheme`, `MixRGBA`, `ResizeEdge`, `TitleNavButton`,
+  `SetBoundsQuiet`); the facade does not export them.
+- `widget/xaml` — parser, properties, binding, resources, templates, the tag registry:
+  `xaml.Default()`, `Registry.Register` / `RegisterComplete`, `Builder func(*Element,
+  *Loader) (base.Widget, error)`, `Loader` (`BaseDir`, `Image`, `Offset`, `BuildChild`,
+  `BuildPopupMenu`, `SetName`). Widget packages register their tags with
+  `RegisterXAML(r *xaml.Registry)`: `text` (textbox, textinput, input, richtextbox,
+  passwordbox), `richtext` (richtext; `RichText.OwnsMarkupChildren`), `chrome` (window,
+  complete), `dock` (dockpanel, border, dockmanager — complete). `dialog` has no tags.
+- Internal tests of `widget/xaml` cannot import `chrome` or `dock` (import cycle): tests that
+  need `<Window>` or dock tags are in the external package `xaml_test`
+  (`chrome_ext_test.go` registers them; internals via `export_test.go`). Subpackage tests
+  reach unexported `base` state through `internal/testhook` (`SaveTextMeasurer`,
+  `SaveStrings`, `LanguageListeners`, `ScreenBounds`).
+- `platform/clipboard` — OS clipboard implementations; its `init` calls
+  `base.SetClipboardProvider`. Imported by the facade.
+- The core cannot import a package above it: that would be an import cycle, so the compiler
+  enforces the order. `widget/base/depmap_test.go` (`internal/depmap`) maps file groups
+  inside `base`; only the portable clipboard group is left, its baseline is empty.
+- Behaviour visible from outside: `%T` gives `*base.Button`, `*text.TextInput`,
+  `*chrome.Window`; facade variables are copies; application types embedding a widget pass
+  the capability-interface branches.
+
+## v4.0 (unreleased, branch `feature/engine-architecture`): window platform packages
+
+Where window code lives now (ADR-0013):
+
+- `window` and `window/minimal` are generated facades (`internal/facadegen`) over
+  `window/core` and `platform/native`; the `Window` type is the same in both, the API
+  snapshot (`window/testdata/api.txt`) is shared. `window` adds blank imports of every
+  capability (`window/capabilities.go`); `window/minimal` has none.
+- Backends are packages: `platform/win32`, `platform/x11`, `platform/wayland`,
+  `platform/cocoa`; `window/core` keeps only shims (`backend_*.go`, `monitor_*.go`).
+  Below them: `platform/native` (backend contracts, shared types, the capability
+  registry), `platform/keyboard`, `platform/pointer`, `platform/dbus`.
+- Capabilities register in `platform/native` from `init`: `platform/a11y`
+  (`RegisterAccessibility`; UIA through `win32.AddMessageHook(WM_GETOBJECT)`, AT-SPI),
+  `platform/shell` (`RegisterShell`: open URL/file, reveal, languages, theme, accent;
+  input checks stay in the core), `platform/tray` (`RegisterTray`: `native.Tray` per
+  OS window, created in `bringUp`, closed in `tearDown`; Win32 icon events and
+  `WM_DESTROY` through `AddMessageHook`; Linux SNI and notifications need no backend),
+  `platform/dnd` (`RegisterDragDrop` — a flag: the drop target and source stay in the
+  backends). Without a capability the core answers "unsupported" exactly like a
+  windowing system without it. Win32 extension points: `AddMessageHook`, `HWND`,
+  `WindowOf`, `NewIcon`.
+- `window.Style{Borderless, Owned, Tool}`, `SetStyle`/`Style`, `SetOwner`, `Raise`,
+  `Lower`, `SetPosition`/`Position` (`window/core/style.go`): honest answers (X11 —
+  "request sent"); before `Run` the style and the owner are remembered; Wayland —
+  `Borderless` only; macOS — `false`.
+- Checks: `internal/layers` (the core and `window/minimal` pull no capability and no
+  `platform/dbus`; the baseline is empty on every OS), `window/core/depmap_test.go`
+  (OS-specific core files are shims only), `window/core/backend_contract_*_test.go`
+  (capability interfaces per backend: Win32 44, X11 39, Wayland 36, Cocoa 3), and the
+  shared scenarios `platform/native/contracttest` (`TestWin32Contract` on live
+  windows, `TestX11Contract`/`TestWaylandContract` on real servers when
+  `DISPLAY`/`WAYLAND_DISPLAY` is set, `TestCocoaContract` builds). The capability
+  matrix of the backends is in `window/README.md`.

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/core/overlay"
 	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
@@ -43,11 +44,11 @@ func TestTranslatingContext_PixelMatch(t *testing.T) {
 	c := e.canvas
 
 	// In-canvas отрисовка оверлея поверх очищенного фона.
-	c.blitBackground()
+	c.BlitBackground()
 	drawOverlays(root, c, false)
 
 	// Offscreen отрисовка через транслирующий контекст.
-	oc := c.renderOverlay(dd, r)
+	oc := overlay.RenderOverlay(c, dd, r)
 
 	// Сравнение области r основного холста с popup-канвасом (scale==1).
 	if oc.Bounds().Dx() != r.Dx() || oc.Bounds().Dy() != r.Dy() {
@@ -55,7 +56,7 @@ func TestTranslatingContext_PixelMatch(t *testing.T) {
 	}
 	for y := 0; y < r.Dy(); y++ {
 		for x := 0; x < r.Dx(); x++ {
-			in := c.back.RGBAAt(r.Min.X+x, r.Min.Y+y)
+			in := c.Back().RGBAAt(r.Min.X+x, r.Min.Y+y)
 			out := oc.RGBAAt(x, y)
 			if in != out {
 				t.Fatalf("пиксель (%d,%d): in-canvas=%v popup-canvas=%v", x, y, in, out)
@@ -133,17 +134,17 @@ func TestPopupSink_NotDrawnInCanvas(t *testing.T) {
 	r := func() image.Rectangle { dd.SetOpen(true); return dd.OverlayBounds() }()
 
 	// Рисуем дерево + оверлеи в hosted-режиме: список НЕ должен попасть в холст.
-	c.blitBackground()
+	c.BlitBackground()
 	root.Draw(c)
 	drawOverlays(root, c, true)
-	hostedPix := c.back.RGBAAt(r.Min.X+2, r.Min.Y+2)
+	hostedPix := c.Back().RGBAAt(r.Min.X+2, r.Min.Y+2)
 
 	// Тот же кадр без оверлея вовсе (dropdown закрыт).
 	dd.SetOpen(false)
-	c.blitBackground()
+	c.BlitBackground()
 	root.Draw(c)
 	drawOverlays(root, c, true)
-	closedPix := c.back.RGBAAt(r.Min.X+2, r.Min.Y+2)
+	closedPix := c.Back().RGBAAt(r.Min.X+2, r.Min.Y+2)
 
 	if hostedPix != closedPix {
 		t.Fatalf("в hosted-режиме оверлей просочился в холст: %v vs %v", hostedPix, closedPix)

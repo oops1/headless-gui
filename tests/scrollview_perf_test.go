@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -115,6 +116,7 @@ func forceScroll(sv *widget.ScrollView, y int) {
 // TestScrollViewDrawKeepsChildBounds — после Draw bounds детей не изменились,
 // и ни один Draw не оставил их сдвинутыми.
 func TestScrollViewDrawKeepsChildBounds(t *testing.T) {
+	testreset.Globals(t)
 	sv, kids := buildScrollView()
 	before := make([]image.Rectangle, len(kids))
 	for i, k := range kids {
@@ -134,6 +136,7 @@ func TestScrollViewDrawKeepsChildBounds(t *testing.T) {
 // TestScrollViewDrawOffsetMatchesShiftedBounds — новый путь (смещение через
 // контекст) рисует РОВНО то же, что прежний (временно сдвинутые bounds).
 func TestScrollViewDrawOffsetMatchesShiftedBounds(t *testing.T) {
+	testreset.Globals(t)
 	const dy = 40
 
 	// Новый путь: дети на своих местах, scrollY = dy.
@@ -170,6 +173,7 @@ func TestScrollViewDrawOffsetMatchesShiftedBounds(t *testing.T) {
 // notifyRectChanged → движок инвалидировался прямо во время отрисовки, и
 // on-demand рендер с живым ScrollView крутился на полном FPS вечно.
 func TestScrollViewIdleDoesNotRender(t *testing.T) {
+	testreset.Globals(t)
 	eng, _ := newOnDemandEngine() // 50 fps, tooltips выключены
 	sv := widget.NewScrollView()
 	sv.SetBounds(image.Rect(10, 10, 300, 150))
@@ -198,6 +202,7 @@ func TestScrollViewIdleDoesNotRender(t *testing.T) {
 // параллельно с Draw и НЕ должен ловить гонку данных.
 // Прежний код мутировал bounds на время отрисовки — под -race тест падал.
 func TestScrollViewDrawRaceWithHitTest(t *testing.T) {
+	testreset.Globals(t)
 	sv, kids := buildScrollView()
 	forceScroll(sv, 40)
 

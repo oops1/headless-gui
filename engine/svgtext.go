@@ -2,7 +2,6 @@ package engine
 
 import (
 	"math"
-	"strings"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/sfnt"
@@ -37,8 +36,8 @@ func (t svgTextBridge) Outline(spec svg.FontSpec, size float64, text string) ([]
 		return nil, 0, false
 	}
 	c := t.e.canvas
-	primary := c.svgFont(spec)
-	if primary == nil || primary.ttf == nil {
+	primary := c.FontForCSS(spec.Families, spec.Weight, spec.Italic)
+	if primary == nil || primary.TTF == nil {
 		return nil, 0, false
 	}
 	k := size / (svgOutlineEm * 64) // 26.6 при em = svgOutlineEm → единицы пользователя
@@ -54,81 +53,33 @@ func (t svgTextBridge) Outline(spec svg.FontSpec, size float64, text string) ([]
 	for _, r := range text {
 		fc := primary
 		if r != ' ' && !fc.HasGlyph(r) {
-			c.eachFallback(primary, func(fb *FontCache) bool {
-				if fb.ttf != nil && fb.HasGlyph(r) {
+			c.EachFallback(primary, func(fb *FontCache) bool {
+				if fb.TTF != nil && fb.HasGlyph(r) {
 					fc = fb
 					return true
 				}
 				return false
 			})
 		}
-		idx, err := fc.ttf.GlyphIndex(&buf, r)
+		idx, err := fc.TTF.GlyphIndex(&buf, r)
 		if err != nil {
 			continue
 		}
 		if prevFont == fc && prev != 0 && idx != 0 {
-			if kern, err := fc.ttf.Kern(&buf, prev, idx, ppem, font.HintingNone); err == nil {
+			if kern, err := fc.TTF.Kern(&buf, prev, idx, ppem, font.HintingNone); err == nil {
 				pen += float64(kern) * k
 			}
 		}
-		segs, err := fc.ttf.LoadGlyph(&buf, idx, ppem, nil)
+		segs, err := fc.TTF.LoadGlyph(&buf, idx, ppem, nil)
 		if err == nil {
 			contours = appendGlyphContours(contours, segs, pen, k)
 		}
-		if adv, err := fc.ttf.GlyphAdvance(&buf, idx, ppem, font.HintingNone); err == nil {
+		if adv, err := fc.TTF.GlyphAdvance(&buf, idx, ppem, font.HintingNone); err == nil {
 			pen += float64(adv) * k
 		}
 		prev, prevFont = idx, fc
 	}
 	return contours, pen, true
-}
-
-// svgFont подбирает шрифт под (семейство, вес, наклон) SVG: первое
-// знакомое семейство из списка, иначе шрифт по умолчанию (в нём тот же выбор
-// веса, что и у остальных виджетов: жирный запрос даёт встроенный Go Bold,
-// если у шрифта по умолчанию жирного нет).
-func (c *Canvas) svgFont(spec svg.FontSpec) *FontCache {
-	weight := spec.Weight
-	if weight <= 0 {
-		weight = 400
-	}
-	for _, fam := range spec.Families {
-		if c.families == nil || c.svgGenericFamily(fam) {
-			continue
-		}
-		c.families.mu.RLock()
-		known := len(c.families.fam[familyKey(fam)]) > 0
-		c.families.mu.RUnlock()
-		if !known {
-			if fc, ok := c.namedFonts.get(fam); ok && fc != nil {
-				return fc
-			}
-			continue
-		}
-		if name := c.resolveFace(fam, weight, spec.Italic); name != "" {
-			if fc, _ := c.namedFonts.get(name); fc != nil {
-				return fc
-			}
-		}
-	}
-	if c.families != nil {
-		if name := c.resolveFace("", weight, spec.Italic); name != "" {
-			if fc, _ := c.namedFonts.get(name); fc != nil {
-				return fc
-			}
-		}
-	}
-	return c.fontCache
-}
-
-// svgGenericFamily — общие семейства CSS: у них нет файла, это «шрифт по
-// умолчанию».
-func (c *Canvas) svgGenericFamily(fam string) bool {
-	switch strings.ToLower(fam) {
-	case "serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "ui-sans-serif":
-		return true
-	}
-	return false
 }
 
 // appendGlyphContours переводит сегменты глифа (26.6; sfnt уже отдаёт ось Y

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -55,6 +56,7 @@ func wantDate(t *testing.T, p *widget.DatePicker, y int, m time.Month, d int) {
 
 // Выбранная дата показывается в формате языка и стирается.
 func TestDatePicker_FormatByLanguage(t *testing.T) {
+	testreset.Globals(t)
 	withLanguage(t, "RU")
 	p := widget.NewDatePicker()
 	if !p.SetSelectedDate(fixedNow()) {
@@ -90,6 +92,7 @@ func TestDatePicker_FormatByLanguage(t *testing.T) {
 // Набор даты с клавиатуры через движок: цифры, Enter — дата выбрана и событие
 // пришло.
 func TestDatePicker_TypeDate(t *testing.T) {
+	testreset.Globals(t)
 	withLanguage(t, "RU")
 	p := widget.NewDatePicker()
 	eng := dateScene(t, p)
@@ -108,6 +111,7 @@ func TestDatePicker_TypeDate(t *testing.T) {
 // Набор терпим к виду: без ведущих нулей, другой разделитель, двузначный год,
 // ISO 8601.
 func TestDatePicker_TolerantParsing(t *testing.T) {
+	testreset.Globals(t)
 	withLanguage(t, "RU")
 	for _, in := range []string{"1.2.2026", "01/02/2026", "1-2-26", "2026-02-01"} {
 		p := widget.NewDatePicker()
@@ -127,6 +131,7 @@ func TestDatePicker_TolerantParsing(t *testing.T) {
 // Неразобранный набор не меняет дату и помечает поле; уход фокуса возвращает
 // выбранную дату, а не оставляет мусор.
 func TestDatePicker_InvalidInput(t *testing.T) {
+	testreset.Globals(t)
 	withLanguage(t, "RU")
 	p := widget.NewDatePicker()
 	eng := dateScene(t, p)
@@ -148,6 +153,7 @@ func TestDatePicker_InvalidInput(t *testing.T) {
 // Границы: набор вне границ не принимается, выбранная дата вне новых границ
 // стирается, календарь не выходит за границы.
 func TestDatePicker_DisplayDateRange(t *testing.T) {
+	testreset.Globals(t)
 	withLanguage(t, "RU")
 	p := widget.NewDatePicker()
 	eng := dateScene(t, p)
@@ -182,6 +188,7 @@ func TestDatePicker_DisplayDateRange(t *testing.T) {
 // Календарь с клавиатуры: Alt+↓ открывает на выбранной дате, стрелки двигают
 // курсор, Enter выбирает и закрывает.
 func TestDatePicker_CalendarKeyboard(t *testing.T) {
+	testreset.Globals(t)
 	withLanguage(t, "RU")
 	p := widget.NewDatePicker()
 	eng := dateScene(t, p)
@@ -212,6 +219,7 @@ func TestDatePicker_CalendarKeyboard(t *testing.T) {
 // Календарь мышью: щелчок по кнопке открывает, щелчок по числу выбирает день
 // показанного месяца и закрывает, Dismiss закрывает без выбора.
 func TestDatePicker_CalendarMouse(t *testing.T) {
+	testreset.Globals(t)
 	withLanguage(t, "RU")
 	p := widget.NewDatePicker()
 	dateScene(t, p)
@@ -249,6 +257,7 @@ func TestDatePicker_CalendarMouse(t *testing.T) {
 
 // Разметка: тег, дата, границы, шаблон формата .NET, первый день недели.
 func TestDatePicker_XAML(t *testing.T) {
+	testreset.Globals(t)
 	withLanguage(t, "RU")
 	_, reg, err := widget.LoadUIFromXAMLFS([]byte(`<Canvas Width="400" Height="300">
   <DatePicker x:Name="d" SelectedDate="2026-09-13" DisplayDateStart="2026-01-01"
@@ -275,6 +284,7 @@ func TestDatePicker_XAML(t *testing.T) {
 
 // Команда разметки получает выбранную дату.
 func TestDatePicker_Command(t *testing.T) {
+	testreset.Globals(t)
 	p := widget.NewDatePicker()
 	var got any
 	if !p.SetCommand("SelectedDateChangedCommand", &widget.RelayCommand{ExecuteFn: func(v any) { got = v }}) {

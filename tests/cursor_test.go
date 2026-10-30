@@ -5,10 +5,12 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 func TestCursor_XAMLAttribute(t *testing.T) {
+	testreset.Globals(t)
 	const xaml = `<Canvas xmlns="clr">
 		<Button Name="b" Cursor="Hand"/>
 	</Canvas>`
@@ -41,6 +43,7 @@ func TestCursor_XAMLAttribute(t *testing.T) {
 }
 
 func TestCursor_TextInputNoOverride(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	ti.SetBounds(image.Rect(0, 0, 200, 30))
 

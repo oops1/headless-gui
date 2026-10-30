@@ -1,0 +1,553 @@
+package base
+
+import (
+	"image"
+	"image/color"
+	"sync"
+	"sync/atomic"
+)
+
+// Dropdown — выпадающий список в стиле Windows 10 Dark.
+type Dropdown struct {
+	Base
+
+	mu       sync.RWMutex
+	items    []string
+	selIdx   int32 // атомарно
+	chosen   int32 // 1 — выбор делался (пользователем или SetSelected), атомарно
+	hoverIdx int32 // индекс пункта под курсором (-1 = нет)
+
+	// FontSize — кегль текста в пунктах (0 = общий размер). Действует и на
+	// выбранное значение, и на пункты раскрытого списка.
+	FontSize float64
+
+	Background  color.RGBA
+	BorderColor color.RGBA
+	TextColor   color.RGBA
+	ArrowColor  color.RGBA
+	FocusBorder color.RGBA
+	HoverItemBG color.RGBA // фон пункта при наведении
+	HoverBG     color.RGBA // фон заголовка при наведении
+
+	open     int32 // 1 — список раскрыт, 0 — закрыт (атомарно)
+	isHover  int32 // курсор над заголовком (атомарно)
+	focused  int32 // 0 | 1 (атомарно)
+
+	PaddingX int
+
+	// ArrowStyle — как нарисована стрелка раскрытия. По умолчанию (ArrowAuto)
+	// решает тема: у скруглённых контролов — тонкий шеврон без разделителя.
+	ArrowStyle ArrowStyle
+
+	// OnChange вызывается при смене выбора.
+	OnChange func(idx int, text string)
+}
+
+// NewDropdown создаёт выпадающий список с заданными пунктами.
+func NewDropdown(items ...string) *Dropdown {
+	return &Dropdown{
+		items:       items,
+		hoverIdx:    -1,
+		Background:  win10.DropBG,
+		BorderColor: win10.DropBorder,
+		TextColor:   win10.DropText,
+		ArrowColor:  win10.DropArrow,
+		FocusBorder: win10.Accent,
+		HoverItemBG: win10.MenuHoverBG,
+		HoverBG:     win10.ListItemHover,
+		PaddingX:    6,
+	}
+}
+
+// SetItems заменяет список пунктов (по аналогии с ListView.SetItems).
+// Сбрасывает выбор в 0 (HasSelection → false), hover, закрывает
+// раскрытый список и перерисовывает.
+// Потокобезопасно. Прежний OnChange не вызывается.
+func (d *Dropdown) SetItems(items []string) {
+	d.mu.Lock()
+	d.items = append([]string(nil), items...)
+	d.mu.Unlock()
+	atomic.StoreInt32(&d.selIdx, 0)
+	atomic.StoreInt32(&d.chosen, 0)
+	atomic.StoreInt32(&d.hoverIdx, -1)
+	if atomic.SwapInt32(&d.open, 0) == 1 {
+		d.notifyChanged() // список был раскрыт в overlay — обновляем весь кадр
+	} else {
+		d.Invalidate()
+	}
+}
+
+// Items возвращает копию текущего списка пунктов.
+func (d *Dropdown) Items() []string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return append([]string(nil), d.items...)
+}
+
+// SetSelected потокобезопасно устанавливает индекс выбранного пункта.
+func (d *Dropdown) SetSelected(idx int) {
+	d.mu.RLock()
+	n := len(d.items)
+	d.mu.RUnlock()
+	if idx >= 0 && idx < n {
+		atomic.StoreInt32(&d.chosen, 1)
+		if atomic.SwapInt32(&d.selIdx, int32(idx)) != int32(idx) {
+			d.invalidateSelection()
+		}
+	}
+}
+
+// invalidateSelection перерисовывает виджет после смены выбранного пункта:
+// заголовок лежит в bounds, но при раскрытом списке подсветка выбранного
+// пункта рисуется в overlay — тогда инвалидируется весь кадр.
+func (d *Dropdown) invalidateSelection() {
+	if atomic.LoadInt32(&d.open) == 1 {
+		d.notifyChanged()
+	} else {
+		d.Invalidate()
+	}
+}
+
+// Selected возвращает индекс текущего выбранного пункта.
+//
+// Внимание: у нового Dropdown (и после SetItems) выбор равен 0, а не −1 —
+// по индексу «ничего не выбрано» не отличить от выбора первого пункта.
+// Для этого есть HasSelection.
+func (d *Dropdown) Selected() int {
+	return int(atomic.LoadInt32(&d.selIdx))
+}
+
+// HasSelection возвращает true, если выбор делался явно: пользователем
+// (мышь/клавиатура) или через SetSelected. У нового Dropdown и после
+// SetItems — false, хотя Selected() возвращает 0.
+func (d *Dropdown) HasSelection() bool {
+	return atomic.LoadInt32(&d.chosen) == 1
+}
+
+// SelectedText возвращает текст выбранного пункта (или "" если список пуст).
+func (d *Dropdown) SelectedText() string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	idx := int(atomic.LoadInt32(&d.selIdx))
+	if idx < 0 || idx >= len(d.items) {
+		return ""
+	}
+	return d.items[idx]
+}
+
+// IsOpen возвращает true если список раскрыт. Потокобезопасно.
+func (d *Dropdown) IsOpen() bool {
+	return atomic.LoadInt32(&d.open) == 1
+}
+
+// SetOpen открывает или закрывает выпадающий список. Потокобезопасно.
+// Список рисуется в overlay вне bounds — при фактическом изменении
+// инвалидируется весь кадр.
+func (d *Dropdown) SetOpen(v bool) {
+	if atomic.SwapInt32(&d.open, b2i(v)) != b2i(v) {
+		d.notifyChanged()
+	}
+}
+
+// OnMouseMove обновляет hover-состояние заголовка и пунктов.
+func (d *Dropdown) OnMouseMove(x, y int) {
+	header := d.Base.Bounds()
+	hb := b2i(image.Pt(x, y).In(header))
+	if atomic.SwapInt32(&d.isHover, hb) != hb {
+		d.Invalidate() // подсветка заголовка — в bounds виджета
+	}
+
+	if atomic.LoadInt32(&d.open) == 1 {
+		const itemH = 30
+		d.mu.RLock()
+		n := len(d.items)
+		d.mu.RUnlock()
+		hov := int32(-1)
+		for i := 0; i < n; i++ {
+			itemTop := header.Max.Y + i*itemH
+			if y >= itemTop && y < itemTop+itemH && x >= header.Min.X && x < header.Max.X {
+				hov = int32(i)
+				break
+			}
+		}
+		if atomic.SwapInt32(&d.hoverIdx, hov) != hov {
+			d.notifyChanged() // пункты раскрытого списка — в overlay
+		}
+	} else if atomic.SwapInt32(&d.hoverIdx, -1) != -1 {
+		d.notifyChanged()
+	}
+}
+
+func (d *Dropdown) Draw(ctx DrawContext) {
+	b := d.bounds
+	if b.Empty() {
+		return
+	}
+
+	isOpen := atomic.LoadInt32(&d.open) == 1
+	st := currentStyle()
+
+	bg := d.Background
+	if atomic.LoadInt32(&d.isHover) == 1 && !isOpen && d.HoverBG.A > 0 && !st.Classic3D {
+		bg = d.HoverBG
+	}
+
+	border := d.BorderColor
+	if isOpen {
+		border = d.FocusBorder
+	}
+	switch {
+	case st.Classic3D:
+		// Классика: утопленное поле + выпуклая «кнопка» со стрелкой справа.
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), bg)
+		DrawBevelSunken(ctx, b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st)
+	case st.ControlCorner > 0:
+		ctx.FillRoundRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st.ControlCorner, bg)
+		ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), st.ControlCorner, border)
+	default:
+		ctx.FillRect(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), bg)
+		ctx.DrawBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), border)
+	}
+
+	// Текст выбранного пункта — обрезается многоточием до стрелки, чтобы
+	// длинная подпись не вылезала за край и не затирала ▼.
+	selText := d.SelectedText()
+	if selText == "" && len(d.items) > 0 {
+		selText = d.items[0]
+	}
+	textY := b.Min.Y + (b.Dy()-13)/2
+	textLeft := b.Min.X + d.PaddingX
+	textMaxW := (b.Max.X - 20) - textLeft // 20px под стрелку и зазор
+	sizePt := FontSizeOrDefault(d.FontSize)
+	ctx.DrawTextSize(EllipsizeText(ctx, selText, textMaxW, sizePt), textLeft, textY, sizePt, d.TextColor)
+
+	// Стрелка ▼
+	arrowX := b.Max.X - 16
+	arrowY := b.Min.Y + b.Dy()/2 - 1
+	switch {
+	case st.Classic3D:
+		// Классика: выпуклая кнопка со стрелкой внутри утопленного поля — часть
+		// образа Win9x, шеврону в ней не место при любом ArrowStyle.
+		btnX := b.Max.X - 19
+		ctx.FillRect(btnX, b.Min.Y+2, 17, b.Dy()-4, win10.BtnBG)
+		DrawBevelRaised(ctx, btnX, b.Min.Y+2, 17, b.Dy()-4, st)
+		drawArrowDown(ctx, arrowX+1, arrowY, d.ArrowColor)
+	case d.arrowStyle(st) == ArrowChevron:
+		drawChevronDown(ctx, b.Max.X-14, b.Min.Y+b.Dy()/2, d.ArrowColor)
+	default:
+		drawArrowDown(ctx, arrowX, arrowY, d.ArrowColor)
+		// Разделитель перед стрелкой
+		ctx.DrawVLine(b.Max.X-20, b.Min.Y+2, b.Dy()-4, d.BorderColor)
+	}
+
+	// Раскрытый список рисуется через overlay (поверх всех виджетов).
+	// См. DrawOverlay / HasOverlay ниже.
+
+	d.drawChildren(ctx)
+	d.drawDisabledOverlay(ctx)
+}
+
+// HasOverlay возвращает true, когда список раскрыт.
+func (d *Dropdown) HasOverlay() bool {
+	return atomic.LoadInt32(&d.open) == 1
+}
+
+// OverlayBounds возвращает прямоугольник раскрытого списка в абсолютных
+// логических координатах (для выноса в нативное окно-попап). Пустой Rect,
+// если список закрыт или пуст. Реализует widget.OverlayBoundsProvider.
+func (d *Dropdown) OverlayBounds() image.Rectangle {
+	if atomic.LoadInt32(&d.open) == 0 {
+		return image.Rectangle{}
+	}
+	b := d.Base.Bounds()
+	d.mu.RLock()
+	n := len(d.items)
+	d.mu.RUnlock()
+	if n == 0 {
+		return image.Rectangle{}
+	}
+	const itemH = 30
+	return image.Rect(b.Min.X, b.Max.Y, b.Max.X, b.Max.Y+n*itemH)
+}
+
+// DrawOverlay рисует раскрытый список поверх всех виджетов.
+// Вызывается движком после отрисовки всего дерева.
+func (d *Dropdown) DrawOverlay(ctx DrawContext) {
+	d.drawOpenList(ctx)
+}
+
+// drawOpenList рисует раскрытый список под полем (стиль Windows 10 ComboBox).
+func (d *Dropdown) drawOpenList(ctx DrawContext) {
+	d.mu.RLock()
+	items := d.items
+	d.mu.RUnlock()
+
+	b := d.bounds
+	const itemH = 30 // высота элемента как в Windows 10
+	listY := b.Max.Y
+	listW := b.Dx()
+	listH := len(items) * itemH
+
+	sel := int(atomic.LoadInt32(&d.selIdx))
+	hov := int(atomic.LoadInt32(&d.hoverIdx))
+
+	// Общий фон списка
+	ctx.FillRect(b.Min.X, listY, listW, listH, d.Background)
+
+	for i, item := range items {
+		iy := listY + i*itemH
+		textCol := d.TextColor
+		switch {
+		case i == hov && d.HoverItemBG.A > 0:
+			ctx.FillRect(b.Min.X+2, iy, listW-4, itemH, d.HoverItemBG)
+			if win10.MenuHoverText.A > 0 {
+				textCol = win10.MenuHoverText // контрастный текст на подсветке
+			}
+		case i == sel:
+			drawDropSelBG(ctx, b.Min.X+2, iy, listW-4, itemH)
+			textCol = contrastText(dropSelOpaque()) // читаемый текст на выделении
+		}
+		// Текст — вертикально по центру, обрезается многоточием по ширине списка.
+		itemMaxW := listW - 2*d.PaddingX
+		itemSize := FontSizeOrDefault(d.FontSize)
+		ctx.DrawTextSize(EllipsizeText(ctx, item, itemMaxW, itemSize),
+			b.Min.X+d.PaddingX, iy+(itemH-13)/2, itemSize, textCol)
+	}
+
+	// Одна общая рамка вокруг всего списка
+	ctx.DrawBorder(b.Min.X, listY, listW, listH, d.FocusBorder)
+}
+
+// ArrowStyle — как нарисована стрелка раскрытия выпадающего списка.
+type ArrowStyle int
+
+const (
+	// ArrowAuto — решает тема: у скруглённых контролов (Win11, macOS) шеврон,
+	// у плоских — прежний треугольник с разделителем.
+	ArrowAuto ArrowStyle = iota
+	// ArrowTriangle — залитый треугольник, зона стрелки отделена чертой.
+	ArrowTriangle
+	// ArrowChevron — тонкая «птичка» у правого края, без разделителя: поле
+	// остаётся одним целым, как у поля ввода той же высоты.
+	ArrowChevron
+)
+
+// arrowStyle разрешает ArrowAuto по стилю темы.
+//
+// По скруглению, а не отдельным флагом темы: скруглённое поле с прямоугольной
+// «кнопкой» внутри и есть та несостыковка, из-за которой шеврон понадобился, —
+// у скруглённого контрола стрелка должна быть частью поля.
+func (d *Dropdown) arrowStyle(st ThemeStyle) ArrowStyle {
+	if d.ArrowStyle != ArrowAuto {
+		return d.ArrowStyle
+	}
+	if st.ControlCorner > 0 {
+		return ArrowChevron
+	}
+	return ArrowTriangle
+}
+
+// drawChevronDown рисует тонкий шеврон «∨» с центром (cx, cy): две линии под
+// 45°, около 10×5 точек, толщиной полторы. Одной ломаной — у сглаженного холста
+// вершина получается ровной, а не стыком двух отрезков.
+func drawChevronDown(ctx DrawContext, cx, cy int, col color.RGBA) {
+	strokePolyline(ctx, []image.Point{
+		{X: cx - 5, Y: cy - 2},
+		{X: cx, Y: cy + 3},
+		{X: cx + 5, Y: cy - 2},
+	}, 1.5, false, col)
+}
+
+// drawArrowDown рисует маленькую стрелку ▼.
+// drawDropSelBG рисует подсветку выбранного пункта. Тема может задавать
+// DropItemBG полупрозрачным (Win10 Dark: акцент с α≈200): рисуем честным
+// альфа-блендингом валидным premultiplied-цветом. Наивный FillRect(Src)
+// вписал бы полупрозрачный НЕ-premultiplied цвет прямо в непрозрачный буфер —
+// «дыра» с искажённым (зеленоватым) оттенком (каналы превышают альфу).
+func drawDropSelBG(ctx DrawContext, x, y, w, h int) {
+	c := win10.DropItemBG
+	if c.A == 255 {
+		ctx.FillRect(x, y, w, h, c)
+		return
+	}
+	ctx.FillRectAlpha(x, y, w, h, PremulAlpha(color.RGBA{R: c.R, G: c.G, B: c.B, A: 255}, c.A))
+}
+
+// dropSelOpaque возвращает непрозрачный цвет подсветки выбора — для расчёта
+// контрастного цвета текста (contrastText ожидает непрозрачный фон).
+func dropSelOpaque() color.RGBA {
+	c := win10.DropItemBG
+	return color.RGBA{R: c.R, G: c.G, B: c.B, A: 255}
+}
+
+func drawArrowDown(ctx DrawContext, x, y int, col color.RGBA) {
+	for i := 0; i < 4; i++ {
+		ctx.DrawHLine(x+i, y+i, 7-2*i, col)
+	}
+	ctx.SetPixel(x+3, y+4, col)
+}
+
+// ApplyTheme обновляет цвета выпадающего списка.
+func (d *Dropdown) ApplyTheme(t *Theme) {
+	d.Background = t.DropBG
+	d.BorderColor = t.DropBorder
+	d.TextColor = t.DropText
+	d.ArrowColor = t.DropArrow
+	d.FocusBorder = t.Accent
+	d.HoverItemBG = t.MenuHoverBG  // подсветка пункта списка (следует теме)
+	d.HoverBG = t.ListItemHover    // подсветка заголовка при наведении
+}
+
+// ─── Focusable ───────────────────────────────────────────────────────────────
+
+func (d *Dropdown) SetFocused(v bool) {
+	if v {
+		atomic.StoreInt32(&d.focused, 1)
+	} else {
+		atomic.StoreInt32(&d.focused, 0)
+	}
+}
+
+func (d *Dropdown) IsFocused() bool {
+	return atomic.LoadInt32(&d.focused) == 1
+}
+
+// ─── KeyHandler ──────────────────────────────────────────────────────────────
+
+func (d *Dropdown) OnKeyEvent(e KeyEvent) {
+	if !d.IsEnabled() || !e.Pressed {
+		return
+	}
+
+	isOpen := atomic.LoadInt32(&d.open) == 1
+
+	switch e.Code {
+	case KeySpace, KeyEnter:
+		// Открыть/закрыть список (overlay — инвалидируем весь кадр)
+		if isOpen {
+			atomic.StoreInt32(&d.open, 0)
+		} else {
+			atomic.StoreInt32(&d.open, 1)
+		}
+		d.notifyChanged()
+
+	case KeyUp:
+		idx := int(atomic.LoadInt32(&d.selIdx))
+		if idx > 0 {
+			atomic.StoreInt32(&d.selIdx, int32(idx-1))
+			atomic.StoreInt32(&d.chosen, 1)
+			d.invalidateSelection()
+			d.fireOnChange(idx - 1)
+		}
+
+	case KeyDown:
+		d.mu.RLock()
+		n := len(d.items)
+		d.mu.RUnlock()
+		idx := int(atomic.LoadInt32(&d.selIdx))
+		if idx < n-1 {
+			atomic.StoreInt32(&d.selIdx, int32(idx+1))
+			atomic.StoreInt32(&d.chosen, 1)
+			d.invalidateSelection()
+			d.fireOnChange(idx + 1)
+		}
+
+	case KeyEscape:
+		if isOpen {
+			atomic.StoreInt32(&d.open, 0)
+			d.notifyChanged() // закрытие overlay-списка
+		}
+	}
+}
+
+// fireOnChange вызывает OnChange синхронно (если задан) — вне d.mu.
+func (d *Dropdown) fireOnChange(idx int) {
+	if d.OnChange == nil {
+		return
+	}
+	d.mu.RLock()
+	text := ""
+	if idx >= 0 && idx < len(d.items) {
+		text = d.items[idx]
+	}
+	d.mu.RUnlock()
+	d.OnChange(idx, text)
+}
+
+// BaseBounds возвращает базовый прямоугольник заголовка (без выпавшего списка).
+// Используется ShiftWidget, чтобы при перетаскивании панели не раздувать bounds.
+func (d *Dropdown) BaseBounds() image.Rectangle {
+	return d.Base.Bounds()
+}
+
+// Dismiss закрывает выпадающий список. Реализует widget.Dismissable.
+func (d *Dropdown) Dismiss() {
+	wasOpen := atomic.SwapInt32(&d.open, 0) == 1
+	hovReset := atomic.SwapInt32(&d.hoverIdx, -1) != -1
+	if wasOpen || hovReset {
+		d.notifyChanged() // закрытие overlay-списка
+	}
+}
+
+// Bounds возвращает расширенный прямоугольник когда список открыт, чтобы
+// hitTest(engine/events.go) находил виджет при клике на пункты списка.
+func (d *Dropdown) Bounds() image.Rectangle {
+	b := d.Base.Bounds()
+	if atomic.LoadInt32(&d.open) == 0 {
+		return b
+	}
+	d.mu.RLock()
+	n := len(d.items)
+	d.mu.RUnlock()
+	const itemH = 30
+	return image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Max.Y+n*itemH)
+}
+
+// OnMouseButton реализует widget.MouseClickHandler.
+func (d *Dropdown) OnMouseButton(e MouseEvent) bool {
+	if !d.IsEnabled() {
+		return false
+	}
+	if e.Button != MouseLeft || !e.Pressed {
+		return false
+	}
+
+	header := d.Base.Bounds()
+
+	if atomic.LoadInt32(&d.open) == 0 {
+		atomic.StoreInt32(&d.open, 1)
+		d.notifyChanged() // раскрытие overlay-списка
+		return true
+	}
+
+	// Список открыт: проверяем попадание по пункту.
+	const itemH = 30
+	d.mu.RLock()
+	items := d.items
+	d.mu.RUnlock()
+
+	for i := range items {
+		itemTop := header.Max.Y + i*itemH
+		itemBot := itemTop + itemH
+		if e.X >= header.Min.X && e.X < header.Max.X && e.Y >= itemTop && e.Y < itemBot {
+			prev := int(atomic.SwapInt32(&d.selIdx, int32(i)))
+			atomic.StoreInt32(&d.chosen, 1)
+			atomic.StoreInt32(&d.open, 0)
+			d.notifyChanged() // закрытие списка + возможная смена заголовка
+			if prev != i && d.OnChange != nil {
+				d.mu.RLock()
+				text := ""
+				if i < len(d.items) {
+					text = d.items[i]
+				}
+				d.mu.RUnlock()
+				d.OnChange(i, text) // синхронно — вне d.mu
+			}
+			return true
+		}
+	}
+
+	atomic.StoreInt32(&d.open, 0)
+	d.notifyChanged() // закрытие overlay-списка (клик мимо пунктов)
+	return true
+}

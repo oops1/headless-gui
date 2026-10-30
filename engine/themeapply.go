@@ -37,6 +37,7 @@ func (e *Engine) ApplyThemeProfile(m *theme.Manager) error {
 	// своими анимациями — компоненты оболочки получают его через
 	// Manager.GetAnimation сами.
 	widget.SetReduceMotion(t.MotionReduced())
+	e.themeMgr.Store(m)
 	e.SetTheme(widget.Materialize(t))
 	return nil
 }

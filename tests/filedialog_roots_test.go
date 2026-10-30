@@ -5,11 +5,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
 // Диалог с AllowedRoots не выходит из корня, места — только корни.
 func TestFileDialog_AllowedRootsOption(t *testing.T) {
+	testreset.Globals(t)
 	root := t.TempDir()
 	sub := filepath.Join(root, "sub")
 	if err := os.Mkdir(sub, 0o755); err != nil {
@@ -39,6 +41,7 @@ func TestFileDialog_AllowedRootsOption(t *testing.T) {
 
 // Старт вне корней сажает диалог на первый корень.
 func TestFileDialog_StartOutsideRoots(t *testing.T) {
+	testreset.Globals(t)
 	root := t.TempDir()
 	eng := newDialogEngine()
 	mb := widget.NewMessageBox(eng)
@@ -55,6 +58,7 @@ func TestFileDialog_StartOutsideRoots(t *testing.T) {
 
 // Глобальный дефолт действует на новые диалоги.
 func TestFileDialog_DefaultAllowedRoots(t *testing.T) {
+	testreset.Globals(t)
 	prev := widget.DefaultAllowedRoots()
 	t.Cleanup(func() { widget.SetDefaultAllowedRoots(prev...) })
 

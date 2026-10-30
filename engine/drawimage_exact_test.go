@@ -16,7 +16,7 @@ func TestDrawImageScaled_ExactPhysicalSizeIsBlitted(t *testing.T) {
 	eng := New(40, 40, 20)
 	eng.SetScale(1.5)
 	c := eng.canvas
-	c.blitBackground()
+	c.BlitBackground()
 
 	// Логический приёмник 10×10 в (4, 4) — физически (6, 6)…(21, 21), 15×15.
 	src := image.NewRGBA(image.Rect(0, 0, 15, 15))
@@ -34,8 +34,8 @@ func TestDrawImageScaled_ExactPhysicalSizeIsBlitted(t *testing.T) {
 
 	for y := 0; y < 15; y++ {
 		for x := 0; x < 15; x++ {
-			off := c.back.PixOffset(6+x, 6+y)
-			got := c.back.Pix[off]
+			off := c.Back().PixOffset(6+x, 6+y)
+			got := c.Back().Pix[off]
 			want := src.RGBAAt(x, y).R
 			if got != want {
 				t.Fatalf("(%d,%d): %d, ожидалось %d — картинка передискретизирована", x, y, got, want)

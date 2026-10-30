@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -25,6 +26,7 @@ func (c *posCtx) MeasureRunePositions(text string, sizePt float64) []int {
 // TestTextInputLayoutCached — позиции рун считаются один раз, а не на каждом
 // Draw; смена текста, маски пароля или ревизии метрик пересчитывает заново.
 func TestTextInputLayoutCached(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("подсказка")
 	ti.SetBounds(image.Rect(0, 0, 200, 28))
 	ti.SetText("некоторый текст поля")
@@ -71,6 +73,7 @@ func TestTextInputLayoutCached(t *testing.T) {
 // TestTextInputCaretNeedsAnimationOnlyOnPhaseChange — NeedsAnimation не тянет
 // кадр, пока фаза мигания каретки не изменилась (PERF-11).
 func TestTextInputCaretNeedsAnimationOnlyOnPhaseChange(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	ti.SetBounds(image.Rect(0, 0, 200, 28))
 

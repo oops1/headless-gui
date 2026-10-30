@@ -1,0 +1,353 @@
+package base
+
+import (
+	"image"
+	"image/color"
+	"math"
+	"sync"
+)
+
+// Slider — горизонтальный ползунок значения в стиле Windows 10.
+//
+// Значение меняется в диапазоне [Min, Max] (по умолчанию 0.0–1.0).
+// Поддерживает drag мышью и клавиатурную навигацию (←/→).
+type Slider struct {
+	Base
+
+	Min float64
+	Max float64
+
+	TrackBG     color.RGBA
+	FillColor   color.RGBA
+	ThumbColor  color.RGBA
+	ThumbHover  color.RGBA
+	BorderColor color.RGBA
+
+	TrackHeight int // высота дорожки (по умолчанию 4)
+	ThumbRadius int // радиус ползунка (по умолчанию 8)
+
+	mu       sync.Mutex
+	value    float64
+	dragging bool
+	hovered  bool
+	focused  bool
+
+	capMgr CaptureManager // менеджер захвата мыши (для корректного drag)
+
+	OnChange func(value float64)
+}
+
+// NewSlider создаёт ползунок [0.0, 1.0].
+func NewSlider() *Slider {
+	return &Slider{
+		Min:         0,
+		Max:         1,
+		TrackBG:     win10.SliderTrackBG,
+		FillColor:   win10.SliderFill,
+		ThumbColor:  win10.SliderThumb,
+		ThumbHover:  win10.Accent,
+		BorderColor: win10.SliderBorder,
+		TrackHeight: 4,
+		ThumbRadius: 8,
+	}
+}
+
+// NewSliderRange создаёт ползунок с заданным диапазоном.
+func NewSliderRange(min, max float64) *Slider {
+	s := NewSlider()
+	s.Min = min
+	s.Max = max
+	s.value = min
+	return s
+}
+
+// SetValue задаёт значение с ограничением [Min, Max].
+// При фактическом изменении инвалидирует область виджета (авто-damage).
+func (s *Slider) SetValue(v float64) {
+	s.mu.Lock()
+	nv := s.clamp(v)
+	if nv == s.value {
+		s.mu.Unlock()
+		return
+	}
+	s.value = nv
+	s.mu.Unlock()
+	s.Invalidate() // вне s.mu
+}
+
+// Value возвращает текущее значение.
+func (s *Slider) Value() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.value
+}
+
+func (s *Slider) clamp(v float64) float64 {
+	if v < s.Min {
+		return s.Min
+	}
+	if v > s.Max {
+		return s.Max
+	}
+	return v
+}
+
+// ratio возвращает нормализованное значение [0, 1].
+func (s *Slider) ratio() float64 {
+	rng := s.Max - s.Min
+	if rng <= 0 {
+		return 0
+	}
+	return (s.value - s.Min) / rng
+}
+
+// trackRect возвращает прямоугольник дорожки.
+func (s *Slider) trackRect() image.Rectangle {
+	b := s.bounds
+	trackY := b.Min.Y + (b.Dy()-s.TrackHeight)/2
+	return image.Rect(b.Min.X+s.ThumbRadius, trackY,
+		b.Max.X-s.ThumbRadius, trackY+s.TrackHeight)
+}
+
+// thumbCenter возвращает центр ползунка.
+func (s *Slider) thumbCenter() (int, int) {
+	tr := s.trackRect()
+	r := s.ratio()
+	cx := tr.Min.X + int(math.Round(r*float64(tr.Dx())))
+	cy := s.bounds.Min.Y + s.bounds.Dy()/2
+	return cx, cy
+}
+
+// Draw рисует Slider: дорожка + заливка + ползунок.
+func (s *Slider) Draw(ctx DrawContext) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	b := s.bounds
+	if b.Empty() {
+		return
+	}
+
+	tr := s.trackRect()
+	st := currentStyle()
+
+	if st.Classic3D {
+		// Классика Win2000: утопленный жёлоб + прямоугольный выпуклый ползунок.
+		ctx.FillRect(tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), s.TrackBG)
+		DrawBevelSunken(ctx, tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), st)
+		fillW := int(math.Round(s.ratio() * float64(tr.Dx())))
+		if fillW > 4 {
+			ctx.FillRect(tr.Min.X+2, tr.Min.Y+2, fillW-4, tr.Dy()-4, s.FillColor)
+		}
+		cx, cy := s.thumbCenter()
+		tw, th := 11, s.ThumbRadius*2+4
+		tx, ty := cx-tw/2, cy-th/2
+		ctx.FillRect(tx, ty, tw, th, s.ThumbColor)
+		DrawBevelRaised(ctx, tx, ty, tw, th, st)
+	} else {
+		// Дорожка (фон)
+		ctx.FillRoundRect(tr.Min.X, tr.Min.Y, tr.Dx(), tr.Dy(), 2, s.TrackBG)
+
+		// Заполненная часть
+		fillW := int(math.Round(s.ratio() * float64(tr.Dx())))
+		if fillW > 0 {
+			ctx.FillRoundRect(tr.Min.X, tr.Min.Y, fillW, tr.Dy(), 2, s.FillColor)
+		}
+
+		// Ползунок
+		cx, cy := s.thumbCenter()
+		thumbCol := s.ThumbColor
+		if s.hovered || s.dragging {
+			thumbCol = s.ThumbHover
+		}
+		DrawFilledCircle(ctx, cx, cy, s.ThumbRadius, thumbCol)
+		drawCircleOutline(ctx, cx, cy, s.ThumbRadius, s.BorderColor)
+
+		// Меньший белый кружок в центре для красоты
+		innerR := s.ThumbRadius - 3
+		if innerR > 2 {
+			DrawFilledCircle(ctx, cx, cy, innerR, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+		}
+	}
+
+	s.drawChildren(ctx)
+	s.drawDisabledOverlay(ctx)
+}
+
+// valueFromX вычисляет значение по позиции мыши.
+func (s *Slider) valueFromX(x int) float64 {
+	tr := s.trackRect()
+	if tr.Dx() <= 0 {
+		return s.Min
+	}
+	ratio := float64(x-tr.Min.X) / float64(tr.Dx())
+	if ratio < 0 {
+		ratio = 0
+	}
+	if ratio > 1 {
+		ratio = 1
+	}
+	return s.Min + ratio*(s.Max-s.Min)
+}
+
+// OnMouseButton обрабатывает клик — начало/конец перетаскивания.
+func (s *Slider) OnMouseButton(e MouseEvent) bool {
+	if !s.IsEnabled() {
+		return false
+	}
+	if e.Button != MouseLeft {
+		return false
+	}
+	s.mu.Lock()
+
+	if e.Pressed {
+		changed := !s.dragging // drag подсвечивает ползунок
+		s.dragging = true
+		fire := false
+		var val float64
+		newVal := s.valueFromX(e.X)
+		if newVal != s.value {
+			s.value = s.clamp(newVal)
+			fire, val = s.OnChange != nil, s.value
+			changed = true
+		}
+		onCh := s.OnChange
+		s.mu.Unlock()
+		if changed {
+			s.Invalidate() // вне s.mu
+		}
+		if fire && onCh != nil {
+			onCh(val) // синхронно — вне s.mu
+		}
+		return true
+	}
+
+	// Отпускание: прекращаем drag и освобождаем захват мыши.
+	wasDragging := s.dragging
+	s.dragging = false
+	cm := s.capMgr
+	s.mu.Unlock()
+	if wasDragging {
+		s.Invalidate() // подсветка ползунка гаснет
+	}
+	if cm != nil {
+		cm.ReleaseCapture()
+	}
+	return true
+}
+
+// WantsCapture — слайдер захватывает мышь при нажатии ЛКМ, чтобы drag работал
+// даже когда курсор уходит за пределы контрола (иначе после ухода курсора
+// отпускание не доходит до слайдера и он «залипает» в режиме перетаскивания).
+func (s *Slider) WantsCapture(e MouseEvent) bool {
+	return s.IsEnabled() && e.Button == MouseLeft && e.Pressed
+}
+
+// SetCaptureManager сохраняет менеджер захвата мыши (инжектится движком).
+func (s *Slider) SetCaptureManager(cm CaptureManager) {
+	s.mu.Lock()
+	s.capMgr = cm
+	s.mu.Unlock()
+}
+
+// OnMouseMove обрабатывает drag и hover.
+func (s *Slider) OnMouseMove(x, y int) {
+	if !s.IsEnabled() {
+		return
+	}
+	s.mu.Lock()
+
+	if s.dragging {
+		fire := false
+		changed := false
+		var val float64
+		newVal := s.valueFromX(x)
+		if newVal != s.value {
+			s.value = s.clamp(newVal)
+			fire, val = s.OnChange != nil, s.value
+			changed = true
+		}
+		onCh := s.OnChange
+		s.mu.Unlock()
+		if changed {
+			s.Invalidate() // вне s.mu
+		}
+		if fire && onCh != nil {
+			onCh(val) // синхронно — вне s.mu
+		}
+		return
+	}
+
+	// Hover на ползунке
+	cx, cy := s.thumbCenter()
+	dx := x - cx
+	dy := y - cy
+	hovered := dx*dx+dy*dy <= s.ThumbRadius*s.ThumbRadius
+	changed := hovered != s.hovered
+	s.hovered = hovered
+	s.mu.Unlock()
+	if changed {
+		s.Invalidate() // вне s.mu
+	}
+}
+
+// OnKeyEvent обрабатывает клавиши ←/→ для изменения значения.
+func (s *Slider) OnKeyEvent(e KeyEvent) {
+	if !s.IsEnabled() || !e.Pressed {
+		return
+	}
+	s.mu.Lock()
+
+	step := (s.Max - s.Min) / 20 // 5% шаг
+	if e.Mod&ModShift != 0 {
+		step = (s.Max - s.Min) / 100 // мелкий шаг
+	}
+
+	old := s.value
+	switch e.Code {
+	case KeyLeft:
+		s.value = s.clamp(s.value - step)
+	case KeyRight:
+		s.value = s.clamp(s.value + step)
+	case KeyHome:
+		s.value = s.Min
+	case KeyEnd:
+		s.value = s.Max
+	default:
+		s.mu.Unlock()
+		return
+	}
+
+	onCh := s.OnChange
+	val := s.value
+	s.mu.Unlock()
+	if val != old {
+		s.Invalidate() // вне s.mu
+	}
+	if onCh != nil {
+		onCh(val) // синхронно — вне s.mu
+	}
+}
+
+// SetFocused реализует Focusable.
+func (s *Slider) SetFocused(v bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.focused = v
+}
+
+// IsFocused реализует Focusable.
+func (s *Slider) IsFocused() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.focused
+}
+
+// ApplyTheme обновляет цвета Slider.
+func (s *Slider) ApplyTheme(t *Theme) {
+	s.TrackBG = t.SliderTrackBG
+	s.FillColor = t.SliderFill
+	s.ThumbColor = t.SliderThumb
+	s.ThumbHover = t.Accent
+	s.BorderColor = t.SliderBorder
+}

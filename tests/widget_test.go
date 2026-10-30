@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 	"github.com/oops1/headless-gui/v3/widget/datagrid"
 )
@@ -20,6 +21,7 @@ type setTextModel struct {
 }
 
 func TestButton_SetTextBinding(t *testing.T) {
+	testreset.Globals(t)
 	m := &setTextModel{Label: "Save"}
 
 	const xaml = `<Canvas xmlns="clr">
@@ -45,6 +47,7 @@ func TestButton_SetTextBinding(t *testing.T) {
 }
 
 func TestBase_BoundsAndChildren(t *testing.T) {
+	testreset.Globals(t)
 	p := widget.NewPanel(widget.DarkTheme().PanelBG)
 	r := image.Rect(10, 20, 110, 120)
 	p.SetBounds(r)
@@ -63,6 +66,7 @@ func TestBase_BoundsAndChildren(t *testing.T) {
 }
 
 func TestBase_MultipleChildren(t *testing.T) {
+	testreset.Globals(t)
 	parent := widget.NewPanel(widget.DarkTheme().PanelBG)
 	for i := 0; i < 5; i++ {
 		parent.AddChild(widget.NewButton("b"))
@@ -75,6 +79,7 @@ func TestBase_MultipleChildren(t *testing.T) {
 // ─── Button ─────────────────────────────────────────────────────────────────
 
 func TestButton_NewButton(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("Тест")
 	if btn.Text != "Тест" {
 		t.Fatalf("Text = %q, want %q", btn.Text, "Тест")
@@ -91,6 +96,7 @@ func TestButton_NewButton(t *testing.T) {
 }
 
 func TestButton_AccentButton(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewWin10AccentButton("OK")
 	if btn.Text != "OK" {
 		t.Fatalf("Text = %q, want %q", btn.Text, "OK")
@@ -98,6 +104,7 @@ func TestButton_AccentButton(t *testing.T) {
 }
 
 func TestButton_PressedState(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	btn.SetPressed(true)
 	if !btn.IsPressed() {
@@ -110,6 +117,7 @@ func TestButton_PressedState(t *testing.T) {
 }
 
 func TestButton_HoveredState(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	btn.SetHovered(true)
 	if !btn.IsHovered() {
@@ -122,6 +130,7 @@ func TestButton_HoveredState(t *testing.T) {
 }
 
 func TestButton_FocusedState(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	btn.SetFocused(true)
 	if !btn.IsFocused() {
@@ -134,6 +143,7 @@ func TestButton_FocusedState(t *testing.T) {
 }
 
 func TestButton_OnMouseButton_Click(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	btn.SetBounds(image.Rect(0, 0, 100, 30))
 
@@ -168,6 +178,7 @@ func TestButton_OnMouseButton_Click(t *testing.T) {
 }
 
 func TestButton_OnMouseButton_RightClick(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	ev := widget.MouseEvent{X: 50, Y: 15, Button: widget.MouseRight, Pressed: true}
 	if btn.OnMouseButton(ev) {
@@ -176,6 +187,7 @@ func TestButton_OnMouseButton_RightClick(t *testing.T) {
 }
 
 func TestButton_OnMouseMove_HoverDetection(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	btn.SetBounds(image.Rect(10, 10, 110, 40))
 
@@ -191,6 +203,7 @@ func TestButton_OnMouseMove_HoverDetection(t *testing.T) {
 }
 
 func TestButton_OnKeyEvent_EnterTriggersClick(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	var clicked bool
 	btn.OnClick = func() { clicked = true }
@@ -215,6 +228,7 @@ func TestButton_OnKeyEvent_EnterTriggersClick(t *testing.T) {
 }
 
 func TestButton_OnKeyEvent_SpaceTriggersClick(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	ch := make(chan bool, 1)
 	btn.OnClick = func() { ch <- true }
@@ -228,6 +242,7 @@ func TestButton_OnKeyEvent_SpaceTriggersClick(t *testing.T) {
 }
 
 func TestButton_OnKeyEvent_ReleaseIgnored(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	called := false
 	btn.OnClick = func() { called = true }
@@ -241,6 +256,7 @@ func TestButton_OnKeyEvent_ReleaseIgnored(t *testing.T) {
 }
 
 func TestButton_AtomicSafety(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
@@ -259,6 +275,7 @@ func TestButton_AtomicSafety(t *testing.T) {
 }
 
 func TestButton_ApplyTheme(t *testing.T) {
+	testreset.Globals(t)
 	btn := widget.NewButton("B")
 	theme := widget.LightTheme()
 	btn.ApplyTheme(theme)
@@ -273,6 +290,7 @@ func TestButton_ApplyTheme(t *testing.T) {
 // ─── CheckBox ───────────────────────────────────────────────────────────────
 
 func TestCheckBox_NewCheckBox(t *testing.T) {
+	testreset.Globals(t)
 	cb := widget.NewCheckBox("Включить")
 	if cb.Text != "Включить" {
 		t.Fatalf("Text = %q", cb.Text)
@@ -283,6 +301,7 @@ func TestCheckBox_NewCheckBox(t *testing.T) {
 }
 
 func TestCheckBox_SetChecked(t *testing.T) {
+	testreset.Globals(t)
 	cb := widget.NewCheckBox("C")
 	cb.SetChecked(true)
 	if !cb.IsChecked() {
@@ -295,6 +314,7 @@ func TestCheckBox_SetChecked(t *testing.T) {
 }
 
 func TestCheckBox_OnMouseButton_Toggle(t *testing.T) {
+	testreset.Globals(t)
 	cb := widget.NewCheckBox("C")
 	var lastState bool
 	cb.OnChange = func(checked bool) { lastState = checked }
@@ -324,6 +344,7 @@ func TestCheckBox_OnMouseButton_Toggle(t *testing.T) {
 }
 
 func TestCheckBox_OnMouseButton_PressConsumed(t *testing.T) {
+	testreset.Globals(t)
 	cb := widget.NewCheckBox("C")
 	ev := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: true}
 	if !cb.OnMouseButton(ev) {
@@ -332,6 +353,7 @@ func TestCheckBox_OnMouseButton_PressConsumed(t *testing.T) {
 }
 
 func TestCheckBox_OnMouseButton_ReleaseWithoutPress(t *testing.T) {
+	testreset.Globals(t)
 	cb := widget.NewCheckBox("C")
 	// Release без предшествующего press — не должен переключать
 	ev := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: false}
@@ -344,6 +366,7 @@ func TestCheckBox_OnMouseButton_ReleaseWithoutPress(t *testing.T) {
 }
 
 func TestCheckBox_Focusable(t *testing.T) {
+	testreset.Globals(t)
 	cb := widget.NewCheckBox("C")
 	cb.SetFocused(true)
 	if !cb.IsFocused() {
@@ -356,6 +379,7 @@ func TestCheckBox_Focusable(t *testing.T) {
 }
 
 func TestCheckBox_OnKeyEvent_SpaceToggles(t *testing.T) {
+	testreset.Globals(t)
 	cb := widget.NewCheckBox("C")
 	ch := make(chan bool, 1)
 	cb.OnChange = func(checked bool) { ch <- checked }
@@ -375,6 +399,7 @@ func TestCheckBox_OnKeyEvent_SpaceToggles(t *testing.T) {
 }
 
 func TestCheckBox_OnMouseMove_Hover(t *testing.T) {
+	testreset.Globals(t)
 	cb := widget.NewCheckBox("C")
 	cb.SetBounds(image.Rect(10, 10, 110, 30))
 	cb.OnMouseMove(50, 20) // внутри
@@ -388,6 +413,7 @@ func TestCheckBox_OnMouseMove_Hover(t *testing.T) {
 }
 
 func TestCheckBox_ApplyTheme(t *testing.T) {
+	testreset.Globals(t)
 	cb := widget.NewCheckBox("C")
 	theme := widget.LightTheme()
 	cb.ApplyTheme(theme)
@@ -399,6 +425,7 @@ func TestCheckBox_ApplyTheme(t *testing.T) {
 // ─── RadioButton ────────────────────────────────────────────────────────────
 
 func TestRadioButton_NewRadioButton(t *testing.T) {
+	testreset.Globals(t)
 	rb := widget.NewRadioButton("Вариант 1", "grp1")
 	if rb.Text != "Вариант 1" {
 		t.Fatalf("Text = %q", rb.Text)
@@ -414,6 +441,7 @@ func TestRadioButton_NewRadioButton(t *testing.T) {
 }
 
 func TestRadioButton_SetSelected(t *testing.T) {
+	testreset.Globals(t)
 	rb := widget.NewRadioButton("A", "grp_test_set")
 	defer rb.RemoveFromGroup()
 	rb.SetSelected(true)
@@ -427,6 +455,7 @@ func TestRadioButton_SetSelected(t *testing.T) {
 }
 
 func TestRadioButton_GroupExclusivity(t *testing.T) {
+	testreset.Globals(t)
 	rb1 := widget.NewRadioButton("A", "grp_excl")
 	rb2 := widget.NewRadioButton("B", "grp_excl")
 	rb3 := widget.NewRadioButton("C", "grp_excl")
@@ -452,6 +481,7 @@ func TestRadioButton_GroupExclusivity(t *testing.T) {
 }
 
 func TestRadioButton_OnMouseButton(t *testing.T) {
+	testreset.Globals(t)
 	rb := widget.NewRadioButton("A", "grp_click")
 	defer rb.RemoveFromGroup()
 	var changed bool
@@ -475,6 +505,7 @@ func TestRadioButton_OnMouseButton(t *testing.T) {
 }
 
 func TestRadioButton_OnMouseButton_ReleaseWithoutPress(t *testing.T) {
+	testreset.Globals(t)
 	rb := widget.NewRadioButton("A", "grp_no_naked")
 	defer rb.RemoveFromGroup()
 	ev := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: false}
@@ -487,6 +518,7 @@ func TestRadioButton_OnMouseButton_ReleaseWithoutPress(t *testing.T) {
 }
 
 func TestRadioButton_Focusable(t *testing.T) {
+	testreset.Globals(t)
 	rb := widget.NewRadioButton("A", "grp_focus")
 	defer rb.RemoveFromGroup()
 	rb.SetFocused(true)
@@ -496,6 +528,7 @@ func TestRadioButton_Focusable(t *testing.T) {
 }
 
 func TestRadioButton_RemoveFromGroup(t *testing.T) {
+	testreset.Globals(t)
 	rb1 := widget.NewRadioButton("A", "grp_rm")
 	rb2 := widget.NewRadioButton("B", "grp_rm")
 	rb1.RemoveFromGroup()
@@ -511,6 +544,7 @@ func TestRadioButton_RemoveFromGroup(t *testing.T) {
 // ─── ToggleSwitch ───────────────────────────────────────────────────────────
 
 func TestToggleSwitch_NewToggleSwitch(t *testing.T) {
+	testreset.Globals(t)
 	ts := widget.NewToggleSwitch("Авто")
 	if ts.Text != "Авто" {
 		t.Fatalf("Text = %q", ts.Text)
@@ -521,6 +555,7 @@ func TestToggleSwitch_NewToggleSwitch(t *testing.T) {
 }
 
 func TestToggleSwitch_SetOn(t *testing.T) {
+	testreset.Globals(t)
 	ts := widget.NewToggleSwitch("T")
 	ts.SetOn(true)
 	if !ts.IsOn() {
@@ -533,6 +568,7 @@ func TestToggleSwitch_SetOn(t *testing.T) {
 }
 
 func TestToggleSwitch_OnMouseButton_Toggle(t *testing.T) {
+	testreset.Globals(t)
 	ts := widget.NewToggleSwitch("T")
 	var lastState bool
 	ts.OnChange = func(on bool) { lastState = on }
@@ -562,6 +598,7 @@ func TestToggleSwitch_OnMouseButton_Toggle(t *testing.T) {
 }
 
 func TestToggleSwitch_OnMouseButton_ReleaseWithoutPress(t *testing.T) {
+	testreset.Globals(t)
 	ts := widget.NewToggleSwitch("T")
 	ev := widget.MouseEvent{X: 5, Y: 5, Button: widget.MouseLeft, Pressed: false}
 	if ts.OnMouseButton(ev) {
@@ -573,6 +610,7 @@ func TestToggleSwitch_OnMouseButton_ReleaseWithoutPress(t *testing.T) {
 }
 
 func TestToggleSwitch_Focusable(t *testing.T) {
+	testreset.Globals(t)
 	ts := widget.NewToggleSwitch("T")
 	ts.SetFocused(true)
 	if !ts.IsFocused() {
@@ -581,6 +619,7 @@ func TestToggleSwitch_Focusable(t *testing.T) {
 }
 
 func TestToggleSwitch_OnKeyEvent_SpaceToggles(t *testing.T) {
+	testreset.Globals(t)
 	ts := widget.NewToggleSwitch("T")
 	ev := widget.KeyEvent{Code: widget.KeySpace, Pressed: true}
 	ts.OnKeyEvent(ev)
@@ -590,6 +629,7 @@ func TestToggleSwitch_OnKeyEvent_SpaceToggles(t *testing.T) {
 }
 
 func TestToggleSwitch_OnMouseMove_Hover(t *testing.T) {
+	testreset.Globals(t)
 	ts := widget.NewToggleSwitch("T")
 	ts.SetBounds(image.Rect(0, 0, 100, 30))
 	ts.OnMouseMove(50, 15) // внутри
@@ -605,6 +645,7 @@ func TestToggleSwitch_OnMouseMove_Hover(t *testing.T) {
 // ─── Label ──────────────────────────────────────────────────────────────────
 
 func TestLabel_NewLabel(t *testing.T) {
+	testreset.Globals(t)
 	lbl := widget.NewWin10Label("Привет")
 	if lbl.Text() != "Привет" {
 		t.Fatalf("Text = %q", lbl.Text())
@@ -612,6 +653,7 @@ func TestLabel_NewLabel(t *testing.T) {
 }
 
 func TestLabel_SetText(t *testing.T) {
+	testreset.Globals(t)
 	lbl := widget.NewWin10Label("A")
 	lbl.SetText("Б")
 	if lbl.Text() != "Б" {
@@ -620,6 +662,7 @@ func TestLabel_SetText(t *testing.T) {
 }
 
 func TestLabel_ThreadSafe(t *testing.T) {
+	testreset.Globals(t)
 	lbl := widget.NewWin10Label("init")
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
@@ -634,6 +677,7 @@ func TestLabel_ThreadSafe(t *testing.T) {
 }
 
 func TestLabel_ApplyTheme(t *testing.T) {
+	testreset.Globals(t)
 	lbl := widget.NewWin10Label("L")
 	theme := widget.LightTheme()
 	lbl.ApplyTheme(theme)
@@ -645,6 +689,7 @@ func TestLabel_ApplyTheme(t *testing.T) {
 // ─── ProgressBar ────────────────────────────────────────────────────────────
 
 func TestProgressBar_NewProgressBar(t *testing.T) {
+	testreset.Globals(t)
 	pb := widget.NewProgressBar()
 	v := pb.Value()
 	if v != 0 {
@@ -653,6 +698,7 @@ func TestProgressBar_NewProgressBar(t *testing.T) {
 }
 
 func TestProgressBar_SetValue(t *testing.T) {
+	testreset.Globals(t)
 	pb := widget.NewProgressBar()
 	pb.SetValue(0.5)
 	v := pb.Value()
@@ -662,6 +708,7 @@ func TestProgressBar_SetValue(t *testing.T) {
 }
 
 func TestProgressBar_SetValueClamped(t *testing.T) {
+	testreset.Globals(t)
 	pb := widget.NewProgressBar()
 	pb.SetValue(-1.0)
 	if pb.Value() != 0.0 {
@@ -675,6 +722,7 @@ func TestProgressBar_SetValueClamped(t *testing.T) {
 }
 
 func TestProgressBar_ThreadSafe(t *testing.T) {
+	testreset.Globals(t)
 	pb := widget.NewProgressBar()
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
@@ -689,6 +737,7 @@ func TestProgressBar_ThreadSafe(t *testing.T) {
 }
 
 func TestProgressBar_CustomColor(t *testing.T) {
+	testreset.Globals(t)
 	pb := widget.NewProgressBarColor(widget.DarkTheme().Accent)
 	if pb.FillColor != widget.DarkTheme().Accent {
 		t.Fatal("custom fill color not applied")
@@ -698,6 +747,7 @@ func TestProgressBar_CustomColor(t *testing.T) {
 // ─── Dropdown ───────────────────────────────────────────────────────────────
 
 func TestDropdown_NewDropdown(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B", "C")
 	if d.Selected() != 0 {
 		t.Fatalf("initial selected = %d", d.Selected())
@@ -711,6 +761,7 @@ func TestDropdown_NewDropdown(t *testing.T) {
 }
 
 func TestDropdown_SetSelected(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B", "C")
 	d.SetSelected(2)
 	if d.Selected() != 2 {
@@ -722,6 +773,7 @@ func TestDropdown_SetSelected(t *testing.T) {
 }
 
 func TestDropdown_SetItems(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B", "C")
 	d.SetSelected(2)
 	d.SetOpen(true)
@@ -750,6 +802,7 @@ func TestDropdown_SetItems(t *testing.T) {
 }
 
 func TestDropdown_SetSelectedOutOfRange(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B")
 	d.SetSelected(10) // out of range — should be ignored
 	if d.Selected() != 0 {
@@ -762,6 +815,7 @@ func TestDropdown_SetSelectedOutOfRange(t *testing.T) {
 }
 
 func TestDropdown_OpenClose(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B")
 	d.SetOpen(true)
 	if !d.IsOpen() {
@@ -774,6 +828,7 @@ func TestDropdown_OpenClose(t *testing.T) {
 }
 
 func TestDropdown_HasOverlay(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A")
 	if d.HasOverlay() {
 		t.Fatal("closed dropdown should not have overlay")
@@ -785,6 +840,7 @@ func TestDropdown_HasOverlay(t *testing.T) {
 }
 
 func TestDropdown_Focusable(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A")
 	d.SetFocused(true)
 	if !d.IsFocused() {
@@ -793,6 +849,7 @@ func TestDropdown_Focusable(t *testing.T) {
 }
 
 func TestDropdown_OnKeyEvent_SpaceToggles(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B")
 	ev := widget.KeyEvent{Code: widget.KeySpace, Pressed: true}
 	d.OnKeyEvent(ev) // open
@@ -806,6 +863,7 @@ func TestDropdown_OnKeyEvent_SpaceToggles(t *testing.T) {
 }
 
 func TestDropdown_OnKeyEvent_UpDown(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B", "C")
 	d.SetSelected(0)
 
@@ -833,6 +891,7 @@ func TestDropdown_OnKeyEvent_UpDown(t *testing.T) {
 }
 
 func TestDropdown_OnKeyEvent_Escape(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B")
 	d.SetOpen(true)
 	esc := widget.KeyEvent{Code: widget.KeyEscape, Pressed: true}
@@ -843,6 +902,7 @@ func TestDropdown_OnKeyEvent_Escape(t *testing.T) {
 }
 
 func TestDropdown_Dismiss(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B")
 	d.SetOpen(true)
 	d.Dismiss()
@@ -852,6 +912,7 @@ func TestDropdown_Dismiss(t *testing.T) {
 }
 
 func TestDropdown_BaseBounds(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B", "C")
 	d.SetBounds(image.Rect(10, 10, 200, 40))
 
@@ -872,6 +933,7 @@ func TestDropdown_BaseBounds(t *testing.T) {
 }
 
 func TestDropdown_OnMouseButton_OpenOnClick(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B")
 	d.SetBounds(image.Rect(0, 0, 200, 30))
 
@@ -887,6 +949,7 @@ func TestDropdown_OnMouseButton_OpenOnClick(t *testing.T) {
 }
 
 func TestDropdown_OnMouseButton_SelectItem(t *testing.T) {
+	testreset.Globals(t)
 	d := widget.NewDropdown("A", "B", "C")
 	d.SetBounds(image.Rect(0, 0, 200, 30))
 	d.SetOpen(true)
@@ -920,6 +983,7 @@ func TestDropdown_OnMouseButton_SelectItem(t *testing.T) {
 // ─── Slider ─────────────────────────────────────────────────────────────────
 
 func TestSlider_NewSlider(t *testing.T) {
+	testreset.Globals(t)
 	s := widget.NewSlider()
 	if s.Min != 0 || s.Max != 1 {
 		t.Fatalf("range = [%f, %f], want [0, 1]", s.Min, s.Max)
@@ -930,6 +994,7 @@ func TestSlider_NewSlider(t *testing.T) {
 }
 
 func TestSlider_NewSliderRange(t *testing.T) {
+	testreset.Globals(t)
 	s := widget.NewSliderRange(10, 100)
 	if s.Min != 10 || s.Max != 100 {
 		t.Fatalf("range = [%f, %f], want [10, 100]", s.Min, s.Max)
@@ -940,6 +1005,7 @@ func TestSlider_NewSliderRange(t *testing.T) {
 }
 
 func TestSlider_SetValue(t *testing.T) {
+	testreset.Globals(t)
 	s := widget.NewSlider()
 	s.SetValue(0.75)
 	v := s.Value()
@@ -949,6 +1015,7 @@ func TestSlider_SetValue(t *testing.T) {
 }
 
 func TestSlider_SetValue_Clamped(t *testing.T) {
+	testreset.Globals(t)
 	s := widget.NewSlider()
 	s.SetValue(-5)
 	if s.Value() != 0 {
@@ -961,6 +1028,7 @@ func TestSlider_SetValue_Clamped(t *testing.T) {
 }
 
 func TestSlider_Focusable(t *testing.T) {
+	testreset.Globals(t)
 	s := widget.NewSlider()
 	s.SetFocused(true)
 	if !s.IsFocused() {
@@ -973,6 +1041,7 @@ func TestSlider_Focusable(t *testing.T) {
 }
 
 func TestSlider_OnKeyEvent_LeftRight(t *testing.T) {
+	testreset.Globals(t)
 	s := widget.NewSlider()
 	s.SetValue(0.5)
 
@@ -988,6 +1057,7 @@ func TestSlider_OnKeyEvent_LeftRight(t *testing.T) {
 }
 
 func TestSlider_OnKeyEvent_HomeEnd(t *testing.T) {
+	testreset.Globals(t)
 	s := widget.NewSlider()
 	s.SetValue(0.5)
 
@@ -1007,6 +1077,7 @@ func TestSlider_OnKeyEvent_HomeEnd(t *testing.T) {
 // ─── TextInput ──────────────────────────────────────────────────────────────
 
 func TestTextInput_NewTextInput(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("Введите...")
 	if ti.Placeholder != "Введите..." {
 		t.Fatalf("Placeholder = %q", ti.Placeholder)
@@ -1017,6 +1088,7 @@ func TestTextInput_NewTextInput(t *testing.T) {
 }
 
 func TestTextInput_SetGetText(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	ti.SetText("Привет мир")
 	if ti.GetText() != "Привет мир" {
@@ -1025,6 +1097,7 @@ func TestTextInput_SetGetText(t *testing.T) {
 }
 
 func TestTextInput_Focusable(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	ti.SetFocused(true)
 	if !ti.IsFocused() {
@@ -1037,6 +1110,7 @@ func TestTextInput_Focusable(t *testing.T) {
 }
 
 func TestTextInput_OnKeyEvent_CharInput(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	// Печатаем символ 'H'
 	ev := widget.KeyEvent{Rune: 'H', Pressed: true}
@@ -1052,6 +1126,7 @@ func TestTextInput_OnKeyEvent_CharInput(t *testing.T) {
 }
 
 func TestTextInput_OnKeyEvent_Backspace(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	ti.SetText("abc")
 	ev := widget.KeyEvent{Code: widget.KeyBackspace, Pressed: true}
@@ -1062,6 +1137,7 @@ func TestTextInput_OnKeyEvent_Backspace(t *testing.T) {
 }
 
 func TestTextInput_OnKeyEvent_Delete(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	ti.SetText("abc")
 	// Ставим курсор в начало
@@ -1075,6 +1151,7 @@ func TestTextInput_OnKeyEvent_Delete(t *testing.T) {
 }
 
 func TestTextInput_OnKeyEvent_Navigation(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	ti.SetText("abcd")
 	// Home → начало
@@ -1092,6 +1169,7 @@ func TestTextInput_OnKeyEvent_Navigation(t *testing.T) {
 }
 
 func TestTextInput_OnKeyEvent_SelectAll_Copy_Paste(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	ti.SetText("hello")
 
@@ -1116,6 +1194,7 @@ func TestTextInput_OnKeyEvent_SelectAll_Copy_Paste(t *testing.T) {
 }
 
 func TestTextInput_PasswordMode(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewPasswordInput("Пароль")
 	if !ti.IsPasswordMode() {
 		t.Fatal("should be password mode")
@@ -1128,6 +1207,7 @@ func TestTextInput_PasswordMode(t *testing.T) {
 }
 
 func TestTextInput_PasswordMode_NoCopy(t *testing.T) {
+	testreset.Globals(t)
 	// Clipboard — глобальное состояние, любой предыдущий тест мог
 	// оставить там текст. Принудительно ставим маркер, который должен
 	// остаться нетронутым после Ctrl+C по password-полю (если копия
@@ -1164,6 +1244,7 @@ func TestTextInput_PasswordMode_NoCopy(t *testing.T) {
 }
 
 func TestTextInput_OnChange(t *testing.T) {
+	testreset.Globals(t)
 	ti := widget.NewTextInput("")
 	ch := make(chan string, 10)
 	ti.OnChange = func(text string) { ch <- text }
@@ -1184,6 +1265,7 @@ func TestTextInput_OnChange(t *testing.T) {
 // ─── ListView ───────────────────────────────────────────────────────────────
 
 func TestListView_NewListView(t *testing.T) {
+	testreset.Globals(t)
 	lv := widget.NewListView("A", "B", "C")
 	items := lv.Items()
 	if len(items) != 3 {
@@ -1195,6 +1277,7 @@ func TestListView_NewListView(t *testing.T) {
 }
 
 func TestListView_SetItems(t *testing.T) {
+	testreset.Globals(t)
 	lv := widget.NewListView("A")
 	lv.SetSelected(0)
 	lv.SetItems([]string{"X", "Y", "Z"})
@@ -1207,6 +1290,7 @@ func TestListView_SetItems(t *testing.T) {
 }
 
 func TestListView_AddItem(t *testing.T) {
+	testreset.Globals(t)
 	lv := widget.NewListView("A")
 	lv.AddItem("B")
 	items := lv.Items()
@@ -1216,6 +1300,7 @@ func TestListView_AddItem(t *testing.T) {
 }
 
 func TestListView_SetSelected(t *testing.T) {
+	testreset.Globals(t)
 	lv := widget.NewListView("A", "B", "C")
 	lv.SetSelected(1)
 	if lv.Selected() != 1 {
@@ -1227,6 +1312,7 @@ func TestListView_SetSelected(t *testing.T) {
 }
 
 func TestListView_ScrollBy(t *testing.T) {
+	testreset.Globals(t)
 	lv := widget.NewListView("A", "B", "C", "D", "E", "F", "G", "H", "I", "J")
 	lv.SetBounds(image.Rect(0, 0, 200, 60)) // маленькое окно
 	lv.ScrollBy(20)
@@ -1235,6 +1321,7 @@ func TestListView_ScrollBy(t *testing.T) {
 }
 
 func TestListView_Focusable(t *testing.T) {
+	testreset.Globals(t)
 	lv := widget.NewListView("A")
 	lv.SetFocused(true)
 	if !lv.IsFocused() {
@@ -1243,6 +1330,7 @@ func TestListView_Focusable(t *testing.T) {
 }
 
 func TestListView_OnKeyEvent_UpDown(t *testing.T) {
+	testreset.Globals(t)
 	lv := widget.NewListView("A", "B", "C")
 	lv.SetBounds(image.Rect(0, 0, 200, 200))
 	lv.SetSelected(0)
@@ -1261,6 +1349,7 @@ func TestListView_OnKeyEvent_UpDown(t *testing.T) {
 }
 
 func TestListView_OnKeyEvent_HomeEnd(t *testing.T) {
+	testreset.Globals(t)
 	lv := widget.NewListView("A", "B", "C")
 	lv.SetBounds(image.Rect(0, 0, 200, 200))
 	lv.SetSelected(1)
@@ -1281,6 +1370,7 @@ func TestListView_OnKeyEvent_HomeEnd(t *testing.T) {
 // ─── Panel ──────────────────────────────────────────────────────────────────
 
 func TestPanel_NewPanel(t *testing.T) {
+	testreset.Globals(t)
 	p := widget.NewWin10Panel()
 	if !p.ShowBorder {
 		t.Fatal("Win10 panel should have border")
@@ -1291,6 +1381,7 @@ func TestPanel_NewPanel(t *testing.T) {
 }
 
 func TestPanel_AddChild(t *testing.T) {
+	testreset.Globals(t)
 	p := widget.NewWin10Panel()
 	btn := widget.NewButton("B")
 	p.AddChild(btn)
@@ -1300,6 +1391,7 @@ func TestPanel_AddChild(t *testing.T) {
 }
 
 func TestPanel_DragEnabled(t *testing.T) {
+	testreset.Globals(t)
 	p := widget.NewWin10Panel()
 	p.Drag.Enabled = true
 	p.Drag.HandleHeight = 30
@@ -1319,6 +1411,7 @@ func TestPanel_DragEnabled(t *testing.T) {
 }
 
 func TestPanel_DragDisabled(t *testing.T) {
+	testreset.Globals(t)
 	p := widget.NewWin10Panel()
 	p.Drag.Enabled = false
 	ev := widget.MouseEvent{X: 200, Y: 110, Button: widget.MouseLeft, Pressed: true}
@@ -1328,6 +1421,7 @@ func TestPanel_DragDisabled(t *testing.T) {
 }
 
 func TestPanel_OnMouseButton_DragDisabled(t *testing.T) {
+	testreset.Globals(t)
 	p := widget.NewWin10Panel()
 	p.Drag.Enabled = false
 	ev := widget.MouseEvent{X: 200, Y: 110, Button: widget.MouseLeft, Pressed: true}

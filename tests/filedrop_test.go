@@ -7,6 +7,7 @@ import (
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -39,6 +40,7 @@ func newDropTree() (parent, child *dropTarget) {
 }
 
 func TestSendFilesDropped_DeliversToWidgetUnderPoint(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	parent, child := newDropTree()
 	child.consume = true
@@ -61,6 +63,7 @@ func TestSendFilesDropped_DeliversToWidgetUnderPoint(t *testing.T) {
 }
 
 func TestSendFilesDropped_BubblesWhenNotConsumed(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	parent, child := newDropTree()
 	child.consume = false // не поглощает — всплывает к родителю
@@ -78,6 +81,7 @@ func TestSendFilesDropped_BubblesWhenNotConsumed(t *testing.T) {
 }
 
 func TestSendFilesDropped_OutsideChild_OnlyParent(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	parent, child := newDropTree()
 	eng.SetRoot(parent)
@@ -94,6 +98,7 @@ func TestSendFilesDropped_OutsideChild_OnlyParent(t *testing.T) {
 }
 
 func TestSendFilesDropped_EmptyPaths_NoOp(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	parent, child := newDropTree()
 	eng.SetRoot(parent)
@@ -110,6 +115,7 @@ func TestSendFilesDropped_EmptyPaths_NoOp(t *testing.T) {
 // TestSendFilesDropped_LogicalCoords — координаты, передаваемые виджету, уже
 // логические: при HiDPI-масштабе физические пиксели делятся на scale.
 func TestSendFilesDropped_LogicalCoords(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 	parent, child := newDropTree()
 	child.consume = true
@@ -131,6 +137,7 @@ func TestSendFilesDropped_LogicalCoords(t *testing.T) {
 // FileDropTarget (обычная Panel), пропускается; событие доходит до целевого
 // предка.
 func TestSendFilesDropped_SkipsNonTargets(t *testing.T) {
+	testreset.Globals(t)
 	eng := newTestEngine()
 
 	parent := &dropTarget{}

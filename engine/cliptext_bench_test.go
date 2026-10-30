@@ -99,12 +99,12 @@ func TestDrawTextClipHorizontalCulling_Identical(t *testing.T) {
 
 		for y := 0; y < h; y++ {
 			for px := 0; px < w; px++ {
-				o := got.canvas.back.PixOffset(px, y)
-				want := blank.canvas.back.Pix[o : o+4]
+				o := got.canvas.Back().PixOffset(px, y)
+				want := blank.canvas.Back().Pix[o : o+4]
 				if image.Pt(px, y).In(clip) {
-					want = ref.canvas.back.Pix[o : o+4]
+					want = ref.canvas.Back().Pix[o : o+4]
 				}
-				g := got.canvas.back.Pix[o : o+4]
+				g := got.canvas.Back().Pix[o : o+4]
 				if g[0] != want[0] || g[1] != want[1] || g[2] != want[2] || g[3] != want[3] {
 					t.Fatalf("x=%d: пиксель (%d,%d): got %v, want %v", x, px, y, g, want)
 				}

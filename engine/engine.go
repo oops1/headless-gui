@@ -2,6 +2,12 @@ package engine
 
 import (
 	"fmt"
+	hgdraw "github.com/oops1/headless-gui/v3/core/draw"
+	"github.com/oops1/headless-gui/v3/core/input"
+	"github.com/oops1/headless-gui/v3/core/loop"
+	"github.com/oops1/headless-gui/v3/core/overlay"
+	hgraster "github.com/oops1/headless-gui/v3/core/raster"
+	hgtext "github.com/oops1/headless-gui/v3/core/text"
 	"image"
 	_ "image/jpeg" // декодер JPEG для SetBackgroundFile
 	"image/png"
@@ -11,13 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
-
-	"golang.org/x/image/font/gofont/gobold"
-	"golang.org/x/image/font/gofont/gobolditalic"
-	"golang.org/x/image/font/gofont/goitalic"
-	"golang.org/x/image/font/gofont/gomono"
 
 	"github.com/oops1/headless-gui/v3/output"
 	"github.com/oops1/headless-gui/v3/theme"
@@ -39,195 +39,28 @@ import (
 // Поток рендеринга и поток потребителя разделены: рендер-горутина
 // складывает готовые кадры в буферизованный канал (глубина 8).
 // Если потребитель отстаёт, излишние кадры пропускаются.
+//
+// Замки: frameMu — корень, под ним берутся остальные; все прочие замки
+// листовые и друг под другом не берутся (state.go, ADR-0011,
+// lockorder_test.go).
 type Engine struct {
-	canvas    *Canvas
-	fontCache *FontCache
-	imgInv    *imageInvalidator // журнал сбросов кэша изображений всех холстов движка (imagecache.go)
-	bgSrc     image.Image // исходный фон (до масштабирования); нужен при SetResolution
-	root      widget.Widget
-	mu        sync.RWMutex // защищает УКАЗАТЕЛИ root/canvas/bgSrc (короткие секции)
+	// Состояние разнесено по областям (state.go, ADR-0011): сцена, цикл,
+	// оверлеи — встроенные структуры (имена полей сохранены: e.canvas,
+	// e.frameMu); ввод — пакет core/input (input.go).
+	sceneState
+	frameState
+	overlayState
 
-	// frameMu сериализует кадр (draw+diff) со структурными операциями над
-	// канвасом/шрифтами (SetResolution, RegisterFont*, SetTheme и т.п.).
-	// В отличие от прежней схемы, e.mu больше НЕ удерживается на весь кадр —
-	// SetRoot/Root и события не блокируются рендером.
-	// Порядок захвата: frameMu → e.mu (никогда наоборот).
-	frameMu sync.Mutex
-
-	// ── Рендер по запросу (см. invalidate.go) ───────────────────────────────
-	onDemand atomic.Bool
-	invGen   atomic.Uint64
-	// mouseMod — модификаторы клавиатуры, которыми помечаются события мыши
-	// (см. modifiers.go). Атомарные: пишет поток окна, читает диспетчеризация.
-	mouseMod atomic.Int32
-	// pacing, frameWanted, wake, sink — внешний темп и сток кадров
-	// (pacing.go). При PacingExternal кадр готовится только по RequestFrame.
-	pacing      atomic.Uint32
-	frameWanted atomic.Bool
-	wake        chan struct{}
-	loopGID     atomic.Uint64 // горутина цикла кадров; 0 — цикл не идёт (см. Flush)
-	sinkMu      sync.RWMutex
-	sink        FrameSink
-
-	damageMu  sync.Mutex
-	damage    []image.Rectangle // области InvalidateRect с прошлого кадра
-	damageAll bool              // Invalidate() — полный diff
-
-	// subpixelOwn — подпиксельный текст включила или выключила тема, а не
-	// приложение; subpixelPinned — приложение распорядилось само
-	// (SetTextSubpixel), и тема режим больше не трогает; subpixelWant — что
-	// просил последний применённый профиль. Под frameMu.
-	subpixelOwn, subpixelPinned, subpixelWant bool
-
-	focus    focusManager  // текущий виджет с фокусом
-	loan     focusLoan     // фокус, взятый виджетом по просьбе (focusreq.go)
-	captured widget.Widget // виджет, захвативший мышь (drag)
-	capMu    sync.Mutex
-	// capChain — контейнеры со сдвигом содержимого над захватившим мышь
-	// виджетом (см. captureOffset); capChainOK — цепочка уже найдена. Под capMu.
-	capChain   []widget.ContentOffsetter
-	capChainOK bool
-
-	// pressConsumer — виджет, поглотивший последний press ЛКМ.
-	// При release: если этот виджет больше не под курсором
-	// (удалён/закрыт), событие проглатывается, чтобы не пролетело
-	// на виджет, оказавшийся под курсором после закрытия.
-	pressConsumer widget.Widget
-
-	// touch — владельцы активных касаний по ID (см. touch.go).
-	touch touchState
-
-	modals []widget.ModalWidget // стек модальных виджетов (последний = верхний)
-	modMu  sync.Mutex
-
-	// modalHost — опциональный хост нативных модалок (window.dialogHost на
-	// Win32). Если установлен и принимает модалку, она живёт в собственном
-	// нативном окне ОС, а не в холсте движка. onModalClosed — колбэк,
-	// вызываемый в конце CloseModal (см. modalhost.go). hostMu защищает оба.
-	modalHost     ModalHost
-	onModalClosed func(widget.ModalWidget)
-	// modalClosedSubs — подписчики AddOnModalClosed. Слот onModalClosed занят
-	// хостом нативных окон, и приложению его не хватало: второй подписчик
-	// молча вытеснял первого (GG-82).
-	modalClosedSubs []modalClosedSub
-	modalSubNextID  int
-	hostMu          sync.Mutex
-
-	// popupSink — опциональный хост popup-оверлеев (window.popupHost). Если
-	// задан, открытые оверлеи (dropdown/меню) выносятся в собственные нативные
-	// окна ОС, а не рисуются в холст. lastPopupSig — сигнатура последнего
-	// набора попапов, отданного sink (для вызова sink только при изменениях).
-	popupSink    func([]PopupFrame)
-	lastPopupSig []popupSig
-	popupCache   map[uintptr]*popupEntry // кэш канваса/картинки на оверлей
-	popupGen     uint64                  // поколение для отсева исчезнувших попапов
-	popupMu      sync.Mutex
-
-	// Рабочие буферы renderPopups (только рендер-горутина, под frameMu).
-	popupItems []popupItem
-	popupSigBu []popupSig
-
-	// notifierHandle — дескриптор регистрации этого движка в широковещательном
-	// реестре нотификаторов widget-пакета (RegisterUINotifier в New). Снимается
-	// в Stop (UnregisterUINotifier), чтобы короткоживущие движки диалогов/
-	// попапов не накапливались в реестре.
-	notifierHandle uint64
-
-	// measurerHandle — дескриптор регистрации измерителя текста
-	// (widget.RegisterTextMeasurer в New, снимается в Stop).
-	measurerHandle uint64
-
-	// svgTextHandle — дескриптор регистрации растеризатора <text> для
-	// widget/svg (svg.RegisterTextRasterizer в New, снимается в Stop).
-	svgTextHandle uint64
-
-	// moveHandle — дескриптор регистрации приёмника объявлений о переносе
-	// (widget.RegisterMoveSink в New, снимается в Stop).
-	moveHandle uint64
-
-	// offscreen — движок создан NewOffscreen и не занимает служб, общих для
-	// процесса: измерителя текста, растеризатора <text> в SVG и границ экрана
-	// для всплывающих меню.
-	offscreen bool
-	// postMu защищает posted: ставят в очередь из любых горутин, разбирает
-	// горутина кадра (см. post.go).
-	postMu sync.Mutex
-	// posted — вызовы, ожидающие выполнения в горутине кадра.
-	posted []func()
-
-	// moveMu защищает pendingMoves: объявления приходят из горутины, где
-	// двигают виджет (обработка ввода), а забирает их горутина кадра.
-	moveMu sync.Mutex
-	// pendingMoves — объявления, накопленные с прошлого кадра. Список свой у
-	// каждого движка: раньше он был один на процесс, и перенос окна в одном
-	// движке уносило в кадр другого — тот копировал у себя пиксели,
-	// которых там нет.
-	pendingMoves []widgetMove
-
-	frameSeq atomic.Uint64
-	started  atomic.Bool // Start вызывался (Stop без Start не ждёт цикл)
-	stopped  atomic.Bool // Stop уже выполнен (идемпотентность)
-
-	// timersMu защищает timers — таймеры After/Every, живые у этого движка. Stop
-	// гасит их все (см. timer.go).
-	timersMu sync.Mutex
-	timers   map[*Timer]struct{}
-
-	// Прежняя позиция курсора для адресного broadcastMouseMove. Доступ только
-	// из потока-источника ввода (SendMouseMove), синхронизация не нужна.
-	lastMoveX, lastMoveY int
-	hasLastMove          bool
-
-	// Серия нажатий одной кнопкой — для MouseEvent.Clicks. Доступ оттуда же,
-	// из потока-источника ввода (SendMouseButton).
-	clickBtn      widget.MouseButton
-	clickAt       time.Time
-	clickX        int
-	clickY        int
-	clickN        int
-	dblClickDelay time.Duration // 0 — значение по умолчанию (defaultDoubleClick)
-
-	// cursorOvr — принудительный курсор поверх курсора виджетов (cursoroverride.go).
-	cursorOvr cursorOverride
-
-	frames chan output.Frame
-	// fullNext — следующий кадр полный (холст пересоздан); lostFrame — кадр
-	// выброшен из переполненного канала, потребитель отстал (fullframe.go).
-	fullNext  atomic.Bool
-	lostFrame atomic.Bool
-	// recycleFrames — данные тайлов кадров берутся из пула и возвращаются по
-	// Frame.Release (SetFrameRecycling, fullframe.go).
-	recycleFrames atomic.Bool
-	quit          chan struct{}
-	done      chan struct{}
-
-	fps     int     // целевой FPS, 1–120
-	maxFPS  atomic.Int32 // потолок частоты кадров поверх fps; 0 — не задан (maxfps.go)
-	userDPI float64 // пользовательский DPI шрифтов (без учёта HiDPI-масштаба)
-
-	// scaleBits — текущий HiDPI-масштаб (math.Float64bits) для lock-free
-	// чтения из InvalidateRect/toLogical: они вызываются из сеттеров
-	// виджетов, в т.ч. когда движок уже держит e.mu (например, root.SetBounds
-	// из SetResolution) — брать e.mu там нельзя (RWMutex нереентерабелен).
-	scaleBits atomic.Uint64
-	saveDir   string        // если не пусто — сохранять PNG в эту директорию
-	saveCh    chan saveJob  // канал для асинхронного сохранения
-	saveDone  chan struct{} // закрывается, когда saveWorker завершил запись всех PNG
-
-	saveLimit atomic.Int64 // предел числа сохраняемых кадров (0 — без предела)
-	saveCount atomic.Int64
-	saveOnce  sync.Once // лог о достижении предела — один раз
-	snapPool  sync.Pool // пул снапшотов front-буфера для SaveFrames
-
-	// ── Tooltip ─────────────────────────────────────────────────────────────
-	ttMu       sync.Mutex
-	ttEnabled  bool          // показывать всплывающие подсказки
-	ttDelay    time.Duration // задержка появления после остановки курсора
-	ttMouseX   int
-	ttMouseY   int
-	ttLastMove time.Time
-	ttHasMouse bool            // курсор хотя бы раз входил на холст
-	ttShownAt  image.Rectangle // область показанной подсказки (пустая — не показана)
+	// in — ввод: доставка событий, фокус, захват, касания, курсор
+	// (core/input). Создаётся в конструкторе, не меняется.
+	in *input.Dispatcher
+	// lp — цикл кадров: горутина цикла, темп и доставка кадров, повреждение
+	// и рендер по запросу, очередь Post, таймеры (core/loop, loop.go).
+	// Создаётся в конструкторе, не меняется.
+	lp *loop.Loop
+	// ov — оверлеи вне кадра: хостовые попапы, хост нативных модальных окон,
+	// подсказка (core/overlay, overlay.go). Создаётся в конструкторе.
+	ov *overlay.Manager
 }
 
 type saveJob struct {
@@ -235,33 +68,6 @@ type saveJob struct {
 	seq  uint64
 	snap *image.RGBA // снапшот front-буфера на момент рендера
 }
-
-// ─── Границы размера холста (SEC-10) ────────────────────────────────────────
-
-const (
-	// MinCanvasSide — минимальная сторона холста. Ноль и отрицательные
-	// значения давали image.NewRGBA с пустым прямоугольником и мусорную
-	// тайловую арифметику в newCanvas (tilesX/tilesY ≤ 0).
-	MinCanvasSide = 1
-
-	// MaxCanvasSide — максимальная сторона холста в логических пикселях.
-	// 16384 — верх того, что осмысленно рисовать программно; всё, что выше,
-	// это опечатка или подставленное снаружи число.
-	MaxCanvasSide = 16384
-
-	// MaxCanvasPixels — максимальная площадь холста (в ФИЗИЧЕСКИХ пикселях,
-	// то есть уже с учётом HiDPI-масштаба).
-	//
-	// Цена пикселя — 4 байта, а буфера два (front+back): 64 Мпикс это
-	// 2 × 256 МБ. Выше поднимать нельзя — предел в 256 Мпикс всё ещё давал
-	// на New(1<<20, 1<<20) два гигабайтных буфера, то есть ровно то, от чего
-	// защищаемся. Ниже — тоже нельзя: 64 Мпикс с запасом покрывает 8K
-	// (7680×4320 ≈ 33 Мпикс) и 4K при scale=2 (те же 33 Мпикс).
-	//
-	// Без этой границы New(1<<20, 1<<20) просил у рантайма терабайты и валил
-	// процесс на месте.
-	MaxCanvasPixels = 64 << 20
-)
 
 // maxTreeDepth — предел глубины обходов дерева виджетов.
 // Цикл в Children() иначе вешает обход намертво.
@@ -278,45 +84,6 @@ func tooDeep(depth int) bool {
 		log.Printf("engine: обход дерева виджетов прерван на глубине %d — вероятен цикл в Children()", maxTreeDepth)
 	})
 	return true
-}
-
-// clampCanvasSize приводит запрошенный размер холста к допустимому диапазону.
-// При изменении пишет в журнал: молча отдать не тот размер, что просили, —
-// худший из вариантов (приложение будет считать координаты по своему числу).
-func clampCanvasSize(width, height int) (int, int) {
-	w, h := width, height
-	if w < MinCanvasSide {
-		w = MinCanvasSide
-	}
-	if h < MinCanvasSide {
-		h = MinCanvasSide
-	}
-	if w > MaxCanvasSide {
-		w = MaxCanvasSide
-	}
-	if h > MaxCanvasSide {
-		h = MaxCanvasSide
-	}
-	// Площадь: ужимаем пропорционально, чтобы не ломать соотношение сторон.
-	for int64(w)*int64(h) > MaxCanvasPixels {
-		if w >= h {
-			w /= 2
-		} else {
-			h /= 2
-		}
-		if w < MinCanvasSide {
-			w = MinCanvasSide
-		}
-		if h < MinCanvasSide {
-			h = MinCanvasSide
-		}
-	}
-	if w != width || h != height {
-		log.Printf("engine: размер холста %dx%d вне допустимых границ — приведён к %dx%d "+
-			"(сторона %d…%d, площадь ≤ %d пикс.)",
-			width, height, w, h, MinCanvasSide, MaxCanvasSide, int64(MaxCanvasPixels))
-	}
-	return w, h
 }
 
 // New создаёт движок.
@@ -351,9 +118,10 @@ func New(width, height, fps int) *Engine {
 //
 // Всё остальное — как у New: те же шрифты по умолчанию, RenderOnce, Start,
 // Stop. Внутри Draw виджеты меряют ctx.MeasureText своего холста, так что
-// отрисовка точна. На замеры ВНЕ Draw (MeasureUIText) у виджетов такого
-// движка отвечает измеритель процесса, то есть движок окна: шрифт, известный
-// только заданию, там подменится шрифтом по умолчанию.
+// отрисовка точна. Раскладка ВНЕ Draw у виджетов дерева такого движка (после
+// SetRoot или ShowModal) меряет его же холстом — через владельца дерева
+// (ADR-0008, MeasureTextFor); глобальный MeasureUIText и замеры дерева без
+// владельца отвечает измеритель процесса, то есть движок окна.
 func NewOffscreen(width, height, fps int) *Engine {
 	return newEngine(width, height, fps, true)
 }
@@ -365,49 +133,38 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	if fps < 1 {
 		fps = 20
 	}
-	width, height = clampCanvasSize(width, height)
-	fc := newFontCache("assets")
-	e := &Engine{
-		fontCache: fc,
-		canvas:    newCanvas(width, height, fc),
-		frames:    make(chan output.Frame, 8),
-		// wake будит цикл кадров при внешнем темпе: без него RequestFrame
-		// ждал бы ближайшего тика, то есть темп остался бы тикерным.
-		wake:      make(chan struct{}, 1),
-		quit:      make(chan struct{}),
-		done:      make(chan struct{}),
-		fps:       fps,
-		offscreen: offscreen,
-		userDPI:   DefaultDPI,
-		ttEnabled: true,
-		ttDelay:   600 * time.Millisecond,
-	}
+	width, height = hgraster.ClampCanvasSize(width, height)
+	fc := hgtext.NewFontCache("assets")
+	e := &Engine{}
+	e.fontCache = fc
+	e.canvas = hgraster.NewCanvas(width, height, fc)
+	e.rec = hgdraw.NewRecorder()
+	e.lp = loop.New(loopHost{e}, fps)
+	e.offscreen = offscreen
+	e.userDPI = DefaultDPI
+	e.ov = overlay.New(overlayHost{e})
+	e.in = input.New(inputHost{e})
 	e.scaleBits.Store(math.Float64bits(1))
-	e.imgInv = &imageInvalidator{}
-	e.canvas.inv = e.imgInv
+	e.canvasRef.Store(e.canvas)
+	e.imgInv = &hgraster.ImageInvalidator{}
+	e.canvas.SetImageInvalidator(e.imgInv)
 	// Рендер по запросу — режим по умолчанию (v3.5): виджеты самоинвалидируются
 	// (Base.Invalidate, авто-damage в SetBounds/сеттерах), события и слой данных
 	// инвалидируют через движок. Кадры рендерятся только при изменениях UI,
 	// причём частично — в пределах damage-области. Прямые записи в
 	// экспортированные поля виджетов требуют Invalidate()/Engine.Invalidate().
 	// Опт-аут (прежнее поведение «рендер каждый тик»): SetRenderOnDemand(false).
-	e.onDemand.Store(true)
-	// Best-effort: подгружаем шрифты с широким покрытием символов (✓ ✗ ⚠,
-	// box-drawing, стрелки) как fallback к встроенному Go Regular (BUG-2).
-	// Сначала системные, затем наши из assets/fonts — на машине без единого
-	// системного шрифта иначе некому нарисовать эти символы вовсе.
-	//
-	// Файлы не читаются: путь регистрируется, а шрифт загружается при первом
-	// символе, которого нет в основном (fallbackfont.go) — около 22 МБ чтения и
-	// разбора на Windows в обычный старт не попадают.
-	for _, p := range append(systemFallbackFontPaths(), assetFallbackFontPaths()...) {
-		e.canvas.addFallbackFontFile(p)
-	}
-	// Встроенные жирный/курсивный шрифты для FontWeight/FontStyle (P1).
-	e.canvas.RegisterFont(widget.BuiltinFontBold, gobold.TTF)
-	e.canvas.RegisterFont(widget.BuiltinFontItalic, goitalic.TTF)
-	e.canvas.RegisterFont(widget.BuiltinFontBoldItalic, gobolditalic.TTF)
-	e.canvas.RegisterFont(widget.BuiltinFontMono, gomono.TTF)
+	// Включён в loop.New.
+	// Путь команд (ADR-0004, cmdpath.go) — режим по умолчанию с 4.0; растр
+	// по тайлам в пуле (ADR-0005, tileframe.go) — тоже, кроме движка вне
+	// экрана: его одиночные кадры не окупают набора воркеров.
+	e.cmdPath.Store(true)
+	e.hashDiff.Store(true)
+	e.tiled.Store(!offscreen)
+	e.single.Store(true)
+	// Запасная цепочка шрифтов (BUG-2; файлы читаются лениво) и встроенные
+	// жирный, курсив и моноширинный (P1).
+	e.canvas.AddDefaultFonts()
 	// Сообщаем виджетам размер канваса (для удержания popup-меню в пределах экрана).
 	if !offscreen {
 		widget.SetScreenBounds(width, height)
@@ -428,8 +185,15 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// каждом тике, а тик заявляет только свою область. Полная инвалидация на
 	// старте каждой анимации — переход цвета кнопки, выезд меню — перерисовывала
 	// бы весь экран ради того, что меняется в одной его части.
-	e.notifierHandle = widget.RegisterUINotifierWake(e.Invalidate, e.InvalidateRect, func() {})
-	e.moveHandle = widget.RegisterMoveSink(e.noteMove)
+	// Приёмники проверяют контракт отрисовки, если он включён
+	// (drawcontract.go), и делают то же, что Invalidate/InvalidateRect.
+	// Приёмник-владелец (ADR-0008, owner.go): уведомления деревьев, привязанных
+	// к другим движкам, сюда не приходят.
+	e.notifierHandle = widget.RegisterUINotifierFor(treeOwner{e}, e.onWidgetInvalidate, e.onWidgetInvalidateRect, e.onWidgetAnimation, e.onWidgetInvalidateRectOwned)
+	// Политика сбоев (failure.go): изоляция, под go test — прежнее поведение.
+	e.failure.policy.Store(uint32(defaultFailurePolicy()))
+	// Приёмник-владелец: объявления деревьев других движков сюда не приходят.
+	e.moveHandle = widget.RegisterMoveSinkFor(treeOwner{e}, e.noteMove)
 	// Точный замер текста для компоновки до отрисовки (размеры диалогов).
 	//
 	// Измеритель один на процесс — иначе некому отвечать: MeasureUIText зовут
@@ -443,29 +207,32 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// Регистрация со снятием: остановленный движок возвращает измеритель
 	// предыдущему живому вместо того, чтобы оставить свой мёртвый холст.
 	//
-	// Движок вне экрана (NewOffscreen) измерителем не становится.
-	if offscreen {
-		return e
-	}
-	e.measurerHandle = widget.RegisterMeasurers(widget.Measurers{
+	measurers := widget.Measurers{
 		// Замыканием, а не значением метода: SetScale и SetResolution
 		// заменяют e.canvas копией, и привязанный к первому холсту метод
 		// отвечал бы по масштабу, которого давно нет (физическая ширина
 		// вместо логической — на HiDPI всё, что считает перенос до кадра,
 		// переносило раньше времени).
 		Text: func(text string, sizePt float64) int {
-			return e.canvas.MeasureText(text, sizePt)
+			return e.canvasRef.Load().MeasureText(text, sizePt)
 		},
 		TextFont: func(text string, sizePt float64, family string) int {
-			return e.canvas.MeasureTextFont(text, sizePt, family)
+			return e.canvasRef.Load().MeasureTextFont(text, sizePt, family)
 		},
 		RunePositions: func(text string, sizePt float64, family string) []int {
-			return e.canvas.MeasureRunePositionsFont(text, sizePt, family)
+			return e.canvasRef.Load().MeasureRunePositionsFont(text, sizePt, family)
 		},
 		FontMetrics: func(sizePt float64, family string) (ascent, descent, lineGap int) {
-			return e.canvas.FontMetrics(family, sizePt)
+			return e.canvasRef.Load().FontMetrics(family, sizePt)
 		},
-	})
+	}
+	// Свои деревья движок меряет сам (owner.go), в том числе вне экрана.
+	e.measureSet = widget.NewMeasureSet(measurers)
+	// Движок вне экрана (NewOffscreen) глобальным измерителем не становится.
+	if offscreen {
+		return e
+	}
+	e.measurerHandle = widget.RegisterMeasurers(measurers)
 	// <text> внутри SVG рисуется шрифтами этого движка (контуры глифов);
 	// регистрация со снятием, как и у измерителя.
 	e.svgTextHandle = svg.RegisterTextRasterizer(svgTextBridge{e})
@@ -495,7 +262,12 @@ func (e *Engine) SetRoot(w widget.Widget) {
 	// старый root, либо полностью подготовленный новый (лейаут + capture).
 	e.mu.RLock()
 	cw, ch := e.canvas.LogicalSize()
+	prev := e.root
 	e.mu.RUnlock()
+	// Дерево принадлежит этому движку (ADR-0008, owner.go) — до первой
+	// раскладки: она меряет текст шрифтами владельца, а его уведомления идут
+	// сюда адресно.
+	e.bindRoot(prev, w)
 	if w.Bounds().Empty() {
 		w.SetBounds(image.Rect(0, 0, cw, ch))
 	}
@@ -512,7 +284,9 @@ func (e *Engine) SetRoot(w widget.Widget) {
 func (e *Engine) SetRootFullCanvas(w widget.Widget) {
 	e.mu.RLock()
 	cw, ch := e.canvas.LogicalSize()
+	prev := e.root
 	e.mu.RUnlock()
+	e.bindRoot(prev, w) // до раскладки, как в SetRoot
 	w.SetBounds(image.Rect(0, 0, cw, ch))
 	injectCaptureManager(w, e)
 	e.mu.Lock()
@@ -554,7 +328,7 @@ func (e *Engine) Root() widget.Widget {
 // Тайлы — в ФИЗИЧЕСКИХ пикселях (логические × Scale).
 // Канал закрывается после Stop().
 func (e *Engine) Frames() <-chan output.Frame {
-	return e.frames
+	return e.lp.Frames()
 }
 
 // CanvasSize возвращает ЛОГИЧЕСКИЙ размер холста (в нём живут виджеты).
@@ -586,18 +360,30 @@ func (e *Engine) SetScale(k float64) {
 	if k <= 0 {
 		k = 1
 	}
+	e.mu.RLock()
+	within := e.scaleWithin
+	e.mu.RUnlock()
+	if within {
+		e.SetScaleWithin(k)
+		return
+	}
 	e.frameMu.Lock() // буферы меняются — ждём конца кадра
 	defer e.frameMu.Unlock()
 	e.mu.Lock()
-	if e.canvas.scale == k {
+	if e.canvas.Scale() == k {
 		e.mu.Unlock()
 		return
 	}
 	lw, lh := e.canvas.LogicalSize()
-	e.canvas = e.canvas.cloneForSize(lw, lh, k, e.bgSrc)
-	e.canvas.setDPIAll(e.userDPI * k)
+	e.canvas = e.canvas.CloneForSize(lw, lh, k, e.bgSrc)
+	e.canvasRef.Store(e.canvas)
+	e.canvas.SetDPIAll(e.userDPI * k)
 	e.scaleBits.Store(math.Float64bits(k))
 	e.mu.Unlock()
+	// буферы прежнего размера новому холсту не подходят. Вне e.mu: у
+	// набора свой замок, а под e.mu других замков не берут (ADR-0011); кадр
+	// не идёт — frameMu удерживается.
+	e.surfaces.drop()
 	e.markCanvasReplaced()
 	widget.BumpTextMetricsRev() // ширины текста изменились — сброс кэшей переноса
 	e.Invalidate()
@@ -611,13 +397,29 @@ func (e *Engine) SetScale(k float64) {
 func (e *Engine) SetResolution(width, height int) {
 	// Границы те же, что у New (SEC-10): смена разрешения — такой же
 	// вход для «числа снаружи», как и создание движка.
-	width, height = clampCanvasSize(width, height)
+	width, height = hgraster.ClampCanvasSize(width, height)
 	e.frameMu.Lock() // ждём конца текущего кадра — буферы меняются
 	defer e.frameMu.Unlock()
 	e.mu.Lock()
-	e.canvas = e.canvas.cloneForSize(width, height, e.canvas.scale, e.bgSrc)
-	root := e.root
+	e.canvas = e.canvas.CloneForSize(width, height, e.canvas.Scale(), e.bgSrc)
+	e.canvasRef.Store(e.canvas)
+	e.scaleWithin = false // логический размер задан явно: обычный режим
 	e.mu.Unlock()
+	// буферы прежнего размера новому холсту не подходят. Вне e.mu: у
+	// набора свой замок, а под e.mu других замков не берут (ADR-0011); кадр
+	// не идёт — frameMu удерживается.
+	e.surfaces.drop()
+	e.fitTreeToCanvas(width, height)
+}
+
+// fitTreeToCanvas — общий хвост смены холста (SetResolution, SetScaleWithin,
+// SetPhysicalResolution): полный кадр, корень и границы экрана по новому
+// логическому размеру, модальные окна внутри холста. Вне e.mu: SetBounds
+// корня заявляет damage и зовёт реестр, которому e.mu не нужен.
+func (e *Engine) fitTreeToCanvas(width, height int) {
+	e.mu.RLock()
+	root := e.root
+	e.mu.RUnlock()
 	e.markCanvasReplaced()
 	// ВАЖНО: SetBounds — вне e.mu. Изменение bounds триггерит авто-damage
 	// (notifyRectChanged → InvalidateRect); повторный захват e.mu на том же
@@ -664,7 +466,7 @@ func (e *Engine) SetBackgroundFile(path string) error {
 	e.frameMu.Lock() // фон читается blitBackground — меняем между кадрами
 	e.mu.Lock()
 	e.bgSrc = img
-	e.canvas.setBackground(img)
+	e.canvas.SetBackground(img)
 	e.mu.Unlock()
 	e.frameMu.Unlock()
 	e.Invalidate()
@@ -680,6 +482,7 @@ func (e *Engine) SetBackgroundFile(path string) error {
 // когда пользователь взялся за окно. Изображение здесь не копируется — не
 // меняйте его после передачи.
 func (e *Engine) SetBackground(img image.Image) error {
+	e.bgGen.Add(1)
 	if img == nil {
 		return fmt.Errorf("engine: SetBackground: изображение nil (снять фон — ClearBackground)")
 	}
@@ -689,7 +492,7 @@ func (e *Engine) SetBackground(img image.Image) error {
 	e.frameMu.Lock() // фон читается blitBackground — меняем между кадрами
 	e.mu.Lock()
 	e.bgSrc = img
-	e.canvas.setBackground(img)
+	e.canvas.SetBackground(img)
 	e.mu.Unlock()
 	e.frameMu.Unlock()
 	e.Invalidate()
@@ -701,10 +504,11 @@ func (e *Engine) SetBackground(img image.Image) error {
 // Без него «просто тёмный рабочий стол» приходилось изображать растянутым
 // однопиксельным PNG — фон нельзя было ни задать из памяти, ни убрать.
 func (e *Engine) ClearBackground() {
+	e.bgGen.Add(1)
 	e.frameMu.Lock()
 	e.mu.Lock()
 	e.bgSrc = nil
-	e.canvas.clearBackground()
+	e.canvas.ClearBackground()
 	e.mu.Unlock()
 	e.frameMu.Unlock()
 	e.Invalidate()
@@ -764,12 +568,13 @@ func (e *Engine) RegisterFont(fontName string, ttfData []byte) {
 	e.frameMu.Lock() // кэш шрифтов читается отрисовкой — меняем между кадрами
 	defer e.frameMu.Unlock()
 	e.canvas.RegisterFont(fontName, ttfData)
+	widget.BumpTextMetricsRev() // замеры именем этого шрифта устарели
 }
 
 // RegisterFontFile регистрирует именованный шрифт из TTF/OTF-файла.
-// Размер файла ограничен maxFontFileSize.
+// Размер файла ограничен 128 МБ (text.MaxFontFileSize).
 func (e *Engine) RegisterFontFile(fontName, path string) error {
-	data, err := readFileBounded(path, maxFontFileSize)
+	data, err := hgtext.LoadFontFile(path)
 	if err != nil {
 		return fmt.Errorf("RegisterFontFile %q: %w", path, err)
 	}
@@ -795,7 +600,7 @@ func (e *Engine) loadFontDirectory(dir string) {
 		if ext != ".ttf" && ext != ".otf" {
 			continue
 		}
-		data, err := readFontFile(filepath.Join(dir, name))
+		data, err := hgtext.ReadFontFile(filepath.Join(dir, name))
 		if err != nil {
 			continue
 		}
@@ -821,6 +626,7 @@ func (e *Engine) RegisterFontDir(dir string) {
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
 	e.loadFontDirectory(dir)
+	widget.BumpTextMetricsRev()
 }
 
 // SetDefaultFont делает зарегистрированный шрифт шрифтом по умолчанию.
@@ -830,6 +636,7 @@ func (e *Engine) SetDefaultFont(name string) bool {
 	defer e.frameMu.Unlock()
 	ok := e.canvas.SetDefaultFont(name)
 	if ok {
+		widget.BumpTextMetricsRev() // ширины шрифтом по умолчанию изменились
 		e.Invalidate()
 	}
 	return ok
@@ -872,7 +679,7 @@ func (e *Engine) SetTextSubpixel(on bool) {
 // зарегистрированных позже. Не связан с SetTextSubpixel: их можно сочетать.
 func (e *Engine) SetTextQuality(q TextQuality) {
 	e.frameMu.Lock()
-	e.canvas.setTextQuality(q)
+	e.canvas.SetTextQuality(q)
 	e.frameMu.Unlock()
 	e.Invalidate()
 }
@@ -882,7 +689,7 @@ func (e *Engine) SetTextQuality(q TextQuality) {
 func (e *Engine) TextQuality() TextQuality {
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
-	return e.canvas.fontCache.Quality()
+	return e.canvas.DefaultFont().Quality()
 }
 
 // SetTextHinting включает и выключает только автохинтинг по вертикали,
@@ -917,10 +724,10 @@ func (e *Engine) UseThemeTextSubpixel() {
 // изменился, сбрасывает замеры строк: ширины у режимов разные, и раскладка,
 // посчитанная по старым, перестала бы совпадать с отрисовкой. Под frameMu.
 func (e *Engine) setSubpixelLocked(on bool) {
-	if e.canvas.fontCache.Subpixel() == on {
+	if e.canvas.DefaultFont().Subpixel() == on {
 		return
 	}
-	e.canvas.setTextSubpixel(on)
+	e.canvas.SetTextSubpixel(on)
 	widget.BumpTextMetricsRev()
 }
 
@@ -946,14 +753,14 @@ func (e *Engine) followThemeSubpixel(want bool) {
 func (e *Engine) TextSubpixel() bool {
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
-	return e.canvas.fontCache.Subpixel()
+	return e.canvas.DefaultFont().Subpixel()
 }
 
 // AvailableFonts возвращает список зарегистрированных именованных шрифтов.
 func (e *Engine) AvailableFonts() []string {
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
-	return e.canvas.fontNames()
+	return e.canvas.FontNames()
 }
 
 // RegisterFallbackFont добавляет fallback-шрифт (TTF/OTF-данные) для рун,
@@ -962,13 +769,17 @@ func (e *Engine) AvailableFonts() []string {
 func (e *Engine) RegisterFallbackFont(ttfData []byte) bool {
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
-	return e.canvas.AddFallbackFont(ttfData)
+	ok := e.canvas.AddFallbackFont(ttfData)
+	if ok {
+		widget.BumpTextMetricsRev() // руны, которых не было, теперь имеют ширину
+	}
+	return ok
 }
 
 // RegisterFallbackFontFile добавляет fallback-шрифт из TTF/OTF-файла.
-// Размер файла ограничен maxFontFileSize.
+// Размер файла ограничен 128 МБ (text.MaxFontFileSize).
 func (e *Engine) RegisterFallbackFontFile(path string) error {
-	data, err := readFileBounded(path, maxFontFileSize)
+	data, err := hgtext.LoadFontFile(path)
 	if err != nil {
 		return fmt.Errorf("RegisterFallbackFontFile %q: %w", path, err)
 	}
@@ -985,7 +796,7 @@ func (e *Engine) SetDPI(dpi float64) {
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
 	e.userDPI = dpi
-	e.canvas.setDPIAll(dpi * e.canvas.scale)
+	e.canvas.SetDPIAll(dpi * e.canvas.Scale())
 	widget.BumpTextMetricsRev() // ширины текста изменились — сброс кэшей переноса
 	e.Invalidate()
 }
@@ -1039,6 +850,7 @@ func (e *Engine) SetThemeProfile(m *theme.Manager, name string) error {
 		return err
 	}
 	widget.SetReduceMotion(m.MotionReduced())
+	e.themeMgr.Store(m)
 	e.SetTheme(widget.Materialize(m.Active()))
 	return nil
 }
@@ -1077,6 +889,20 @@ func (e *Engine) RenderFrameNow() output.Frame {
 // logicalDamage переводит области кадра в логические координаты, расширяя
 // их наружу: при дробном масштабе округление внутрь отрезало бы от области
 // половину точки, а вместе с ней — поддерево на самом её краю.
+// logicalRect — logicalDamage для одного прямоугольника, без аллокаций.
+func (e *Engine) logicalRect(r image.Rectangle) image.Rectangle {
+	k := e.Scale()
+	if k == 1 {
+		return r
+	}
+	return image.Rect(
+		int(math.Floor(float64(r.Min.X)/k)),
+		int(math.Floor(float64(r.Min.Y)/k)),
+		int(math.Ceil(float64(r.Max.X)/k)),
+		int(math.Ceil(float64(r.Max.Y)/k)),
+	)
+}
+
 func (e *Engine) logicalDamage(rects []image.Rectangle) []image.Rectangle {
 	k := e.Scale()
 	if k == 1 || len(rects) == 0 {
@@ -1112,8 +938,8 @@ func (e *Engine) RenderOnce() *image.RGBA {
 	}
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
-	out := image.NewRGBA(canvas.front.Rect)
-	copy(out.Pix, canvas.front.Pix)
+	out := image.NewRGBA(canvas.Front().Rect)
+	copy(out.Pix, canvas.Front().Pix)
 	return out
 }
 
@@ -1121,20 +947,20 @@ func (e *Engine) RenderOnce() *image.RGBA {
 // он и только он. По флагам Start/Stop, а не по loopGID: сразу после Start
 // горутина цикла может ещё не успеть записать свой номер, а очередь уже его.
 func (e *Engine) loopRunning() bool {
-	return e.started.Load() && !e.stopped.Load()
+	return e.lp.Running()
 }
 
 // Start запускает цикл рендеринга в отдельной горутине.
 // Вызывать не более одного раза.
 func (e *Engine) Start() {
-	if e.stopped.Load() || !e.started.CompareAndSwap(false, true) {
+	if !e.lp.MarkStarted() {
 		return // повторный Start или Start после Stop — no-op
 	}
 	e.Invalidate() // гарантируем рендер первого кадра в любом режиме
 	if e.saveDir != "" {
 		go e.saveWorker()
 	}
-	go e.loop()
+	e.lp.Run()
 }
 
 // Stop останавливает цикл рендеринга и ждёт его завершения.
@@ -1150,21 +976,33 @@ func (e *Engine) Start() {
 // Stop без Start тоже безопасен (снимает регистрацию, закрывает каналы) —
 // раньше он навсегда зависал на ожидании цикла, который никто не запускал.
 func (e *Engine) Stop() {
-	if !e.stopped.CompareAndSwap(false, true) {
+	if !e.lp.MarkStopped() {
 		return
 	}
 	widget.UnregisterUINotifier(e.notifierHandle)
+	e.unbindAll() // корень и модальные снова уведомляют широковещанием (ADR-0008)
+	// Анимации, привязанные к циклу этого движка, больше никто не шагнёт:
+	// снимаются без OnDone, а не висят в реестре вечно.
+	widget.StopAnimationsFor(e)
+	// Учёт рисующихся виджетов общий на процесс: остановленный движок,
+	// включивший проверку контракта, не должен держать его включённым у всех.
+	e.SetDrawContractCheck(false)
+	e.releaseFailureTrace()
 	widget.UnregisterMoveSink(e.moveHandle)
+	e.countMotion(false)
 	widget.UnregisterTextMeasurer(e.measurerHandle)
 	svg.UnregisterTextRasterizer(e.svgTextHandle)
-	close(e.quit)
-	// Таймеры гасим до ожидания цикла: stopped уже выставлен, новые не заведутся.
-	e.stopTimers()
-	started := e.started.Load()
-	if started {
-		<-e.done
-	}
-	close(e.frames)
+	// Цикл: quit закрывается, таймеры гаснут до ожидания цикла (stopped уже
+	// выставлен, новые не заведутся), горутина цикла дожидается выхода.
+	e.lp.Halt()
+	started := e.lp.Started()
+	// Цикл кадра остановлен (done); RenderOnce с другой горутины держит
+	// frameMu — воркеры тайлового растра, кэш размытия и таблицы хэшей
+	// (tileframe.go) освобождаются под ним.
+	e.frameMu.Lock()
+	e.tr = nil
+	e.frameMu.Unlock()
+	e.lp.CloseFrames()
 	if e.saveCh != nil {
 		close(e.saveCh) // saveWorker дочитает оставшиеся задачи
 		if started {
@@ -1193,7 +1031,7 @@ func (e *Engine) accessibilityTreeNow() *widget.AccessNode {
 	e.mu.RLock()
 	root := e.root
 	e.mu.RUnlock()
-	focused := e.focus.get()
+	focused := e.in.Focused()
 
 	tree := widget.BuildAccessTree(root, focused)
 	if tree == nil {
@@ -1262,6 +1100,7 @@ func (e *Engine) focusAccessibleNow(w widget.Widget) bool {
 //
 // Возвращает false, если виджет nil, скрыт, выключен или его границы пусты.
 func (e *Engine) ActivateAccessible(w widget.Widget) bool {
+	defer e.guardInput("ActivateAccessible")()
 	ok := false
 	e.callOnLoop(func() { ok = e.activateAccessibleNow(w) })
 	return ok
@@ -1280,7 +1119,7 @@ func (e *Engine) activateAccessibleNow(w widget.Widget) bool {
 	}
 	// Границы — в кадре виджета; щелчок идёт по экрану. Для кнопки внутри
 	// прокрутки это разные точки (см. frames.go).
-	b = b.Sub(e.frameOffsetOf(w))
+	b = b.Sub(e.in.FrameOffsetOf(w))
 	// Центр — в ЛОГИЧЕСКИХ координатах (в них живут Bounds), а SendMouse*
 	// принимают ФИЗИЧЕСКИЕ и сами делят на Scale() внутри toLogical.
 	k := e.Scale()
@@ -1306,7 +1145,7 @@ func (e *Engine) activateAccessibleNow(w widget.Widget) bool {
 //
 // Владелец обязан реализовывать widget.AccessActionHandler: без него
 // возвращается false, и решать, что делать дальше (прежнее нажатие в центр
-// владельца), предстоит мосту, — см. Window.accessibilityNodeAction.
+// владельца), предстоит мосту, — см. accessibilityNodeAction в platform/a11y.
 // Метод потокобезопасен: действие выполняется на горутине движка, а вызывают
 // его со своих потоков мосты доступности (D-Bus, COM-поток UIA). Над скрытым
 // или выключенным владельцем действий нет — как у FocusAccessible.
@@ -1317,6 +1156,7 @@ func (e *Engine) activateAccessibleNow(w widget.Widget) bool {
 // в неё. Владельцам-оверлеям (меню) фокус не передаётся: меню само не
 // принимает ввод от того, кто его не открывал, а перехват фокуса закрыл бы его.
 func (e *Engine) AccessAction(w widget.Widget, id string, action widget.AccessActionKind) bool {
+	defer e.guardInput("AccessAction")()
 	ok := false
 	e.callOnLoop(func() { ok = e.accessActionNow(w, id, action) })
 	return ok
@@ -1390,6 +1230,10 @@ func (e *Engine) ShowModal(m widget.ModalWidget) {
 			return
 		}
 	}
+
+	// Модальное окно — отдельный корень этого движка (ADR-0008): привязка до
+	// раскладки, чтобы она мерила текст шрифтами этого движка.
+	widget.BindOwner(m, treeOwner{e})
 
 	// Центрируем диалог (в логических координатах)
 	e.mu.RLock()
@@ -1539,6 +1383,7 @@ func (e *Engine) CloseModal(m widget.ModalWidget) {
 			sm.SetModal(false)
 		}
 		e.fireOnModalClosed(closed)
+		widget.BindOwner(closed, nil)
 	}
 	e.Invalidate()
 }
@@ -1582,137 +1427,84 @@ func savePNG(img *image.RGBA, path string) {
 	_ = png.Encode(f, img)
 }
 
-func (e *Engine) loop() {
-	defer close(e.done)
-	e.loopGID.Store(curGoroutineID())
-	defer e.loopGID.Store(0)
-	// Анимации, заведённые на горутине цикла, шагает только этот движок: у
-	// вторичного движка диалога свои обработчики и своя горутина (GG-68).
-	defer widget.BindAnimationLoop(e)()
-
-	interval := e.frameInterval()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	// lastGen — поколение инвалидации, отрендеренное последним кадром
-	// (on-demand). Сентинел гарантирует рендер первого кадра.
-	lastGen := ^uint64(0)
-	// lastFrameAt — когда рисовался последний кадр: кадр по пробуждению не
-	// должен идти чаще темпа кадров.
-	var lastFrameAt time.Time
-
-	for {
-		select {
-		case <-e.wake:
-			// Отложенные вызовы разбираем ПЕРВЫМИ: они меняют дерево, и их
-			// изменения должны попасть в тот же кадр, а не в следующий.
-			e.runPosted()
-			if e.pacingIsExternal() {
-				// Внешний темп: кадр — только по запросу стока. Анимации
-				// продвигаются в тикере, здесь — только кадр.
-				if !e.takeFrameRequest() {
-					continue
-				}
-				frame := e.renderFrame()
-				lastFrameAt = time.Now()
-				if len(frame.Tiles) == 0 && len(frame.Moves) == 0 {
-					continue
-				}
-				e.deliver(frame)
-				continue
-			}
-			// Тикерный темп: через очередь приходит ввод окна, и его результат
-			// должен появиться сразу, а не на следующем тике. Но не чаще темпа
-			// кадров — мышь шлёт сотни событий в секунду, и кадр на каждое был
-			// бы работой впустую; не нарисованное здесь нарисует тикер.
-			if !e.onDemand.Load() || time.Since(lastFrameAt) < interval {
-				continue
-			}
-			gen := e.invGen.Load()
-			if gen == lastGen && !e.fullFramePending() {
-				continue
-			}
-			lastGen = gen
-			frame := e.renderFrame()
-			lastFrameAt = time.Now()
-			if len(frame.Tiles) == 0 && len(frame.Moves) == 0 {
-				continue
-			}
-			e.deliver(frame)
-
-		case <-ticker.C:
-			// Потолок частоты (SetMaxFPS) мог смениться с прошлого тика.
-			if iv := e.frameInterval(); iv != interval {
-				interval = iv
-				ticker.Reset(iv)
-			}
-			// Отложенные вызовы — раньше всего: они меняют дерево, а решение
-			// о пропуске кадра принимается по заявленному damage, и damage от
-			// них обязан успеть.
-			e.runPosted()
-			// Продвигаем анимации ДО решения о пропуске кадра: тики зовут
-			// сеттеры виджетов, те самоинвалидируются (авто-damage), поэтому
-			// damage от тиков попадёт в invGen ниже и кадр перерисуется
-			// частично. Вызывается в любом режиме — анимации живут и при
-			// SetRenderOnDemand(false).
-			widget.StepAnimationsFor(e, time.Now())
-			// Внешний темп: кадры готовит RequestFrame. Анимации всё равно
-			// продвигаем — иначе начатая приложением анимация замерла бы до
-			// следующего запроса и шла бы рывками.
-			if e.pacingIsExternal() {
-				continue
-			}
-			if e.onDemand.Load() {
-				gen := e.invGen.Load()
-				// Полный кадр после потери или смены размера рисуется и без
-				// изменений: иначе статичный интерфейс остался бы у
-				// потребителя неверным (fullframe.go).
-				if gen == lastGen && !e.animationNeeded(interval) && !e.fullFramePending() {
-					continue // UI не менялся — пропускаем кадр целиком
-				}
-				lastGen = gen // снимаем ДО рендера: инвалидация во время кадра не потеряется
-			}
-			frame := e.renderFrame()
-			lastFrameAt = time.Now()
-			// Кадр из ОДНИХ переносов — полноценный кадр: окно переехало,
-			// пикселей не изменилось, и потребителю есть что выполнить.
-			// Проверка только по тайлам отбрасывала его молча.
-			if len(frame.Tiles) == 0 && len(frame.Moves) == 0 {
-				continue
-			}
-			// Один путь выдачи на оба темпа: сток и канал получают кадр
-			// в одном месте, иначе сток молча оставался бы пустым при
-			// тикерном темпе — ровно это и показал тест.
-			e.deliver(frame)
-		case <-e.quit:
-			return
-		}
-	}
-}
-
 func (e *Engine) renderFrame() output.Frame {
 	// frameMu гарантирует целостность канваса на время кадра; e.mu берётся
 	// лишь на мгновение — снять указатели. SetRoot/Root/события рендером
 	// больше не блокируются.
 	e.frameMu.Lock()
 	defer e.frameMu.Unlock()
+	// Профиль движения (motionprofile.go): Draw заводит переходы, а кадр
+	// RenderOnce/RenderFrameNow идёт на горутине вызывающего.
+	if unbind := e.motionScope(); unbind != nil {
+		defer unbind()
+	}
+	// Граница кадра (failure.go): паника в Draw любого виджета ловится здесь,
+	// кадр не отдаётся (нулевой Frame), следующий — полный.
+	defer e.guard("Draw")()
+	e.stats.frames.Add(1)
+	drawStart := time.Now()
 
 	e.mu.RLock()
 	canvas := e.canvas
 	root := e.root
 	e.mu.RUnlock()
 
+	// Буфер вывода (surfaces.go): свободный из набора, иначе кадр
+	// пропускается, а damage остаётся до следующего раза.
+	//
+	// Что кадр перерисует, в буфер из front не копируется: перерисовка всё
+	// равно положит туда фон и дерево целиком. Заявленное после этого места
+	// только расширит перерисовку, поэтому подсмотреть его здесь безопасно.
+	redraw, redrawAll := e.peekDamage()
+	surface, haveSurface := e.acquireSurface(canvas, e.wholeFramePending() || redrawAll, redraw)
+	if !haveSurface {
+		e.stats.skipped.Add(1)
+		return output.Frame{Seq: e.frameSeq.Load(), Timestamp: time.Now(), Width: canvas.W, Height: canvas.H}
+	}
+
 	damageRects, damageAll := e.consumeDamage()
 	// Повреждение, задевшее размытую подложку, расширяется на неё целиком:
 	// иначе размытие посчиталось бы по куску поверх прошлого кадра
 	// (backdropdamage.go).
 	if !damageAll {
-		damageRects = canvas.expandForBackdrops(damageRects)
+		damageRects = canvas.ExpandForBackdrops(damageRects)
+		damageRects = mergeOverlaps(damageRects)
 	}
 	// Полный кадр (fullframe.go): рисуется всё и отдаётся всё, без диффа.
 	full := e.takeFullFrame()
 	if full {
 		damageAll = true
+	}
+
+	// Модальные виджеты кадра — снимок списка (затемнение и диалоги рисуются
+	// после дерева; переходам оверлеев нужен порядок слоёв уже здесь).
+	e.modMu.Lock()
+	modals := make([]widget.ModalWidget, len(e.modals))
+	copy(modals, e.modals)
+	e.modMu.Unlock()
+
+	// Переходы оверлеев (overlaytrans.go): область перехода, задетая
+	// повреждением, перерисовывается целиком; шаги без повреждения идут
+	// смешением снимков, без отрисовки дерева.
+	//
+	// Флаг читается раз на кадр: SetOverlayTransitions с другой горутины не
+	// должен застать кадр на полпути. Выключенные, но не снятые переходы
+	// снимаются здесь же (ovtPrepare).
+	var ovtSteps []image.Rectangle
+	var layers []widget.Widget
+	ovtOn := e.ovt.on.Load()
+	if ovtOn || len(e.ovt.list) > 0 {
+		layers = ovtLayers(root, modals)
+		damageRects, ovtSteps = e.ovtPrepare(canvas, damageRects, damageAll, layers, ovtOn)
+		if !damageAll {
+			damageRects = mergeOverlaps(damageRects)
+		}
+	}
+	// Шаги переходов хостовых попапов (popuptrans.go): холст не меняется,
+	// кадр без повреждения доходит только до renderPopups.
+	popupSteps := e.ov.TakePopupTicked()
+	if (len(ovtSteps) > 0 || popupSteps) && !damageAll && len(damageRects) == 0 && e.lp.RenderOnDemand() {
+		return e.renderStepFrame(canvas, root, modals, surface, ovtSteps, popupSteps, image.Rectangle{}, drawStart)
 	}
 	// Объединение нужно там, где область может быть только одна: клип
 	// канваса — прямоугольник, и попапы отбираются по одному прямоугольнику.
@@ -1730,7 +1522,7 @@ func (e *Engine) renderFrame() output.Frame {
 	// Рисовать по объединению не жалко (пиксели остаются те же, тайлы от
 	// этого не меняются), а вот сравнивать по нему — значит отправить
 	// потребителю всё, что лежит между далёкими областями.
-	partial := e.onDemand.Load() && !damageAll && !damage.Empty()
+	partial := e.lp.RenderOnDemand() && !damageAll && !damage.Empty()
 
 	// Пропуск поддеревьев: обходу нужно знать, что именно перерисовывается.
 	// Полный кадр ограничений не ставит — иначе первый же кадр после
@@ -1754,61 +1546,153 @@ func (e *Engine) renderFrame() output.Frame {
 		// пикселях, а границы виджетов живут в логических. При масштабе
 		// 1.25 сравнение одних с другими пропустило бы ровно то поддерево,
 		// которое и надо было нарисовать.
-		canvas.setDrawDamage(e.logicalDamage([]image.Rectangle{damage}))
-		defer canvas.clearDrawDamage()
+		canvas.SetDrawDamage(e.logicalDamage([]image.Rectangle{damage}))
+		defer canvas.ClearDrawDamage()
 	} else {
-		canvas.clearDrawDamage()
+		canvas.ClearDrawDamage()
 	}
 
 	if partial {
 		damage = damage.Intersect(image.Rect(0, 0, canvas.W, canvas.H))
 		if damage.Empty() {
+			if len(ovtSteps) > 0 || popupSteps || e.getPopupSink() != nil {
+				// Повреждение целиком за краем холста, а шаги переходов —
+				// на нём: их нельзя потерять, последний шаг не повторится.
+				// Хостовые попапы живут и за краем: их повреждение тоже
+				// доходит до renderPopups.
+				return e.renderStepFrame(canvas, root, modals, surface, ovtSteps, popupSteps, popupDamage, drawStart)
+			}
 			return output.Frame{Seq: e.frameSeq.Add(1), Timestamp: time.Now(), Width: canvas.W, Height: canvas.H}
 		}
-		// Сброс признаков — ДО блита фона: фон помечает тайлы, которые
-		// накрыл, и сброс после него стёр бы эту пометку. Тогда тайл, на
-		// котором кроме обоев ничего нет, снова уезжал бы к потребителю с
-		// ответом «неизвестно что».
-		canvas.resetTileMarks(damage)
-		canvas.blitBackgroundIn(damage)
-		canvas.setBaseClip(damage)
-		defer canvas.clearBaseClip()
-	} else {
-		canvas.resetTileMarks(image.Rect(0, 0, canvas.W, canvas.H))
-		canvas.blitBackground()
+	}
+	// Переходы оверлеев: обход оверлеев при записи решает, что уходит после
+	// растра (toplayers.go), поэтому кадр переходов открывается до записи.
+	if ovtOn {
+		e.ovtBeginFrame(!partial, damage, layers)
+	}
+	// Режим буферов холста (ADR-0007): окно back над front или два буфера.
+	canvas.SetSingleBuffer(e.single.Load())
+	own := canvas.UsingOwnBack()
+
+	// Переносы применяются к ПЕРЕДНЕМУ буферу ДО растра: он приводится в то
+	// состояние, в котором окажется буфер потребителя после копирования, и
+	// воркеры сравнивают тайлы с ним уже таким (ADR-0007) — дифф оставляет
+	// только настоящие расхождения. Без этого потребитель получал и команду
+	// переноса, и все пиксели переехавшего окна — то есть платил столько же,
+	// сколько без переноса вовсе. При полном кадре объявления просто
+	// отбрасываются: потребитель и так получает всё заново, а оставшись, они
+	// достались бы следующему кадру.
+	var moves []output.MoveRegion
+	declared := e.takeMoves()
+	if partial && len(declared) > 0 {
+		moves = canvas.ApplyMovesToFront(declared)
 	}
 
+	// Путь команд (ADR-0004, cmdpath.go): дерево, а за ним оверлеи, модальные
+	// и подсказка (toplayers.go) пишутся в рекордер ДО фона и сброса меток
+	// тайлов — запись пикселей не трогает, а паника в Draw оставляет холст
+	// нетронутым. Воспроизведение — ниже, на месте DrawTraced.
+	var rootList *hgdraw.List
+	var exitClip hgdraw.ClipState
+	// Ничейное повреждение забирается после всех ранних выходов (кадры
+	// шагов переходов, пустое повреждение): оно нужно только записи дерева,
+	// а забранное до выхода пропало бы. На прямом пути — просто дренируется.
+	force := e.takeForce()
+	cmdPath := root != nil && e.cmdPath.Load()
 	// Активен ли хост попапов: если да — оверлеи с OverlayBounds не рисуются
 	// в холст (они уходят в собственные окна-попапы, см. renderPopups ниже).
 	hosted := e.getPopupSink() != nil
+	if cmdPath {
+		if !partial && !damageAll {
+			// Кадр без заявленного повреждения (RenderOnce, рендер каждый
+			// тик, появление подсказки) — как прежде, всё заново: приложение
+			// могло изменить то, о чём не сообщило ни одним Invalidate.
+			e.rec.Invalidate()
+		}
+		e.beginDrawContract()
+		rootList, exitClip = e.recordFrame(canvas, root, modals, hosted, ovtOn, force)
+	} else {
+		e.clearPost()
+	}
+	// План кадра пути команд (hashdiff.go): ничейное повреждение, «всё
+	// заново» и переносы принуждают тайлы к растру.
+	var plan *framePlan
+	if cmdPath && rootList != nil {
+		plan = e.planFrame(full || damageAll, force, len(moves) > 0)
+	}
+	if partial {
+		canvas.SetBaseClip(damage)
+		defer canvas.ClearBaseClip()
+	}
+	switch {
+	case plan == nil:
+		// Прямой путь (и дерево без единой команды) рисует в холст: окно back
+		// размером с кадр — сброшенное, оно равно front и остаётся (ADR-0007);
+		// фон на весь back или на повреждение, признаки тайлов сбрасываются
+		// до него.
+		if own {
+			canvas.SetBackWindow(canvas.Frame())
+			if partial {
+				canvas.Touch(damage)
+				for _, r := range ovtSteps {
+					canvas.Touch(r) // шаг перехода смешивается на месте покоя мимо повреждения
+				}
+			} else {
+				canvas.Touch(canvas.Frame())
+			}
+		}
+		e.blitBackgroundFrame(canvas, partial, damage)
+	case own && len(e.post) > 0:
+		// Слои после растра (переходы оверлеев): окно back над их местами,
+		// заполненное из front; тайлы растра под ним воркеры кладут в окно.
+		canvas.SetBackWindow(e.postRect)
+		canvas.Touch(e.postRect)
+	}
 
 	// Корневое дерево: рисуем root и его overlay-слой (popup/dropdown).
 	// Без этого вызова на канвасе остаётся только blitBackground —
 	// именно сюда «уехал» баг с чёрным экраном при последнем appendF.
+	// Отсюда и до диффа рисуют виджеты: уведомление от них на этой горутине —
+	// нарушение контракта отрисовки (drawcontract.go).
+	e.beginDrawContract()
+	var res rasterResult
 	if root != nil {
-		root.Draw(canvas)
-		drawOverlays(root, canvas, hosted)
+		if cmdPath {
+			res = e.rasterTree(canvas, rootList, exitClip, partial, damage, plan)
+			// Чужие буферы вывода (surfaces.go): тайлы, пропущенные
+			// хэш-диффом внутри области перерисовки, в back ещё не
+			// скопированы, а буфер потребителя обязан быть полным. До
+			// отложенных слоёв: они лягут поверх.
+			if res.hashed && surface != 0 {
+				for _, i := range res.skipped {
+					if tile := canvas.TileRect(i); tile.Overlaps(redraw) {
+						canvas.CopyFrontToBack(tile)
+					}
+				}
+			}
+			if len(e.post) > 0 {
+				e.drawPost(canvas, hosted, ovtOn)
+			}
+		} else {
+			widget.DrawTraced(root, canvas)
+			e.drawOverlayLayer(root, canvas, hosted, ovtOn)
+			// Модальные виджеты: затемнение + диалог поверх всего
+			for _, m := range modals {
+				if !m.IsModal() {
+					continue
+				}
+				// Затемнение фона (логические координаты)
+				if dim := m.DimColor(); dim.A > 0 {
+					lw, lh := canvas.LogicalSize()
+					canvas.FillRectAlpha(0, 0, lw, lh, dim)
+				}
+				widget.DrawTraced(m, canvas)
+				e.drawOverlayLayer(m, canvas, hosted, ovtOn)
+			}
+		}
 	}
-
-	// Модальные виджеты: затемнение + диалог поверх всего
-	e.modMu.Lock()
-	modals := make([]widget.ModalWidget, len(e.modals))
-	copy(modals, e.modals)
-	e.modMu.Unlock()
-
-	for _, m := range modals {
-		if !m.IsModal() {
-			continue
-		}
-		// Затемнение фона (логические координаты)
-		dim := m.DimColor()
-		if dim.A > 0 {
-			lw, lh := canvas.LogicalSize()
-			canvas.FillRectAlpha(0, 0, lw, lh, dim)
-		}
-		// Отрисовка модального виджета
-		m.Draw(canvas)
-		drawOverlays(m, canvas, hosted)
+	if ovtOn {
+		e.ovtEndFrame()
 	}
 
 	// Хостируемые popup-оверлеи: рендерим их в отдельные буферы и отдаём хосту
@@ -1816,64 +1700,173 @@ func (e *Engine) renderFrame() output.Frame {
 	if hosted {
 		// !partial — рисовали весь кадр, значит перерисовываем и все попапы.
 		e.renderPopups(canvas, root, modals, popupDamage, !partial)
+	} else if e.ov.Arena().Canvas() != nil {
+		// Хост попапов снят: заготовку арены — сборщику (ADR-0009).
+		e.ov.ReleaseArena()
+		e.ov.ResetPopupBytes()
 	}
 
-	// Всплывающая подсказка (поверх всего, включая модальные диалоги).
-	e.drawTooltip(canvas, root)
-
-	// Переносы применяются к ПЕРЕДНЕМУ буферу до диффа: он приводится в то
-	// состояние, в котором окажется буфер потребителя после копирования, и
-	// дифф оставляет только настоящие расхождения. Без этого потребитель
-	// получал и команду переноса, и все пиксели переехавшего окна — то есть
-	// платил столько же, сколько без переноса вовсе.
-	var moves []output.MoveRegion
-	declared := e.takeMoves()
-	if partial && len(declared) > 0 {
-		moves = canvas.applyMovesToFront(declared)
+	// Всплывающая подсказка (поверх всего, включая модальные диалоги); на
+	// пути команд она записана или отложена вместе со слоями.
+	if !cmdPath {
+		e.drawTooltip(canvas, root)
 	}
-	// При полном кадре объявления просто отбрасываются: потребитель и так
-	// получает всё заново, а оставшись, они достались бы следующему кадру.
+	e.endDrawContract()
+
+	// Окна программ с видео (video.go): после всей отрисовки, до диффа —
+	// метки тайлов нужны описанию кадра.
+	videos := e.collectVideos(canvas, root, modals)
+
+	diffStart := time.Now()
+	e.stats.drawNs.Add(uint64(diffStart.Sub(drawStart)))
 
 	// Diff: при частичной перерисовке сравниваем только тайлы,
 	// пересекающие damage-область (контракт InvalidateRect).
 	var tiles []output.DirtyTile
-	canvas.recycle = e.recycleFrames.Load()
+	canvas.SetFrameOptions(e.recycleFrames.Load(), !e.noTileData.Load())
 	switch {
-	case full:
-		tiles = canvas.allTiles()
-	case partial:
-		tiles = canvas.diffAndSyncInRects(damageRects)
+	case !own:
+		// Чужая память потребителя: back полноразмерный, как в 4а.3.
+		switch {
+		case full:
+			tiles = canvas.AllTiles()
+		case res.hashed && len(e.post) == 0 && len(res.rendered) < hashDiffSerialMax:
+			// Хэш-дифф (ADR-0006): тайлы, которые не рисовались, равны front —
+			// сравниваются только нарисованные.
+			tiles = canvas.DiffAndSyncTiles(res.rendered)
+		case res.hashed && partial:
+			// Слои легли поверх растра неизвестно куда, или нарисованных
+			// тайлов много (дешевле в пуле): дифф по объединению выбранного.
+			tiles = canvas.DiffAndSyncInRects(append([]image.Rectangle{damage}, ovtSteps...))
+		case partial:
+			// Шаги переходов вне повреждения смешаны в буфер без перерисовки —
+			// их области сравниваются тоже.
+			tiles = canvas.DiffAndSyncInRects(append(damageRects[:len(damageRects):len(damageRects)], ovtSteps...))
+		default:
+			tiles = canvas.DiffAndSync()
+		}
+		if plan != nil && !e.postRect.Empty() {
+			e.tileRaster().noteOverlaid(false, []image.Rectangle{e.postRect})
+		}
 	default:
-		tiles = canvas.diffAndSync()
+		// Свой буфер (ADR-0007): воркеры уже сравнили и скопировали свои тайлы
+		// в front; окно back сбрасывается (на прямом пути частичного кадра —
+		// только заявленные области и шаги: тайл между далёкими областями не
+		// сравнивается), изменившиеся тайлы извлекаются из front.
+		var rects []image.Rectangle
+		if plan == nil && partial {
+			rects = append(damageRects[:len(damageRects):len(damageRects)], ovtSteps...)
+		}
+		canvas.FlushBackWindow(rects)
+		if plan != nil && !e.postRect.Empty() {
+			// Что легло поверх растра дерева — не функция команд: тайлы под
+			// местом слоёв на следующем кадре растрятся заново (hashdiff.go).
+			// Все, а не только изменившиеся при сбросе: слой, нарисовавший то
+			// же, что и кадр назад, сброс не отличит от слоя, не тронувшего
+			// тайл, а под ним уже не дерево.
+			e.tileRaster().noteOverlaid(false, []image.Rectangle{e.postRect})
+		}
+		if full {
+			tiles = canvas.AllTilesFront()
+		} else {
+			tiles = canvas.ChangedTiles()
+		}
 	}
 
-	canvas.finishBackdrops(partial, damageRects)
+	canvas.FinishBackdrops(partial, damageRects)
 
 	seq := e.frameSeq.Add(1)
 
-	if e.saveDir != "" && len(tiles) > 0 && e.saveAllowed() {
-		// Снимаем копию front-буфера СЕЙЧАС, пока он актуален.
-		snap := e.acquireSnap(canvas.front.Rect)
-		copy(snap.Pix, canvas.front.Pix)
-		path := filepath.Join(e.saveDir, fmt.Sprintf("frame_%06d.png", seq))
-		// Отправка блокирующая (все кадры сохраняются), но не переживает Stop:
-		// иначе при остановке с полным буфером рендер и Stop ждали бы друг друга.
-		select {
-		case e.saveCh <- saveJob{path: path, seq: seq, snap: snap}:
-		case <-e.quit:
-		}
-	}
+	e.saveFrame(canvas, seq, tiles)
 
 	fr := output.Frame{
 		Seq:       seq,
 		Timestamp: time.Now(),
 		Tiles:     tiles,
-		Regions:   canvas.regionsFor(tiles),
+		Regions:   canvas.RegionsFor(tiles),
 		Moves:     moves,
+		Videos:    videos,
 		Width:     canvas.W,
 		Height:    canvas.H,
 	}
-	fr.AttachSlabs(canvas.takeSlabs()...)
+	fr.AttachSlabs(canvas.TakeSlabs()...)
+	e.surfaceFrameDone(surface, &fr, full)
+	e.stats.bufferBytes.Store(uint64(canvas.EndFrameBuffers()))
+	e.stats.diffNs.Add(sinceNanos(diffStart))
+	e.stats.tiles.Add(uint64(len(tiles)))
+	e.stats.moves.Add(uint64(len(moves)))
+	return fr
+}
+
+// saveFrame отдаёт кадр на запись в PNG (SetSaveFrames), если он что-то
+// изменил.
+func (e *Engine) saveFrame(canvas *Canvas, seq uint64, tiles []output.DirtyTile) {
+	if e.saveDir != "" && len(tiles) > 0 && e.saveAllowed() {
+		// Снимаем копию front-буфера СЕЙЧАС, пока он актуален.
+		snap := e.acquireSnap(canvas.Front().Rect)
+		copy(snap.Pix, canvas.Front().Pix)
+		path := filepath.Join(e.saveDir, fmt.Sprintf("frame_%06d.png", seq))
+		// Отправка блокирующая (все кадры сохраняются), но не переживает Stop:
+		// иначе при остановке с полным буфером рендер и Stop ждали бы друг друга.
+		select {
+		case e.saveCh <- saveJob{path: path, seq: seq, snap: snap}:
+		case <-e.lp.Quit():
+		}
+	}
+}
+
+// renderStepFrame — кадр, в котором изменились только шаги переходов
+// оверлеев (overlaytrans.go): дерево не рисуется, снимки смешиваются прямо в
+// буфер, и сравниваются только их области.
+func (e *Engine) renderStepFrame(canvas *Canvas, root widget.Widget, modals []widget.ModalWidget,
+	surface int, steps []image.Rectangle, popupSteps bool, popupDamage image.Rectangle, drawStart time.Time) output.Frame {
+	canvas.SetSingleBuffer(e.single.Load())
+	own := canvas.UsingOwnBack()
+	if own && len(steps) > 0 {
+		// Смешение идёт в окно back над областями шагов (ADR-0007).
+		canvas.SetBackWindow(unionRects(steps))
+		for _, r := range steps {
+			canvas.Touch(r)
+		}
+	}
+	e.ovtStepOnly(canvas)
+	if (popupSteps || !popupDamage.Empty()) && e.getPopupSink() != nil {
+		// Холст не перерисовывается; попап — только если повреждение
+		// задело его, иначе хост получает тот же Img с новым шагом.
+		e.beginDrawContract()
+		e.renderPopups(canvas, root, modals, popupDamage, false)
+		e.endDrawContract()
+	}
+	videos := e.collectVideos(canvas, root, modals)
+	diffStart := time.Now()
+	e.stats.drawNs.Add(uint64(diffStart.Sub(drawStart)))
+	canvas.SetFrameOptions(e.recycleFrames.Load(), !e.noTileData.Load())
+	var tiles []output.DirtyTile
+	if own {
+		canvas.FlushBackWindow(steps)
+		tiles = canvas.ChangedTiles()
+	} else {
+		tiles = canvas.DiffAndSyncInRects(steps)
+	}
+	if e.tr != nil && len(steps) > 0 {
+		e.tr.noteOverlaid(false, steps) // смесь шага — не функция команд
+	}
+	seq := e.frameSeq.Add(1)
+	e.saveFrame(canvas, seq, tiles)
+	fr := output.Frame{
+		Seq:       seq,
+		Timestamp: time.Now(),
+		Tiles:     tiles,
+		Regions:   canvas.RegionsFor(tiles),
+		Videos:    videos,
+		Width:     canvas.W,
+		Height:    canvas.H,
+	}
+	fr.AttachSlabs(canvas.TakeSlabs()...)
+	e.surfaceFrameDone(surface, &fr, false)
+	e.stats.bufferBytes.Store(uint64(canvas.EndFrameBuffers()))
+	e.stats.diffNs.Add(sinceNanos(diffStart))
+	e.stats.tiles.Add(uint64(len(tiles)))
 	return fr
 }
 
@@ -1885,8 +1878,8 @@ func (e *Engine) renderFrame() output.Frame {
 // с непустым прямоугольником, выносятся в отдельные нативные окна-попапы и
 // здесь (в основном холсте) НЕ рисуются. Прочие оверлеи (например, меню выбора
 // локали widget.Window, не реализующее OverlayBoundsProvider) рисуются как прежде.
-func drawOverlays(w widget.Widget, ctx widget.DrawContext, hosted bool) {
-	drawOverlaysAt(w, ctx, hosted, image.Point{}, 0)
+func drawOverlays(w widget.Widget, ctx widget.DrawContext, hosted bool) bool {
+	return drawOverlaysAt(w, ctx, hosted, image.Point{}, 0)
 }
 
 // drawOverlaysAt: off — смещение кадра w (см. frames.go). Оверлей рисуется в
@@ -1894,23 +1887,30 @@ func drawOverlays(w widget.Widget, ctx widget.DrawContext, hosted bool) {
 // прокрутки идёт через widget.OffsetContext. Без этого меню, открытое у
 // прокрученного поля, рисовалось бы там, где поле стоит в содержимом, — вне
 // видимой части, а то и вне холста.
-func drawOverlaysAt(w widget.Widget, ctx widget.DrawContext, hosted bool, off image.Point, depth int) {
+//
+// Возвращает true, если хоть один оверлей нарисован в ctx.
+func drawOverlaysAt(w widget.Widget, ctx widget.DrawContext, hosted bool, off image.Point, depth int) bool {
 	if tooDeep(depth) {
-		return
+		return false
 	}
+	drew := false
 	if od, ok := w.(widget.OverlayDrawer); ok && od.HasOverlay() {
 		if !hosted || !isHostedOverlay(w) {
-			od.DrawOverlay(widget.OffsetContext(ctx, off.X, off.Y))
+			widget.DrawOverlayTraced(w, od, widget.OffsetContext(ctx, off.X, off.Y))
+			drew = true
 		}
 	}
 	children := w.Children()
 	if len(children) == 0 {
-		return
+		return drew
 	}
-	coff := off.Add(contentShift(w))
+	coff := off.Add(input.ContentShift(w))
 	for _, child := range children {
-		drawOverlaysAt(child, ctx, hosted, coff, depth+1)
+		if drawOverlaysAt(child, ctx, hosted, coff, depth+1) {
+			drew = true
+		}
 	}
+	return drew
 }
 
 // isHostedOverlay сообщает, выносится ли активный overlay виджета w в отдельное

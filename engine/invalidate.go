@@ -27,11 +27,11 @@
 // пересекающими повреждённую область — отрисовка дерева остаётся полной.
 // Контракт: в on-demand режиме вызывающий обязан сообщать ВСЕ изменившиеся
 // области (или использовать Invalidate без прямоугольника).
+
 package engine
 
 import (
 	"image"
-	"math"
 	"time"
 
 	"github.com/oops1/headless-gui/v3/widget"
@@ -45,12 +45,12 @@ import (
 // «Контракт отрисовки»): одна строка возвращает прежнее поведение, пока
 // нарушения разбираются.
 func (e *Engine) SetSubtreeCulling(v bool) {
-	e.canvas.cullingOn.Store(v)
+	e.canvas.SetSubtreeCulling(v)
 	e.Invalidate()
 }
 
 // SubtreeCulling сообщает, включён ли пропуск поддеревьев.
-func (e *Engine) SubtreeCulling() bool { return e.canvas.cullingOn.Load() }
+func (e *Engine) SubtreeCulling() bool { return e.canvas.SubtreeCullingEnabled() }
 
 // SetOcclusionCulling включает или выключает вычитание перекрытого: поддерево,
 // целиком накрытое непрозрачным соседом, не рисуется (widget/occlusion.go).
@@ -60,41 +60,29 @@ func (e *Engine) SubtreeCulling() bool { return e.canvas.cullingOn.Load() }
 // объявлением остаётся дыра, и одна строка возвращает прежнее поведение, пока
 // объявление ищут.
 func (e *Engine) SetOcclusionCulling(v bool) {
-	e.canvas.occlusionOn.Store(v)
+	e.canvas.SetOcclusionCulling(v)
 	e.Invalidate()
 }
 
 // OcclusionCulling сообщает, включено ли вычитание перекрытого.
-func (e *Engine) OcclusionCulling() bool { return e.canvas.occlusionOn.Load() }
+func (e *Engine) OcclusionCulling() bool { return e.canvas.OcclusionEnabled() }
 
 // SetRenderOnDemand включает/выключает рендер по запросу.
 // Безопасно вызывать в любой момент; включение сразу инвалидирует кадр.
 func (e *Engine) SetRenderOnDemand(v bool) {
-	e.onDemand.Store(v)
-	e.Invalidate()
+	e.lp.SetRenderOnDemand(v)
 }
 
 // RenderOnDemand сообщает, включён ли рендер по запросу.
 func (e *Engine) RenderOnDemand() bool {
-	return e.onDemand.Load()
+	return e.lp.RenderOnDemand()
 }
 
 // Invalidate помечает весь кадр как изменившийся: ближайший тик отрендерит его.
 // Дёшево (атомарный инкремент) — можно вызывать часто.
 func (e *Engine) Invalidate() {
-	e.damageMu.Lock()
-	e.damageAll = true
-	e.damageMu.Unlock()
-	e.invGen.Add(1)
+	e.lp.Invalidate()
 }
-
-// maxDamageRects — сколько областей движок держит по отдельности, прежде чем
-// схлопнуть их в одно объединение.
-//
-// Порог нужен, чтобы список не рос без предела: сотня областей сама по себе
-// дороже, чем перерисовать их общий прямоугольник. Шестнадцати хватает на
-// любой разумный кадр — обычно их две-три.
-const maxDamageRects = 16
 
 // InvalidateRect помечает изменившейся прямоугольную область (в ЛОГИЧЕСКИХ
 // пикселях холста — система координат виджетов). Diff ближайшего кадра
@@ -107,91 +95,39 @@ const maxDamageRects = 16
 // По объединению уходили тайлы всего прямоугольника (десятки килобайт на
 // кадр), по списку — только тайлы самих полос.
 func (e *Engine) InvalidateRect(r image.Rectangle) {
-	if r.Empty() {
-		return
-	}
-	// Масштаб читается lock-free (scaleBits): InvalidateRect вызывается из
-	// сеттеров виджетов, в т.ч. когда движок уже держит e.mu.
-	if k := e.Scale(); k != 1 {
-		r = scaleRectF(r, k)
-	}
-	e.damageMu.Lock()
-	if !e.damageAll {
-		e.damage = addDamage(e.damage, r)
-	}
-	e.damageMu.Unlock()
-	e.invGen.Add(1)
+	e.lp.InvalidateRect(r)
 }
 
-// addDamage добавляет область к списку, поглощая вложенные.
-//
-// Вложенные отбрасываются не ради экономии памяти, а потому что тайлы всё
-// равно сравнивались бы дважды: первое сравнение синхронизирует буферы, и
-// второе вернуло бы «не изменилось» — работа впустую.
-func addDamage(list []image.Rectangle, r image.Rectangle) []image.Rectangle {
-	// Проверка «уже покрыта» вынесена в отдельный проход СПЕЦИАЛЬНО, хотя
-	// одного цикла хватило бы. Компактация идёт «на месте» (out := list[:0] —
-	// тот же массив), и ранний возврат из общего цикла отдавал бы наружу уже
-	// сдвинутый список. Сегодня это безвредно: сдвиг и ранний возврат разом
-	// требуют вложенной пары в списке, а её тут не бывает — обе ветки ниже
-	// вложенность как раз и устраняют. Но правильность кода не должна
-	// держаться на этом рассуждении: два прохода по списку из шестнадцати
-	// прямоугольников ничего не стоят, а рассуждение сломается от первой же
-	// правки условий.
-	for _, cur := range list {
-		if r.In(cur) {
-			return list // новая область уже покрыта — список не меняется
-		}
-	}
-
-	out := list[:0]
-	for _, cur := range list {
-		if cur.In(r) {
-			continue // старая поглощается новой
-		}
-		out = append(out, cur)
-	}
-	out = append(out, r)
-	if len(out) > maxDamageRects {
-		// Порог пройден: дальше дешевле работать одним прямоугольником.
-		u := out[0]
-		for _, cur := range out[1:] {
-			u = u.Union(cur)
-		}
-		return append(out[:0], u)
-	}
-	return out
+// damageRect — InvalidateRect без ничейного повреждения: для областей, под
+// которыми дерево виджетов не менялось (подсказка, переходы оверлеев) и для
+// уведомлений виджетов, уже помеченных устаревшими (widget/retain.go).
+func (e *Engine) damageRect(r image.Rectangle) {
+	e.lp.DamageRect(r)
 }
 
-// scaleRectF масштабирует логический прямоугольник в физический по краям
-// (та же математика, что canvas.sRect, но без доступа к канвасу).
-func scaleRectF(r image.Rectangle, k float64) image.Rectangle {
-	return image.Rect(
-		int(math.Round(float64(r.Min.X)*k)),
-		int(math.Round(float64(r.Min.Y)*k)),
-		int(math.Round(float64(r.Max.X)*k)),
-		int(math.Round(float64(r.Max.Y)*k)),
-	)
+// noteDamage добавляет область к повреждению кадра, не объявляя UI
+// изменившимся (invGen): для кадра, который цикл и так готовит. false —
+// область пуста.
+func (e *Engine) noteDamage(r image.Rectangle) bool {
+	return e.lp.NoteDamage(r)
 }
 
 // consumeDamage атомарно забирает накопленные повреждения.
 // all==true — нужен полный diff (Invalidate или режим по умолчанию).
-func (e *Engine) consumeDamage() (regions []image.Rectangle, all bool) {
-	e.damageMu.Lock()
-	regions, all = e.damage, e.damageAll
-	e.damage = nil
-	e.damageAll = false
-	e.damageMu.Unlock()
-	return regions, all
+// wholeFramePending — следующий кадр будет полным: заявлена полная
+// инвалидация или полный кадр (fullframe.go). Без сброса.
+func (e *Engine) wholeFramePending() bool {
+	return e.lp.WholeFramePending()
 }
 
-// unionRects — общий прямоугольник списка (пустой для пустого списка).
-func unionRects(rects []image.Rectangle) image.Rectangle {
-	var u image.Rectangle
-	for _, r := range rects {
-		u = u.Union(r)
-	}
-	return u
+func (e *Engine) consumeDamage() (regions []image.Rectangle, all bool) {
+	return e.lp.ConsumeDamage()
+}
+
+// peekDamage — объединение заявленного на сейчас, не забирая его: что
+// перерисует ближайший кадр как минимум. all — весь кадр.
+func (e *Engine) peekDamage() (union image.Rectangle, all bool) {
+	return e.lp.PeekDamage()
 }
 
 // RenderCount возвращает число фактически отрендеренных кадров с момента
@@ -204,8 +140,16 @@ func (e *Engine) RenderCount() uint64 {
 // мигающая каретка у виджета с фокусом, активная анимация (widget.Animate)
 // или «дозревающий» tooltip.
 func (e *Engine) animationNeeded(frameInterval time.Duration) bool {
-	if f := e.focus.get(); f != nil {
+	if f := e.in.Focused(); f != nil {
 		if a, ok := f.(widget.Animated); ok && a.NeedsAnimation() {
+			// Кадр ради каретки — частичный, по области виджета: прежде он
+			// шёл полным (фон, обход всего дерева, все тайлы), на пути команд
+			// (cmdpath.go) перезаписывается и воспроизводится один виджет.
+			// Без invGen: кадр готовится сейчас, второй за ним не нужен.
+			if h, ok := f.(widget.ListHolder); ok {
+				h.MarkDirty()
+			}
+			e.noteDamage(e.in.ScreenBoundsOf(f))
 			return true
 		}
 	}
@@ -226,4 +170,13 @@ func (e *Engine) animationNeeded(frameInterval time.Duration) bool {
 	// получит — но она сломана и без того: с версии 3.15.0 движок вправе не
 	// звать Draw у поддерева вне damage (см. «Контракт отрисовки» в GUIDE).
 	return e.tooltipMayAppear(frameInterval)
+}
+
+// unionRects — общий прямоугольник списка (пустой для пустого списка).
+func unionRects(rects []image.Rectangle) image.Rectangle {
+	var u image.Rectangle
+	for _, r := range rects {
+		u = u.Union(r)
+	}
+	return u
 }

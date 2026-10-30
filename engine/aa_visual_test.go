@@ -20,7 +20,7 @@ func TestAA_VisualSample(t *testing.T) {
 	}
 	eng := New(560, 360, 20)
 	c := eng.canvas
-	c.blitBackground()
+	c.BlitBackground()
 
 	accent := color.RGBA{R: 0, G: 120, B: 212, A: 255}
 	white := color.RGBA{R: 235, G: 235, B: 235, A: 255}
@@ -64,7 +64,7 @@ func TestAA_VisualSample(t *testing.T) {
 	semi := color.RGBA{R: 0, G: 120, B: 212, A: 254}
 	c.FillRoundRect(400, 36, 100, 36, 14, semi)
 
-	savePNG(c.back, out)
+	savePNG(c.Back(), out)
 	t.Logf("сцена сохранена: %s", out)
 	_ = widget.DefaultFontSizePt // прижать импорт (сцена не использует виджеты напрямую)
 }

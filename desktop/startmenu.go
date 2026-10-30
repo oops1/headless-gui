@@ -105,6 +105,11 @@ type StartMenu struct {
 	OnTilesChanged func(groups []TileGroup)
 	// OnTileLaunch вызывается по плитке без приложения (Tile.App пуст).
 	OnTileLaunch func(id TileID)
+	// Post, если задан, переносит обновления живых плиток (Tile.Live) в поток
+	// интерфейса — например, Engine.Post: источник и таймер перебора зовут
+	// из своих горутин. Без Post — поток движка, которому принадлежит дерево
+	// меню (widget.PostFor); меню вне дерева движка обновляется на месте.
+	Post func(func())
 	// ContextMenu собирает контекстное меню правой кнопки: пункты для цели
 	// (nil или пусто — меню не показывается). Меню рисует PopupMenu движка и
 	// живёт внутри «Пуска», поэтому клик по его пунктам не закрывает «Пуск»
@@ -143,6 +148,9 @@ func NewStartMenu(tm *theme.Manager, cat AppCatalog) *StartMenu {
 		Flyout: NewFlyout(tm, ComponentStartMenu),
 		cat:    cat,
 	}
+	// «Пуск» выезжает по своему токену (start.open), без него — как прочие
+	// панели.
+	m.AnimKey = theme.AnimStartOpen
 	m.Content = m.drawContent
 	m.Size = m.size
 	m.v = newStartView(m)

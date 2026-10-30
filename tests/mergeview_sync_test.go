@@ -2,6 +2,8 @@ package tests
 
 import (
 	"testing"
+
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 )
 
 // GG-63: итог и верхние панели прокручиваются вместе, по блокам. Отдельно
@@ -10,6 +12,7 @@ import (
 
 // Колесо над одной частью двигает и вторую — в обе стороны.
 func TestMergeView_SyncScrollWheel(t *testing.T) {
+	testreset.Globals(t)
 	mv := mergeLongView(t)
 	if !mv.SyncScroll() {
 		t.Fatal("синхронная прокрутка по умолчанию выключена")
@@ -39,6 +42,7 @@ func TestMergeView_SyncScrollWheel(t *testing.T) {
 // Края совпадают: верх в начале — итог в начале, верх в конце — итог в конце,
 // хотя итог длиннее на строки маркеров.
 func TestMergeView_SyncScrollEnds(t *testing.T) {
+	testreset.Globals(t)
 	mv := mergeLongView(t)
 
 	mv.SetSyncScroll(false)
@@ -62,6 +66,7 @@ func TestMergeView_SyncScrollEnds(t *testing.T) {
 // маркеров первого конфликта (у нерешённого их на четыре больше, чем строк у
 // сторон), с допуском на то, что опорная точка у частей разной высоты.
 func TestMergeView_SyncScrollAlignsChunks(t *testing.T) {
+	testreset.Globals(t)
 	mv := mergeLongView(t)
 	const lineH = 22
 
@@ -76,6 +81,7 @@ func TestMergeView_SyncScrollAlignsChunks(t *testing.T) {
 
 // Выключенная синхронизация — части порознь; включение ставит итог вровень.
 func TestMergeView_SyncScrollOff(t *testing.T) {
+	testreset.Globals(t)
 	mv := mergeLongView(t)
 	mv.SetSyncScroll(false)
 	mv.SetScroll(900)
@@ -90,6 +96,7 @@ func TestMergeView_SyncScrollOff(t *testing.T) {
 
 // Правка итога его прокрутку не дёргает: ведущей становится сама правка.
 func TestMergeView_SyncScrollStableWhileTyping(t *testing.T) {
+	testreset.Globals(t)
 	mv := mergeLongView(t)
 	mv.SetResultScroll(800)
 	before := mv.ResultScroll()

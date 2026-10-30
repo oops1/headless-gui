@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -76,6 +77,7 @@ func lineStartsOf(tb *widget.TextBox, n int) []int {
 
 // Перенос настоящим шрифтом совпадает с прежним алгоритмом.
 func TestTextBox_WrapMatchesReference(t *testing.T) {
+	testreset.Globals(t)
 	_ = newDialogEngine() // точный измеритель
 	words := []string{"слово", "a", "ii", "длинноеслово", "мама", "x",
 		"переносимоеслововнутристроки", "0", "тест", "abc", "WWW"}

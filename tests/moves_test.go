@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -43,6 +44,7 @@ func recordMoves(t *testing.T) func() []widget.MoveNotice {
 }
 
 func TestMoves_WindowDragDeclaresMove(t *testing.T) {
+	testreset.Globals(t)
 	win := widget.NewWindow("Окно", 300, 200)
 	from := image.Rect(100, 100, 400, 300)
 	win.SetBounds(from)
@@ -73,6 +75,7 @@ func TestMoves_WindowDragDeclaresMove(t *testing.T) {
 // Перенос не отменяет инвалидацию: он подсказка, как дешевле получить тот же
 // результат, а не замена damage.
 func TestMoves_StillReportsDamage(t *testing.T) {
+	testreset.Globals(t)
 	win := widget.NewWindow("Окно", 200, 150)
 	win.SetBounds(image.Rect(50, 50, 250, 200))
 	win.OnMouseButton(widget.MouseEvent{X: 100, Y: 60, Button: widget.MouseLeft, Pressed: true})
@@ -86,6 +89,7 @@ func TestMoves_StillReportsDamage(t *testing.T) {
 // Масштабирование переносом не считается: потребитель выполнит его блитом и
 // получит искажение.
 func TestMoves_RejectsResize(t *testing.T) {
+	testreset.Globals(t)
 	taken := recordMoves(t)
 	widget.NotifyMove(image.Rect(0, 0, 100, 100), image.Rect(200, 200, 340, 340))
 	if got := taken(); len(got) != 0 {
@@ -98,6 +102,7 @@ func TestMoves_RejectsResize(t *testing.T) {
 // Объявление берётся напрямую: то, что перетаскивание окна его порождает,
 // проверено выше, а здесь важен путь «объявили — попало в кадр».
 func TestMoves_ReachTheFrame(t *testing.T) {
+	testreset.Globals(t)
 	root := widget.NewPanel(color.RGBA{R: 20, G: 20, B: 20, A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 600, 400))
@@ -145,6 +150,7 @@ func TestMoves_ReachTheFrame(t *testing.T) {
 // перенос не применялся к переднему буферу, потребитель получал и команду
 // копирования, и все пиксели, то есть платил как без переноса.
 func TestMoves_SaveTraffic(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 600, 400
 
 	// Одна и та же сцена и один и тот же сдвиг: с объявлением и без.
@@ -223,6 +229,7 @@ func TestMoves_SaveTraffic(t *testing.T) {
 // Поэтому кадр несёт только непересекающиеся переносы; пересекающиеся уезжают
 // обычными тайлами.
 func TestMoves_FrameCarriesNoOverlappingMoves(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 600, 400
 
 	root := widget.NewPanel(color.RGBA{R: 20, G: 24, B: 30, A: 255})
@@ -268,6 +275,7 @@ func TestMoves_FrameCarriesNoOverlappingMoves(t *testing.T) {
 
 // Непересекающиеся переносы кадр несёт все.
 func TestMoves_IndependentMovesAllSurvive(t *testing.T) {
+	testreset.Globals(t)
 	const w, h = 600, 400
 
 	root := widget.NewPanel(color.RGBA{R: 20, G: 24, B: 30, A: 255})

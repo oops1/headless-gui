@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/internal/testreset"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
@@ -35,6 +36,7 @@ func guideCenter(w, h int, side widget.DockSide) (int, int) {
 // Якоря Left/Right заставляют Top/Bottom ложиться МЕЖДУ них (VS-порядок) — там,
 // где старая формула превью (на всю ширину) расходилась с раскладкой.
 func TestDockPreview_MatchesDropForAllSides(t *testing.T) {
+	testreset.Globals(t)
 	for _, tc := range []struct {
 		name string
 		side widget.DockSide
@@ -91,6 +93,7 @@ func TestDockPreview_MatchesDropForAllSides(t *testing.T) {
 // сторону, где уже есть docked-панель, превью подсвечивает ПОЛНЫЙ регион, а
 // bounds новой (активной) панели = регион МИНУС нижняя полоса табов.
 func TestDockPreview_StackEqualsRegionMinusTabStrip(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	m.AddPane(newPane("a", "A"), widget.DockLeft) // Left уже занята
 	p := newPane("p", "P")
@@ -126,6 +129,7 @@ func TestDockPreview_StackEqualsRegionMinusTabStrip(t *testing.T) {
 
 // TestDockStrip_PinButtonDocks — клик по 📌 на ярлыке возвращает панель в док.
 func TestDockStrip_PinButtonDocks(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)
@@ -155,6 +159,7 @@ func TestDockStrip_PinButtonDocks(t *testing.T) {
 
 // TestDockStrip_CloseButtonCloses — клик по ✕ на ярлыке закрывает панель.
 func TestDockStrip_CloseButtonCloses(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)
@@ -182,6 +187,7 @@ func TestDockStrip_CloseButtonCloses(t *testing.T) {
 // TestDockStrip_NameClickTogglesFlyout — клик по ИМЕНИ ярлыка (вне кнопок)
 // сохраняет прежнее поведение: открывает flyout.
 func TestDockStrip_NameClickTogglesFlyout(t *testing.T) {
+	testreset.Globals(t)
 	m, _ := newDockMgr(400, 300)
 	pL := newPane("l", "Left")
 	m.AddPane(pL, widget.DockLeft)

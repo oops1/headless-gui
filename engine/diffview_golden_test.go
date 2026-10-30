@@ -83,9 +83,9 @@ func diffGoldenScene(t *testing.T, th *widget.Theme, prep func(d *widget.DiffVie
 	widget.ApplyThemeTree(root, th)
 	prep(d)
 
-	c.blitBackground()
+	c.BlitBackground()
 	root.Draw(c)
-	return c.back
+	return c.Back()
 }
 
 func TestGolden_DiffView(t *testing.T) {

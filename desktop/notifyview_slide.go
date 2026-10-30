@@ -77,7 +77,7 @@ func expandAnimation(tm *theme.Manager) (time.Duration, widget.Easing) {
 		// Токена нет: берётся длительность menu.open, но раскрытие карточки —
 		// функциональная анимация, и «меньше движения» укорачивает её как
 		// функциональную (а не обнуляет, как украшение menu.open).
-		if t.MotionReduced() {
+		if t.ReducesMotion() {
 			a := t.AnimReduced(AnimNotificationExpand, tm.GetAnimationRaw(AnimMenuOpen))
 			if a.Duration <= 0 {
 				return 0, nil

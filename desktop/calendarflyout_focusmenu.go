@@ -40,6 +40,7 @@ func (c *CalendarFlyout) ensureFocusMenu() *widget.PopupMenu {
 		return p
 	}
 	p = widget.NewPopupMenu()
+	p.SetHost(c)
 	c.mu.Lock()
 	if c.focusMenu == nil {
 		c.focusMenu = p
