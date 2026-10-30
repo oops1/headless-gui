@@ -12,8 +12,8 @@
 //	панель ──GetLayout / Event───────────▶ наш /MenuBar (com.canonical.dbusmenu)
 //
 // Меню на Linux рисует САМА панель (мы отдаём только дерево), поэтому наше
-// base.PopupMenu по правому клику здесь не показывается — см. интерфейс
-// nativeTrayMenu в window/core/tray.go.
+// base.PopupMenu по правому клику здесь не показывается — см.
+// native.Tray.SetTrayMenuNative.
 //
 // ОГРАНИЧЕНИЯ:
 //   - GNOME из коробки StatusNotifierWatcher НЕ поднимает: без расширения
@@ -49,6 +49,7 @@ import (
 	xdraw "golang.org/x/image/draw"
 
 	"github.com/oops1/headless-gui/v3/platform/dbus"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
@@ -84,15 +85,21 @@ var errNoTrayWatcher = errors.New(
 // драться за одно и то же имя.
 var sniItemSeq atomic.Uint32
 
-// SNI — состояние иконки трея одного окна. Встраивается в X11Window и
-// WaylandWindow (как Notifier для уведомлений): его методы становятся их
-// методами, и окно превращается в trayHost (window/core/tray.go).
+// SNI — состояние иконки трея одного окна; вместе с Notifier — трей окна на
+// Linux (linuxTray, register_linux.go).
 //
-// Потокобезопасность: SetTrayIcon/RemoveTrayIcon/… зовутся с UI-потока окна,
+// Потокобезопасность: SetTrayIcon/RemoveTrayIcon/… зовутся с любой горутины,
 // входящие вызовы D-Bus обрабатываются в горутинах соединения — всё состояние
 // под trayMu. Пользовательские колбэки вызываются вне блокировки, в отдельной
 // горутине (иначе долгий обработчик задержал бы ответ панели).
 type SNI struct {
+	// regMu упорядочивает регистрацию и снятие иконки: два первых SetTrayIcon
+	// не поднимают двух соединений, а register, разминувшийся с Close, не
+	// оставляет иконку после окна. Под ним идут вызовы шины своего соединения;
+	// входящие вызовы (handleCall) его не берут.
+	regMu  sync.Mutex
+	closed bool // окно закрыто (Close): иконку больше не поднимаем
+
 	trayMu sync.Mutex
 
 	conn   *dbus.Conn // отдельное соединение с шиной (nil — трея нет)
@@ -113,7 +120,7 @@ type SNI struct {
 	menuRun func(fn func())
 }
 
-// ─── trayHost: иконка ────────────────────────────────────────────────────────
+// ─── Иконка ──────────────────────────────────────────────────────────────────
 
 // SetTrayIcon показывает/обновляет иконку в трее. Первый вызов поднимает
 // соединение и регистрируется у Watcher; последующие — обновляют пиксели и
@@ -121,6 +128,11 @@ type SNI struct {
 func (t *SNI) SetTrayIcon(icon image.Image, tooltip string) error {
 	w, h, argb := sniIconPixmap(icon)
 
+	t.regMu.Lock()
+	defer t.regMu.Unlock()
+	if t.closed {
+		return native.ErrTrayUnsupported
+	}
 	t.trayMu.Lock()
 	t.iconW, t.iconH, t.iconARGB = w, h, argb
 	t.tooltip = tooltip
@@ -170,6 +182,22 @@ func (t *SNI) register() error {
 // RemoveTrayIcon убирает иконку: объявляем Passive (панель прячет её сразу),
 // отдаём имя и закрываем соединение. Повторный SetTrayIcon поднимет всё заново.
 func (t *SNI) RemoveTrayIcon() {
+	t.regMu.Lock()
+	defer t.regMu.Unlock()
+	t.removeLocked()
+}
+
+// Close убирает иконку при закрытии окна; после него SetTrayIcon отвечает
+// ErrTrayUnsupported.
+func (t *SNI) Close() {
+	t.regMu.Lock()
+	defer t.regMu.Unlock()
+	t.closed = true
+	t.removeLocked()
+}
+
+// removeLocked — RemoveTrayIcon под regMu.
+func (t *SNI) removeLocked() {
 	t.trayMu.Lock()
 	c, active, name := t.conn, t.active, t.name
 	t.conn, t.active, t.name = nil, false, ""
@@ -196,7 +224,7 @@ func (t *SNI) SetTrayClickHandler(fn func(button int, doubleClick bool)) {
 // меню размещает панель. Возвращаем (0,0), нашим меню мы здесь не пользуемся.
 func (t *SNI) CursorScreenPos() (int, int) { return 0, 0 }
 
-// ─── nativeTrayMenu: меню отдаём панели ──────────────────────────────────────
+// ─── Меню отдаём панели ──────────────────────────────────────────────────────
 
 // SetTrayMenuNative принимает трей-меню для показа СРЕДОЙ (com.canonical.dbusmenu)
 // и всегда возвращает true: на Linux панель рисует меню сама, показывать своё

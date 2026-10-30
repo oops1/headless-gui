@@ -439,12 +439,14 @@ type Window struct {
 	// tearDown сносит открытые в нём диалоги вместе с их движками.
 	modalHost *dialogHost
 
-	// ── Трей и уведомления (Windows, Linux) ──────────────────────────────────
+	// ── Трей и уведомления (возможность platform/tray) ───────────────────────
 	// Сеттеры трея вызываются до Run() (native ещё nil), поэтому желаемое
 	// состояние буферизуется и применяется в Run() после создания окна
-	// (applyPendingTray). На платформах без поддержки (native не trayHost) —
-	// тихий no-op. См. tray.go, platform/win32/tray_windows.go,
-	// platform/tray/sni_linux.go.
+	// (startTray, applyPendingTray). Без трея (window/minimal, macOS) — тихий
+	// no-op. См. tray.go.
+	//
+	// tray — трей окна ОС (startTray); nil — трея нет.
+	tray              atomic.Pointer[native.Tray]
 	trayIcon          image.Image
 	trayTooltip       string
 	trayIconWant      bool
@@ -648,6 +650,7 @@ func (win *Window) tearDown() {
 	win.stopMonitorWatch()
 	win.closeSystemThemeWatch()
 	win.stopAccessibility()
+	win.stopTray()
 	// Сносим все оторванные окна панелей: останавливаем их движки (реестр
 	// нотификаторов/горутины без утечки); owned-окна ОС уходят вместе с
 	// owner'ом.
@@ -905,11 +908,13 @@ func (win *Window) bringUp() error {
 
 	// Декларация трея из XAML (<Window TrayIcon=…>, <TrayMenu>): переносим в
 	// буферизованные поля, если приложение не задало иконку/меню явно. ДО
-	// applyPendingTray, которая отправит итоговое состояние бэкенду.
+	// applyPendingTray, которая отправит итоговое состояние трею.
 	win.pickupDeclarativeTray()
 
-	// Применяем отложенное состояние трея/уведомлений (иконка, меню, колбэки),
-	// заданное до Run(). На платформах без поддержки — no-op.
+	// Трей окна (возможность platform/tray, если фасад её подключил) и
+	// отложенное состояние трея/уведомлений (иконка, меню, колбэки), заданное
+	// до Run(). Без трея — no-op. Снимается в tearDown.
+	win.startTray()
 	win.applyPendingTray()
 
 	// Мост доступности — возможность platform/a11y, если фасад её подключил

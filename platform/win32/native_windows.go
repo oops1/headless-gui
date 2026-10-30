@@ -161,7 +161,8 @@ const (
 
 	// WM_APP — базовое сообщение приложения; используем для маршалинга колбэков
 	// на UI-поток (InvokeOnUIThread): PostMessage(WM_APP, id) → wndProc вызывает
-	// зарегистрированную функцию на потоке цикла сообщений.
+	// зарегистрированную функцию на потоке цикла сообщений. WM_APP+1 занят
+	// уведомлениями иконки трея (platform/tray, через AddMessageHook).
 	wmApp = 0x8000
 
 	// GWLP_HWNDPARENT — индекс SetWindowLongPtr для смены owner-окна (== -8).
@@ -237,7 +238,9 @@ var (
 	gdi32  = windows.NewLazySystemDLL("gdi32.dll")
 	dwmapi = windows.NewLazySystemDLL("dwmapi.dll")
 
-	// Drag&Drop файлов из ОС (WM_DROPFILES). shell32 объявлен в tray_windows.go.
+	shell32 = windows.NewLazySystemDLL("shell32.dll")
+
+	// Drag&Drop файлов из ОС (WM_DROPFILES).
 	procDragAcceptFiles = shell32.NewProc("DragAcceptFiles")
 	procDragQueryFileW  = shell32.NewProc("DragQueryFileW")
 	procDragQueryPoint  = shell32.NewProc("DragQueryPoint")
@@ -428,12 +431,7 @@ type Win32Window struct {
 	ncLeave    pointer.LeaveTracker
 	trackMouse func(hwnd uintptr, flags uint32) bool
 
-	// Трей/уведомления (Shell_NotifyIcon) — см. tray_windows.go.
-	trayAdded      bool           // иконка добавлена (NIM_ADD выполнен)
-	trayHIcon      windows.Handle // текущий HICON иконки трея (уничтожаем при замене)
-	onTrayClick    func(button int, doubleClick bool)
-	onBalloonClick func()
-	iconicEnabled  bool // включено iconic-представление окна (DWM превью)
+	iconicEnabled bool // включено iconic-представление окна (DWM превью), taskbar_windows.go
 
 	// kbGrabbed — окно заказало захват клавиатуры (keygrab_windows.go).
 	// Атомарно: читает KeyboardGrabActive с любой горутины.
@@ -1990,11 +1988,6 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		// wParam — HDROP: список путей + точка сброса. Раскрываем и завершаем
 		// (DragFinish обязателен — иначе ОС не освободит структуру).
 		w.handleDropFiles(wparam)
-		return 0
-
-	case wmTrayCallback:
-		// Событие иконки трея (см. NOTIFYICONDATA.uCallbackMessage).
-		w.handleTrayCallback(lparam)
 		return 0
 
 	case wmPrintClient, wmPrint:

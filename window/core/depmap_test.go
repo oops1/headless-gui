@@ -17,7 +17,7 @@ package core
 // только тегом //go:build, ловит отдельный TestDepMap_NoTaggedOSFiles.
 //
 // Правило рёбер (с 9.2b): бэкенд не зависит ни от ядра, ни от другого
-// бэкенда — общее у них в platform/native, keyboard, pointer, dbus, tray.
+// бэкенда — общее у них в platform/native, keyboard, pointer, dbus.
 // База нарушений своя под каждую ОС (файлы берутся по тегам сборки); с 9.3
 // она пуста везде.
 //

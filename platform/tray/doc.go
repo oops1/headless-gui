@@ -1,12 +1,13 @@
-// Package tray — иконка в системном трее и уведомления на Linux по D-Bus
-// (ADR-0013): StatusNotifierItem с меню dbusmenu (SNI) и
-// org.freedesktop.Notifications (Notifier).
+// Package tray — возможность окна (ADR-0013 §3): иконка в системном трее, её
+// меню и клики, системные уведомления. Windows — Shell_NotifyIcon на окне
+// бэкенда Win32 (события иконки и WM_DESTROY — через win32.AddMessageHook);
+// Linux, X11 и Wayland одинаково — StatusNotifierItem с меню dbusmenu (SNI) и
+// org.freedesktop.Notifications (Notifier) по D-Bus, без окна бэкенда.
 //
-// Бэкенды X11 и Wayland встраивают SNI и Notifier в своё окно: их методы
-// делают окно trayHost и balloonHost для ядра window/core. Пакет — слой ниже
-// бэкендов: зависит только от platform/dbus и widget/base.
-// На 9.8 трей подключится к бэкендам через точки расширения (ADR-0013 §3),
-// и направление зависимости развернётся.
+// Подключается пустым импортом: init регистрирует native.RegisterTray, и ядро
+// окна создаёт трей каждому окну ОС, а при закрытии окна снимает. Фасад window
+// импортирует пакет, window/minimal — нет: там иконки и уведомлений нет, а
+// HideToTray и RestoreFromTray — операции окна — работают.
 //
 // Программы этот пакет не импортируют: трей — методы window.Window.
 package tray

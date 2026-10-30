@@ -1,6 +1,6 @@
 //go:build windows
 
-package win32
+package tray
 
 import (
 	"image"
@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/oops1/headless-gui/v3/platform/win32"
 )
 
 // TestTrayIconAfterNotify проверяет судьбу HICON после Shell_NotifyIconW:
@@ -46,28 +48,28 @@ func TestRemoveTrayIconFreesHandle(t *testing.T) {
 			img.Set(x, y, color.RGBA{R: 200, G: 100, B: 50, A: 255})
 		}
 	}
-	hicon := rgbaToHICON(img)
+	hicon := win32.NewIcon(img)
 	if hicon == 0 {
 		t.Skip("CreateIconIndirect недоступен в этом окружении")
 	}
 
-	w := &Win32Window{trayHIcon: hicon, trayAdded: false} // hwnd = 0
-	w.RemoveTrayIcon()
+	tr := &winTray{w: &win32.Win32Window{}, hicon: hicon} // hwnd = 0
+	tr.RemoveTrayIcon()
 
-	if w.trayHIcon != 0 {
-		t.Errorf("trayHIcon = %v, ожидался 0 — иконка утекла", w.trayHIcon)
+	if tr.hicon != 0 {
+		t.Errorf("hicon = %v, ожидался 0 — иконка утекла", tr.hicon)
 	}
-	if w.trayAdded {
-		t.Error("trayAdded остался true")
+	if tr.added {
+		t.Error("added остался true")
 	}
 }
 
 // TestRemoveTrayIconIdempotent проверяет повторный вызов без иконки.
 func TestRemoveTrayIconIdempotent(t *testing.T) {
-	w := &Win32Window{}
-	w.RemoveTrayIcon()
-	w.RemoveTrayIcon()
-	if w.trayHIcon != 0 || w.trayAdded {
+	tr := &winTray{w: &win32.Win32Window{}}
+	tr.RemoveTrayIcon()
+	tr.RemoveTrayIcon()
+	if tr.hicon != 0 || tr.added {
 		t.Error("состояние трея испорчено повторным снятием")
 	}
 }

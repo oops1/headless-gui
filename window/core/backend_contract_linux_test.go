@@ -3,6 +3,7 @@
 package core
 
 import (
+	"image"
 	"testing"
 
 	"github.com/oops1/headless-gui/v3/platform/native"
@@ -22,7 +23,6 @@ var (
 	_ activationNotifier  = (*X11Window)(nil)
 	_ alwaysOnTopBackend  = (*X11Window)(nil)
 	_ appIDSetter         = (*X11Window)(nil)
-	_ balloonHost         = (*X11Window)(nil)
 	_ cornerRounder       = (*X11Window)(nil)
 	_ cursorImageSetter   = (*X11Window)(nil)
 	_ dirtyRectBlitter    = (*X11Window)(nil)
@@ -44,7 +44,6 @@ var (
 	_ lockKeysSetter      = (*X11Window)(nil)
 	_ minimizedBackend    = (*X11Window)(nil)
 	_ monitorChangeSource = (*X11Window)(nil)
-	_ nativeTrayMenu      = (*X11Window)(nil)
 	_ ownedWindow         = (*X11Window)(nil)
 	_ popupCursorSetter   = (*X11Window)(nil)
 	_ popupPixelAlpha     = (*X11Window)(nil)
@@ -53,7 +52,7 @@ var (
 	_ rawKeySource        = (*X11Window)(nil)
 	_ scaleDetector       = (*X11Window)(nil)
 	_ touchSource         = (*X11Window)(nil)
-	_ trayHost            = (*X11Window)(nil)
+	_ trayWindow          = (*X11Window)(nil)
 	_ uiThreadInvoker     = (*X11Window)(nil)
 	_ wheelRawSource      = (*X11Window)(nil)
 )
@@ -75,7 +74,6 @@ var (
 var (
 	_ activationNotifier    = (*wayland.WaylandWindow)(nil)
 	_ appIDSetter           = (*wayland.WaylandWindow)(nil)
-	_ balloonHost           = (*wayland.WaylandWindow)(nil)
 	_ childPopupCursor      = (*wayland.WaylandWindow)(nil)
 	_ childPopupCursorImage = (*wayland.WaylandWindow)(nil)
 	_ childPopupHost        = (*wayland.WaylandWindow)(nil)
@@ -103,11 +101,10 @@ var (
 	_ minimizedBackend      = (*wayland.WaylandWindow)(nil)
 	_ monitorChangeSource   = (*wayland.WaylandWindow)(nil)
 	_ monitorSource         = (*wayland.WaylandWindow)(nil)
-	_ nativeTrayMenu        = (*wayland.WaylandWindow)(nil)
 	_ popupCursorSetter     = (*wayland.WaylandWindow)(nil)
 	_ rawKeySource          = (*wayland.WaylandWindow)(nil)
 	_ touchSource           = (*wayland.WaylandWindow)(nil)
-	_ trayHost              = (*wayland.WaylandWindow)(nil)
+	_ trayWindow            = (*wayland.WaylandWindow)(nil)
 	_ wheelRawSource        = (*wayland.WaylandWindow)(nil)
 )
 
@@ -140,5 +137,28 @@ func TestBackendContract_WaylandStyleOnly(t *testing.T) {
 	}
 	if win.SetStyle(native.Style{Tool: true}) || win.Style().Tool {
 		t.Error("Tool на Wayland принят")
+	}
+}
+
+// trayIconMethods и balloonMethods — методы трея, которые раньше объявляли
+// бэкенды. Иконка в трее и уведомления — возможность platform/tray (9.8c):
+// окно бэкенда их не объявляет, ядро их у окна и не ищет.
+type (
+	trayIconMethods interface {
+		SetTrayIcon(image.Image, string) error
+	}
+	balloonMethods interface {
+		ShowBalloon(string, string, uint32) error
+	}
+)
+
+func TestBackendContract_LinuxNoTray(t *testing.T) {
+	for name, nw := range map[string]any{"X11Window": &X11Window{}, "WaylandWindow": &wayland.WaylandWindow{}} {
+		if _, ok := nw.(trayIconMethods); ok {
+			t.Errorf("%s объявил SetTrayIcon", name)
+		}
+		if _, ok := nw.(balloonMethods); ok {
+			t.Errorf("%s объявил ShowBalloon", name)
+		}
 	}
 }

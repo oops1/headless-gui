@@ -161,14 +161,6 @@ const wlBufWaitTimeout = 32 * time.Millisecond
 
 // WaylandWindow — реализация NativeWindow поверх Wayland (xdg-shell + wl_shm).
 type WaylandWindow struct {
-	// trayNotifier — системные уведомления через D-Bus (platform/tray): путь
-	// общий с X11, композитора не касается.
-	trayNotifier
-
-	// traySNI — иконка в системном трее по StatusNotifierItem
-	// (platform/tray): тоже чистый D-Bus, композитора не касается.
-	traySNI
-
 	conn *net.UnixConn
 
 	mu     sync.Mutex // сериализует запись в сокет и доступ к буферам

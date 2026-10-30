@@ -1,16 +1,18 @@
 // tray.go — публичный, платформенно-независимый API иконки в трее,
 // системных balloon-уведомлений и восстановления окна из трея.
 //
-// Поддержаны Windows (Shell_NotifyIcon, platform/win32/tray_windows.go) и Linux — X11 и
-// Wayland (StatusNotifierItem по D-Bus, platform/tray/sni_linux.go). Бэкенд реализует
-// приватный интерфейс trayHost; на прочих платформах (macOS/headless) окно его
-// не реализует — методы становятся вежливыми no-op'ами и возвращают
-// ошибку/ничего. Компилируется на всех платформах.
+// Иконка, её меню и клики, уведомления — возможность platform/tray (ADR-0013
+// §3): Windows — Shell_NotifyIcon, Linux (X11 и Wayland одинаково) —
+// StatusNotifierItem и org.freedesktop.Notifications по D-Bus. Ядро создаёт
+// трей окну после создания окна ОС (native.TrayService) и снимает при
+// закрытии; без возможности (window/minimal, macOS) методы иконки и
+// уведомлений — вежливые no-op'ы и ErrTrayUnsupported. Спрятать окно и вернуть
+// его (HideToTray, RestoreFromTray) — операции самого окна у бэкенда, они
+// работают и без трея.
 //
 // Разница платформ, о которой знает этот файл: контекстное меню трея на
 // Windows рисуем МЫ (widget.PopupMenu у курсора), а на Linux его показывает
-// сама панель по протоколу com.canonical.dbusmenu. Бэкенд заявляет об этом
-// опциональным интерфейсом nativeTrayMenu.
+// сама панель по протоколу com.canonical.dbusmenu (Tray.SetTrayMenuNative).
 package core
 
 import (
@@ -20,57 +22,13 @@ import (
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
-// trayHost — приватная возможность бэкенда: иконка в области уведомлений,
-// balloon-уведомления и сворачивание/восстановление окна. Реализуется
-// Win32Window (platform/win32/tray_windows.go). Все методы вызываются на UI-потоке окна.
-type trayHost interface {
-	// SetTrayIcon добавляет/обновляет иконку в трее (NIM_ADD/NIM_MODIFY).
-	SetTrayIcon(icon image.Image, tooltip string) error
-	// RemoveTrayIcon убирает иконку (NIM_DELETE).
-	RemoveTrayIcon()
-	// SetTrayClickHandler регистрирует диспетчер кликов по иконке
-	// (button: 0=left, 1=right, 2=middle; doubleClick — двойной клик).
-	SetTrayClickHandler(fn func(button int, doubleClick bool))
-	// ShowBalloon показывает системное всплывающее уведомление (NIF_INFO).
-	// infoFlag: 0=none, 1=info, 2=warning, 3=error (NIIF_*).
-	ShowBalloon(title, text string, infoFlag uint32) error
-	// SetBalloonClickHandler регистрирует колбэк клика по balloon
-	// (NIN_BALLOONUSERCLICK).
-	SetBalloonClickHandler(fn func())
-	// HideToTray прячет окно (SW_HIDE — исчезает из панели задач).
+// trayWindow — операции окна, которые нужны трею: спрятать окно (исчезает из
+// панели задач) и показать его снова с передачей фокуса ОС. Реализуют Win32,
+// X11 и Wayland (там — no-op: xdg_toplevel спрятать нельзя). Зовутся на потоке
+// окна (onNative).
+type trayWindow interface {
 	HideToTray()
-	// RestoreFromTray показывает окно и передаёт ему фокус ОС.
 	RestoreFromTray()
-	// CursorScreenPos возвращает позицию курсора в экранных координатах.
-	CursorScreenPos() (int, int)
-	// SetForeground выводит окно-носитель на передний план (класс. трей-трюк).
-	SetForeground()
-}
-
-// nativeTrayMenu — опциональная возможность бэкенда: контекстное меню трея
-// показывает САМА система, а не мы. Так устроен Linux (StatusNotifierItem
-// отдаёт дерево меню панели по com.canonical.dbusmenu, и позиции иконки мы
-// даже не знаем). Реализуется tray.SNI (platform/tray).
-//
-// SetTrayMenuNative передаёт бэкенду актуальное меню (nil — убрать) и
-// возвращает true, если он взял показ на себя: тогда Window не добавляет
-// PopupMenu в дерево виджетов и не открывает его по правому клику.
-// Win32Window интерфейс НЕ реализует — путь Windows не меняется.
-type nativeTrayMenu interface {
-	SetTrayMenuNative(menu *widget.PopupMenu) bool
-}
-
-// balloonHost — УЗКАЯ часть возможностей трея: только системные уведомления.
-// Выделена отдельно, потому что на Linux уведомления живут без иконки в трее
-// (демон org.freedesktop.Notifications показывает их сам), а полноценного трея
-// у X11/Wayland-бэкендов пока нет. Win32Window реализует и trayHost, и этот
-// интерфейс; X11Window/WaylandWindow — только его (см. platform/tray/notify_linux.go).
-type balloonHost interface {
-	// ShowBalloon показывает системное уведомление.
-	// infoFlag: 0=none, 1=info, 2=warning, 3=error.
-	ShowBalloon(title, text string, infoFlag uint32) error
-	// SetBalloonClickHandler регистрирует колбэк клика по уведомлению.
-	SetBalloonClickHandler(fn func())
 }
 
 // severityInfoFlag переводит widget.DialogSeverity в dwInfoFlags balloon'а
@@ -111,8 +69,8 @@ func trayButton(button int) widget.MouseButton {
 // SetOnTrayClick, двойной левый клик по иконке восстанавливает окно из трея.
 //
 // Можно вызывать до Run() (состояние применится при создании окна) или из
-// обработчиков UI во время работы. На не-Windows платформах — no-op (до Run
-// возвращает nil, во время работы — native.ErrTrayUnsupported).
+// обработчиков UI во время работы. Без трея (macOS, window/minimal) до Run
+// возвращает nil, во время работы — native.ErrTrayUnsupported.
 func (win *Window) SetTrayIcon(icon image.Image, tooltip string) error {
 	win.trayIcon = icon
 	win.trayTooltip = tooltip
@@ -120,22 +78,19 @@ func (win *Window) SetTrayIcon(icon image.Image, tooltip string) error {
 	if win.native == nil {
 		return nil // применится в Run() → applyPendingTray
 	}
-	th, ok := win.native.(trayHost)
-	if !ok {
+	t := win.trayOf()
+	if t == nil {
 		return native.ErrTrayUnsupported
 	}
-	win.ensureTrayDispatcher(th)
-	return th.SetTrayIcon(icon, tooltip)
+	win.ensureTrayDispatcher(t)
+	return t.SetTrayIcon(icon, tooltip)
 }
 
 // RemoveTrayIcon убирает иконку из трея.
 func (win *Window) RemoveTrayIcon() {
 	win.trayIconWant = false
-	if win.native == nil {
-		return
-	}
-	if th, ok := win.native.(trayHost); ok {
-		th.RemoveTrayIcon()
+	if t := win.trayOf(); t != nil {
+		t.RemoveTrayIcon()
 	}
 }
 
@@ -144,11 +99,8 @@ func (win *Window) RemoveTrayIcon() {
 // дефолтное поведение (двойной левый → восстановить окно).
 func (win *Window) SetOnTrayClick(fn func(button widget.MouseButton, doubleClick bool)) {
 	win.onTrayClick = fn
-	if win.native == nil {
-		return
-	}
-	if th, ok := win.native.(trayHost); ok {
-		win.ensureTrayDispatcher(th)
+	if t := win.trayOf(); t != nil {
+		win.ensureTrayDispatcher(t)
 	}
 }
 
@@ -161,12 +113,9 @@ func (win *Window) SetOnTrayClick(fn func(button widget.MouseButton, doubleClick
 // рисует его среда рабочего стола; наш попап при этом не показывается.
 func (win *Window) SetTrayMenu(menu *widget.PopupMenu) {
 	win.trayMenu = menu
-	if win.native == nil {
-		return
-	}
-	if th, ok := win.native.(trayHost); ok {
-		win.ensureTrayDispatcher(th)
-		win.pushTrayMenuNative()
+	if t := win.trayOf(); t != nil {
+		win.ensureTrayDispatcher(t)
+		win.pushTrayMenuNative(t)
 		win.attachTrayMenu()
 	}
 }
@@ -177,16 +126,13 @@ func (win *Window) SetTrayMenu(menu *widget.PopupMenu) {
 // Windows: требует ранее установленной иконки трея (SetTrayIcon) — уведомление
 // принадлежит ей. Linux: иконка не нужна, уведомление показывает демон рабочего
 // стола (org.freedesktop.Notifications); без демона возвращается ошибка.
-// macOS/headless — native.ErrTrayUnsupported.
+// До Run, на macOS и в window/minimal — native.ErrTrayUnsupported.
 func (win *Window) ShowBalloon(title, text string, severity widget.DialogSeverity) error {
-	if win.native == nil {
+	t := win.trayOf()
+	if t == nil {
 		return native.ErrTrayUnsupported
 	}
-	bh, ok := win.native.(balloonHost)
-	if !ok {
-		return native.ErrTrayUnsupported
-	}
-	return bh.ShowBalloon(title, text, severityInfoFlag(severity))
+	return t.ShowBalloon(title, text, severityInfoFlag(severity))
 }
 
 // SetOnBalloonClick регистрирует колбэк клика пользователя по уведомлению
@@ -194,23 +140,21 @@ func (win *Window) ShowBalloon(title, text string, severity widget.DialogSeverit
 // Колбэк выполняется на горутине движка, как и обработчики виджетов.
 func (win *Window) SetOnBalloonClick(fn func()) {
 	win.onBalloonClick = fn
-	if win.native == nil {
-		return
-	}
-	if bh, ok := win.native.(balloonHost); ok {
-		bh.SetBalloonClickHandler(win.onEngineFunc(fn))
+	if t := win.trayOf(); t != nil {
+		t.SetBalloonClickHandler(win.onEngineFunc(fn))
 	}
 }
 
 // HideToTray прячет окно (исчезает из панели задач). Иконка трея остаётся.
+// Это операция окна: работает и без трея (window/minimal).
 func (win *Window) HideToTray() {
 	if win.native == nil {
 		return
 	}
 	// Зовут из обработчиков, то есть с горутины движка, а окно ОС прячется на
 	// потоке своего цикла сообщений.
-	if th, ok := win.native.(trayHost); ok {
-		win.onNative(th.HideToTray)
+	if tw, ok := win.native.(trayWindow); ok {
+		win.onNative(tw.HideToTray)
 	}
 }
 
@@ -219,8 +163,8 @@ func (win *Window) RestoreFromTray() {
 	if win.native == nil {
 		return
 	}
-	if th, ok := win.native.(trayHost); ok {
-		win.onNative(th.RestoreFromTray)
+	if tw, ok := win.native.(trayWindow); ok {
+		win.onNative(tw.RestoreFromTray)
 	}
 }
 
@@ -230,7 +174,7 @@ func (win *Window) RestoreFromTray() {
 // (<Window TrayIcon=… TrayTooltip=…> и <TrayMenu>): заполняет буферизованные поля
 // трея, если приложение НЕ задало их явно до Run() (SetTrayIcon/SetTrayMenu).
 // Приоритет у приложения: заданные им иконка/меню не перетираются. Вызывается в
-// Run() ДО applyPendingTray, которая уже отправит итоговое состояние бэкенду.
+// Run() ДО applyPendingTray, которая уже отправит итоговое состояние трею.
 func (win *Window) pickupDeclarativeTray() {
 	root := win.eng.Root()
 	if root == nil {
@@ -250,40 +194,72 @@ func (win *Window) pickupDeclarativeTray() {
 	}
 }
 
-// applyPendingTray применяет отложенное состояние трея после создания окна.
-// Вызывается из Run(). На платформах без trayHost — no-op.
-func (win *Window) applyPendingTray() {
-	// Уведомления доступны шире трея (Linux — без иконки), поэтому колбэк
-	// клика применяем через balloonHost, до проверки полного trayHost.
-	if bh, ok := win.native.(balloonHost); ok && win.onBalloonClick != nil {
-		bh.SetBalloonClickHandler(win.onEngineFunc(win.onBalloonClick))
+// trayOf — трей окна; nil — трея нет (до Run, без возможности, у бэкенда без
+// трея). После закрытия окна поле остаётся (как native), а сам трей отвечает
+// отказом.
+func (win *Window) trayOf() native.Tray {
+	if p := win.tray.Load(); p != nil {
+		return *p
 	}
-	th, ok := win.native.(trayHost)
+	return nil
+}
+
+// startTray создаёт трей окну ОС: bringUp, после Create — до applyPendingTray.
+// Трей новый, поэтому диспетчер и меню системы ему отдаются заново.
+func (win *Window) startTray() {
+	win.trayDispatcherSet = false
+	win.trayMenuNative = false
+	win.tray.Store(nil)
+	f, ok := native.TrayService()
 	if !ok {
 		return
 	}
-	if win.trayIconWant || win.onTrayClick != nil || win.trayMenu != nil {
-		win.ensureTrayDispatcher(th)
-	}
-	win.pushTrayMenuNative()
-	win.attachTrayMenu()
-	if win.trayIconWant && win.trayIcon != nil {
-		_ = th.SetTrayIcon(win.trayIcon, win.trayTooltip)
+	if t := f(win.native); t != nil {
+		win.tray.Store(&t)
 	}
 }
 
-// ensureTrayDispatcher единожды регистрирует диспетчер кликов трея у бэкенда.
-func (win *Window) ensureTrayDispatcher(th trayHost) {
+// stopTray снимает трей при закрытии окна (tearDown): иконка и подписки
+// уведомлений не переживают окно.
+func (win *Window) stopTray() {
+	if t := win.trayOf(); t != nil {
+		t.Close()
+	}
+}
+
+// applyPendingTray применяет отложенное состояние трея после создания окна.
+// Вызывается из Run(). Без трея — no-op.
+func (win *Window) applyPendingTray() {
+	t := win.trayOf()
+	if t == nil {
+		return
+	}
+	// Уведомления доступны шире иконки (Linux — без неё), поэтому колбэк
+	// клика по уведомлению — первым, независимо от иконки.
+	if win.onBalloonClick != nil {
+		t.SetBalloonClickHandler(win.onEngineFunc(win.onBalloonClick))
+	}
+	if win.trayIconWant || win.onTrayClick != nil || win.trayMenu != nil {
+		win.ensureTrayDispatcher(t)
+	}
+	win.pushTrayMenuNative(t)
+	win.attachTrayMenu()
+	if win.trayIconWant && win.trayIcon != nil {
+		_ = t.SetTrayIcon(win.trayIcon, win.trayTooltip)
+	}
+}
+
+// ensureTrayDispatcher единожды регистрирует у трея диспетчер кликов и
+// очередь для пунктов системного меню.
+func (win *Window) ensureTrayDispatcher(t native.Tray) {
 	if win.trayDispatcherSet {
 		return
 	}
 	win.trayDispatcherSet = true
-	th.SetTrayClickHandler(win.dispatchTrayClick)
+	t.SetTrayClickHandler(win.dispatchTrayClick)
 	// Меню, которое показывает сама система (Linux), сообщает выбор пункта со
 	// своего потока — пункт выполняется на горутине движка.
-	if mr, ok := th.(interface{ SetTrayMenuRunner(run func(fn func())) }); ok {
-		mr.SetTrayMenuRunner(win.onEngine)
-	}
+	t.SetTrayMenuRunner(win.onEngine)
 }
 
 // dispatchTrayClick — единый диспетчер кликов трея: вызывает пользовательский
@@ -301,21 +277,18 @@ func (win *Window) dispatchTrayClick(button int, doubleClick bool) {
 		win.RestoreFromTray()
 	}
 	// Правый клик открывает НАШЕ меню только там, где его не показывает
-	// система (Windows). На Linux панель уже нарисовала своё — см. nativeTrayMenu.
+	// система (Windows). На Linux панель уже нарисовала своё — см.
+	// Tray.SetTrayMenuNative.
 	if button == 1 && !doubleClick && win.trayMenu != nil && !win.trayMenuNative {
 		win.showTrayMenu()
 	}
 }
 
-// pushTrayMenuNative отдаёт трей-меню бэкенду, если тот показывает меню сам
-// (Linux). Запоминает результат: пока trayMenuNative взведён, наш PopupMenu в
+// pushTrayMenuNative отдаёт меню трею: если его показывает сама система
+// (Linux), запоминаем это — пока trayMenuNative взведён, наш PopupMenu в
 // дерево виджетов не добавляется и по правому клику не открывается.
-func (win *Window) pushTrayMenuNative() {
-	nm, ok := win.native.(nativeTrayMenu)
-	if !ok {
-		return
-	}
-	win.trayMenuNative = nm.SetTrayMenuNative(win.trayMenu)
+func (win *Window) pushTrayMenuNative(t native.Tray) {
+	win.trayMenuNative = t.SetTrayMenuNative(win.trayMenu)
 }
 
 // showTrayMenu показывает трей-меню у курсора. Экранные координаты курсора
@@ -324,12 +297,14 @@ func (win *Window) pushTrayMenuNative() {
 // Перед показом носитель выводится на передний план (классический трей-трюк:
 // иначе меню не закроется по клику мимо него).
 func (win *Window) showTrayMenu() {
-	th, ok := win.native.(trayHost)
-	if !ok || win.trayMenu == nil {
+	t := win.trayOf()
+	if t == nil || win.trayMenu == nil {
 		return
 	}
-	sx, sy := th.CursorScreenPos()
-	th.SetForeground()
+	sx, sy := t.CursorScreenPos()
+	if fg, ok := win.native.(foregrounder); ok {
+		fg.SetForeground()
+	}
 	cx, cy := win.native.GetPosition()
 	scale := win.scale
 	if scale <= 0 {

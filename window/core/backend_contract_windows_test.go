@@ -2,7 +2,12 @@
 
 package core
 
-import "github.com/oops1/headless-gui/v3/platform/native"
+import (
+	"image"
+	"testing"
+
+	"github.com/oops1/headless-gui/v3/platform/native"
+)
 
 // backend_contract_windows_test.go — бэкенд Win32 удовлетворяет
 // интерфейсам-возможностям ядра.
@@ -16,7 +21,6 @@ import "github.com/oops1/headless-gui/v3/platform/native"
 var (
 	_ activationNotifier  = (*Win32Window)(nil)
 	_ alwaysOnTopBackend  = (*Win32Window)(nil)
-	_ balloonHost         = (*Win32Window)(nil)
 	_ clientSizer         = (*Win32Window)(nil)
 	_ cornerRounder       = (*Win32Window)(nil)
 	_ cursorImageSetter   = (*Win32Window)(nil)
@@ -51,7 +55,7 @@ var (
 	_ scaleDetector       = (*Win32Window)(nil)
 	_ secondaryMarker     = (*Win32Window)(nil)
 	_ touchSource         = (*Win32Window)(nil)
-	_ trayHost            = (*Win32Window)(nil)
+	_ trayWindow          = (*Win32Window)(nil)
 	_ uiThreadInvoker     = (*Win32Window)(nil)
 	_ wheelRawSource      = (*Win32Window)(nil)
 	_ workAreaProvider    = (*Win32Window)(nil)
@@ -64,3 +68,25 @@ var (
 	_ native.Stacker     = (*Win32Window)(nil)
 	_ native.Styler      = (*Win32Window)(nil)
 )
+
+// trayIconMethods и balloonMethods — методы трея, которые раньше объявляли
+// бэкенды. Иконка в трее и уведомления — возможность platform/tray (9.8c):
+// окно бэкенда их не объявляет, ядро их у окна и не ищет.
+type (
+	trayIconMethods interface {
+		SetTrayIcon(image.Image, string) error
+	}
+	balloonMethods interface {
+		ShowBalloon(string, string, uint32) error
+	}
+)
+
+func TestBackendContract_Win32NoTray(t *testing.T) {
+	var nw any = &Win32Window{}
+	if _, ok := nw.(trayIconMethods); ok {
+		t.Error("Win32Window объявил SetTrayIcon")
+	}
+	if _, ok := nw.(balloonMethods); ok {
+		t.Error("Win32Window объявил ShowBalloon")
+	}
+}

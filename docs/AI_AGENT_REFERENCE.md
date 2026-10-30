@@ -3065,7 +3065,7 @@ ww.OnNativeResize = func(edges int) bool { return true } // widget.NativeEdgeTop
 |---|---|---|---|
 | Модалка в своём окне (`ModalHost`) | нативно | нативно | in-canvas фолбэк |
 | Popup-оверлей в своём окне (`PopupSink`) | нативно | нативно | Wayland — `xdg_popup`, macOS — in-canvas |
-| Трей / balloon / превью | да | трей — StatusNotifierItem по D-Bus (`tray_sni_linux.go`, меню — dbusmenu), balloon — `org.freedesktop.Notifications`; превью нет | Wayland — трей и balloon как на X11 (`HideToTray` — no-op); macOS/headless — no-op (ошибка/false) |
+| Трей / balloon / превью | да | трей — StatusNotifierItem по D-Bus (`platform/tray/sni_linux.go`, меню — dbusmenu), balloon — `org.freedesktop.Notifications`; превью нет | Wayland — трей и balloon как на X11 (`HideToTray` — no-op); macOS/headless — no-op (ошибка/false) |
 | Перетащить / растянуть окно | `SetPosition` | `_NET_WM_MOVERESIZE` (`BeginMove`/`BeginResize`, с v3.26) | Wayland — просит компоновщик, macOS — нет |
 | Свернуть / развернуть | да | да | Wayland — да (`set_minimized`/`set_maximized`) |
 | Форма курсора | да | да (шрифт «cursor») | Wayland — да (`cursor_shape` или своя картинка) |
@@ -3134,7 +3134,7 @@ type OverlayBoundsProvider interface { OverlayBounds() image.Rectangle } // аб
 
 Публичный API на `*window.Window`. Можно вызывать до `Run()` (состояние
 буферизуется и применяется при создании окна) или из обработчиков UI. На Linux
-(X11 и Wayland) трей — StatusNotifierItem по D-Bus (`window/tray_sni_linux.go`:
+(X11 и Wayland) трей — StatusNotifierItem по D-Bus (`platform/tray/sni_linux.go`:
 нужен `StatusNotifierWatcher` на шине, в GNOME — расширение AppIndicator; меню
 рисует панель, одиночный клик вместо двойного), balloon —
 `org.freedesktop.Notifications` без иконки в трее; превью в панели задач — только
@@ -3188,7 +3188,11 @@ win.Run()
 если WM_PRINTCLIENT окажется недостаточно на конкретной системе.
 
 Идентификаторы сообщений: `InvokeOnUIThread` занимает `WM_APP` (0x8000);
-callback иконки трея — `WM_APP+1` (`wmTrayCallback`).
+callback иконки трея — `WM_APP+1` (`wmTrayCallback`, ловит возможность
+`platform/tray` через `win32.AddMessageHook`). Трей и уведомления — возможность
+`platform/tray`: в `window/minimal` их нет (`SetTrayIcon` после `Run` и
+`ShowBalloon` — `native.ErrTrayUnsupported`), а `HideToTray`/`RestoreFromTray`
+— операции окна — работают и там. Иконка снимается при закрытии окна.
 
 ---
 
@@ -3678,8 +3682,9 @@ meaningful when `state==2`).
 
 A root `<Window>` can declare its system-tray icon, tooltip and context menu
 right in XAML — no imperative `SetTrayIcon`/`SetTrayMenu` needed for the basic
-case. The tray itself works only on Windows (Shell_NotifyIcon); on other
-platforms the declaration parses fine and is simply a no-op at run time.
+case. The tray itself works on Windows (Shell_NotifyIcon) and Linux
+(StatusNotifierItem) through the `platform/tray` capability; on macOS and in
+`window/minimal` the declaration parses fine and is simply a no-op at run time.
 
 ```xml
 <Window Title="Моё приложение" Width="900" Height="600"
@@ -3711,7 +3716,7 @@ platforms the declaration parses fine and is simply a no-op at run time.
   `<MenuItem Text="…"/>` items and `<Separator/>` (or `<MenuItem Separator="True"/>`).
   It is stored in the `widget.Window.TrayMenu` **field**, not added to the widget
   tree (a `PopupMenu` as a direct `Window` child is unsafe — `Window.SetBounds`
-  skips `*PopupMenu`); `window.attachTrayMenu` inserts it into the tree correctly
+  skips `*PopupMenu`); `attachTrayMenu` (`window/core/tray.go`) inserts it into the tree correctly
   at `Run()`. Give it a `Name` so code can find it (registered in the XAML
   registry under that name).
 

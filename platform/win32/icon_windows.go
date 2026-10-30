@@ -6,6 +6,7 @@ package win32
 
 import (
 	"image"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 
@@ -18,7 +19,23 @@ const (
 	iconBigIdx   = 1 // значок в Alt+Tab и в свойствах окна
 )
 
-var procSendMessageW = user32.NewProc("SendMessageW")
+var (
+	procSendMessageW       = user32.NewProc("SendMessageW")
+	procCreateIconIndirect = user32.NewProc("CreateIconIndirect")
+	procDestroyIcon        = user32.NewProc("DestroyIcon")
+	procCreateBitmap       = gdi32.NewProc("CreateBitmap")
+	procCreateDIBSection   = gdi32.NewProc("CreateDIBSection")
+	procDeleteObject       = gdi32.NewProc("DeleteObject")
+)
+
+// iconInfo — ICONINFO для CreateIconIndirect.
+type iconInfo struct {
+	FIcon    int32
+	XHotspot uint32
+	YHotspot uint32
+	HbmMask  windows.Handle
+	HbmColor windows.Handle
+}
 
 // Проверка на этапе сборки: Window.SetIcon находит бэкенд по интерфейсу, и
 // опечатка в имени метода превратилась бы в молчаливый ErrIconUnsupported.
@@ -72,4 +89,68 @@ func (w *Win32Window) applyPendingIcon() {
 	icons := w.pendingIcons
 	w.pendingIcons = nil
 	_ = w.SetIcon(icons)
+}
+
+// NewIcon строит HICON из картинки — тот же, что у значка окна (32bpp цветной
+// DIB с альфой + AND-маска из альфы). Точка расширения для возможностей вне
+// бэкенда (трей, platform/tray); уничтожает значок вызывающий (DestroyIcon).
+// 0 — не вышло.
+func NewIcon(img *image.RGBA) windows.Handle { return rgbaToHICON(img) }
+
+// rgbaToHICON создаёт HICON из RGBA (32bpp цветной DIB + 1bpp AND-маска).
+func rgbaToHICON(img *image.RGBA) windows.Handle {
+	return rgbaToHandle(img, true, 0, 0)
+}
+
+// rgbaToHandle создаёт HICON (icon=true) или HCURSOR (icon=false, с горячей
+// точкой hotX, hotY) из RGBA: 32bpp цветной DIB с альфой + 1bpp AND-маска.
+func rgbaToHandle(img *image.RGBA, icon bool, hotX, hotY uint32) windows.Handle {
+	b := img.Bounds()
+	cw, ch := b.Dx(), b.Dy()
+	if cw <= 0 || ch <= 0 {
+		return 0
+	}
+
+	// Цветной top-down 32bpp DIB-section.
+	bi := bitmapInfo{
+		BmiHeader: bitmapInfoHeader{
+			BiSize:        uint32(unsafe.Sizeof(bitmapInfoHeader{})),
+			BiWidth:       int32(cw),
+			BiHeight:      -int32(ch), // negative = top-down
+			BiPlanes:      1,
+			BiBitCount:    32,
+			BiCompression: biRgb,
+		},
+	}
+	var bits unsafe.Pointer
+	hbmColor, _, _ := procCreateDIBSection.Call(
+		0, uintptr(unsafe.Pointer(&bi)), uintptr(dibRgbColors),
+		uintptr(unsafe.Pointer(&bits)), 0, 0)
+	if hbmColor == 0 || bits == nil {
+		return 0
+	}
+	color := native.IconColorBuffer(img)
+	copy(unsafe.Slice((*byte)(bits), len(color)), color)
+
+	// 1bpp AND-маска из альфы.
+	mask, _ := iconMaskBuffer(img, 128)
+	hbmMask, _, _ := procCreateBitmap.Call(uintptr(cw), uintptr(ch), 1, 1,
+		uintptr(unsafe.Pointer(&mask[0])))
+
+	ii := iconInfo{
+		HbmMask:  windows.Handle(hbmMask),
+		HbmColor: windows.Handle(hbmColor),
+	}
+	if icon {
+		ii.FIcon = 1
+	} else {
+		ii.XHotspot, ii.YHotspot = hotX, hotY
+	}
+	hicon, _, _ := procCreateIconIndirect.Call(uintptr(unsafe.Pointer(&ii)))
+
+	procDeleteObject.Call(hbmColor)
+	if hbmMask != 0 {
+		procDeleteObject.Call(hbmMask)
+	}
+	return windows.Handle(hicon)
 }

@@ -7,4 +7,5 @@ package window
 import (
 	_ "github.com/oops1/headless-gui/v3/platform/a11y"
 	_ "github.com/oops1/headless-gui/v3/platform/shell"
+	_ "github.com/oops1/headless-gui/v3/platform/tray"
 )

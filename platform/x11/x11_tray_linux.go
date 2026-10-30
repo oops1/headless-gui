@@ -2,15 +2,8 @@
 
 package x11
 
-import "github.com/oops1/headless-gui/v3/platform/tray"
-
-// traySNI и trayNotifier — трей и уведомления, встроенные в X11Window.
-// Неэкспортированные псевдонимы: методы продвигаются, а поле окна снаружи
-// не видно (в открытом API window.X11Window его нет).
-type (
-	traySNI      = tray.SNI
-	trayNotifier = tray.Notifier
-)
+// x11_tray_linux.go — окно X11 прячется в трей и возвращается (интерфейс
+// ядра trayWindow). Иконка в трее и уведомления — возможность platform/tray.
 
 // HideToTray прячет окно X11: UnmapWindow убирает его и с экрана, и из панели
 // задач EWMH-WM (полный аналог SW_HIDE на Windows).

@@ -648,6 +648,35 @@ func TestTrayAgainstFakeWatcher(t *testing.T) {
 	if de.NameHasOwner(itemName) {
 		t.Errorf("после RemoveTrayIcon имя %s всё ещё занято", itemName)
 	}
+
+	// ── Закрытие окна: иконка снимается и больше не поднимается ──────────────
+	if err := tray.SetTrayIcon(image.NewRGBA(image.Rect(0, 0, 4, 4)), "снова"); err != nil {
+		t.Fatalf("повторный SetTrayIcon: %v", err)
+	}
+	tray.trayMu.Lock()
+	again := tray.name
+	tray.trayMu.Unlock()
+	if again == "" || !de.NameHasOwner(again) {
+		t.Fatalf("повторная иконка не зарегистрирована: %q", again)
+	}
+	tray.Close()
+	if de.NameHasOwner(again) {
+		t.Errorf("после Close имя %s всё ещё занято", again)
+	}
+	if err := tray.SetTrayIcon(image.NewRGBA(image.Rect(0, 0, 4, 4)), "после"); !errors.Is(err, native.ErrTrayUnsupported) {
+		t.Errorf("SetTrayIcon после Close: %v", err)
+	}
+}
+
+// После Close иконка не поднимается: вызов, разминувшийся с закрытием окна,
+// не регистрирует её заново (шина для проверки не нужна).
+func TestSNI_CloseRefusesIcon(t *testing.T) {
+	var s SNI
+	s.Close()
+	s.Close()
+	if err := s.SetTrayIcon(image.NewRGBA(image.Rect(0, 0, 4, 4)), "x"); !errors.Is(err, native.ErrTrayUnsupported) {
+		t.Errorf("SetTrayIcon после Close: %v", err)
+	}
 }
 
 // TestTrayWithoutWatcher — без службы трея SetTrayIcon отдаёт понятную ошибку,

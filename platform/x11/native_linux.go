@@ -23,16 +23,6 @@ import (
 // Чистый Go без CGO и внешних зависимостей.
 // Общается с X-сервером напрямую через Unix socket.
 type X11Window struct {
-	// trayNotifier — системные уведомления через D-Bus (platform/tray).
-	// Встроен анонимно: его методы ShowBalloon/SetBalloonClickHandler делают
-	// окно balloonHost'ом, и Window.ShowBalloon работает без иконки в трее.
-	trayNotifier
-
-	// traySNI — иконка в системном трее по StatusNotifierItem
-	// (platform/tray). Вместе с методами HideToTray/RestoreFromTray
-	// (x11_tray_linux.go) делает окно trayHost'ом (window/core/tray.go).
-	traySNI
-
 	conn      net.Conn
 	screen    x11Screen
 	rootWin   uint32

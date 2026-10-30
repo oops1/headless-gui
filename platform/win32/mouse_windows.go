@@ -37,6 +37,7 @@ const (
 
 var (
 	procTrackMouseEvent = user32.NewProc("TrackMouseEvent")
+	procGetCursorPos    = user32.NewProc("GetCursorPos")
 	procWindowFromPoint = user32.NewProc("WindowFromPoint")
 	procDestroyCursor   = user32.NewProc("DestroyCursor")
 )

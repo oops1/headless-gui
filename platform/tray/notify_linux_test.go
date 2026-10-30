@@ -3,10 +3,12 @@
 package tray
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/oops1/headless-gui/v3/platform/dbus"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget/base"
 )
 
@@ -183,5 +185,37 @@ func TestNotifyAgainstFakeDaemon(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("второй Notify не доехал")
+	}
+
+	// Окно закрыто: клик по его уведомлению никуда не идёт.
+	closedClick := make(chan struct{}, 1)
+	n3 := &Notifier{}
+	n3.SetBalloonClickHandler(func() { closedClick <- struct{}{} })
+	if err := n3.ShowBalloon("Закроется", "текст", 1); err != nil {
+		t.Fatalf("ShowBalloon третьего: %v", err)
+	}
+	<-calls
+	n3.Close()
+	if err := daemon.Emit(notifyObjPath, notifyInterface, "ActionInvoked", "us", []any{uint32(4242), "default"}); err != nil {
+		t.Fatalf("emit после Close: %v", err)
+	}
+	select {
+	case <-closedClick:
+		t.Error("клик дошёл до закрытого окна")
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+// После Close уведомления не показываются, а колбэк не ставится (шина для
+// проверки не нужна).
+func TestNotifier_CloseRefuses(t *testing.T) {
+	var n Notifier
+	n.Close()
+	n.SetBalloonClickHandler(func() {})
+	if n.onClick != nil {
+		t.Error("колбэк поставлен после Close")
+	}
+	if err := n.ShowBalloon("t", "x", 1); !errors.Is(err, native.ErrTrayUnsupported) {
+		t.Errorf("ShowBalloon после Close: %v", err)
 	}
 }
