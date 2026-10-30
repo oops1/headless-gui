@@ -1,6 +1,6 @@
 //go:build windows
 
-package core
+package a11y
 
 import (
 	"image"
@@ -167,7 +167,7 @@ func newUIATestBridge(t *testing.T) (*uiaBridge, *engine.Engine) {
 
 	win := New(eng, "Окно UIA")
 	win.scale = 1
-	b := &uiaBridge{win: win, elems: map[int32]*uiaElement{}}
+	b := &uiaBridge{host: win.host(), elems: map[int32]*uiaElement{}}
 	b.refresh(true)
 	t.Cleanup(func() {
 		b.mu.Lock()
@@ -400,7 +400,7 @@ func TestUIADisabledAndChecked(t *testing.T) {
 
 	win := New(eng, "T")
 	win.scale = 1
-	b := &uiaBridge{win: win, elems: map[int32]*uiaElement{}}
+	b := &uiaBridge{host: win.host(), elems: map[int32]*uiaElement{}}
 	b.refresh(true)
 	t.Cleanup(func() {
 		for _, e := range b.elems {
@@ -466,7 +466,7 @@ func newUIAActionScene(t *testing.T) *uiaActionScene {
 
 	win := New(sc.eng, "Действия UIA")
 	win.scale = 1
-	sc.b = &uiaBridge{win: win, elems: map[int32]*uiaElement{}}
+	sc.b = &uiaBridge{host: win.host(), elems: map[int32]*uiaElement{}}
 	sc.b.refresh(true)
 	t.Cleanup(func() {
 		sc.b.mu.Lock()
@@ -665,7 +665,7 @@ func TestUIASetFocusThroughVTable(t *testing.T) {
 // пикселях экрана.
 func TestUIAScaledBounds(t *testing.T) {
 	b, _ := newUIATestBridge(t)
-	b.win.scale = 1.5
+	winOf(b.host).scale = 1.5
 	v := b.current()
 	e := b.element(v.id(1))
 	var rc uiaRect
@@ -688,7 +688,7 @@ func TestUIAPasswordHidden(t *testing.T) {
 
 	win := New(eng, "T")
 	win.scale = 1
-	b := &uiaBridge{win: win, elems: map[int32]*uiaElement{}}
+	b := &uiaBridge{host: win.host(), elems: map[int32]*uiaElement{}}
 	b.refresh(true)
 	t.Cleanup(func() {
 		for _, e := range b.elems {

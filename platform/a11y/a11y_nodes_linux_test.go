@@ -1,6 +1,6 @@
 //go:build linux && !android
 
-package core
+package a11y
 
 import (
 	"image"
@@ -16,10 +16,10 @@ import (
 // в который попадают сообщения с провода.
 
 // newATSPIBridgeFor собирает мост БЕЗ подключения к шине поверх корня.
-func newATSPIBridgeFor(root widget.Widget) (*atspiBridge, *Window) {
+func newATSPIBridgeFor(root widget.Widget) (*atspiBridge, *testWin) {
 	win := newTestWindow(root)
 	win.scale = 1
-	return &atspiBridge{win: win, appName: ":1.7"}, win
+	return &atspiBridge{host: win.host(), appName: ":1.7"}, win
 }
 
 // atspiCallNode вызывает метод интерфейса на узле по его устойчивому id —

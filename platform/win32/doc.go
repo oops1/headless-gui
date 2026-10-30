@@ -9,8 +9,8 @@
 // методов) для возможностей вне пакета.
 //
 // Точки расширения для возможностей вне бэкенда: AddMessageHook — обработчик
-// оконного сообщения (доступность UI Automation в window/core отвечает так
-// на WM_GETOBJECT), Win32Window.HWND — дескриптор окна.
+// оконного сообщения (доступность UI Automation, platform/a11y, отвечает
+// так на WM_GETOBJECT), Win32Window.HWND — дескриптор окна.
 //
 // Программы этот пакет не импортируют: Win32Window, NewNativeWindow и
 // AllowForeground приходят через фасад window. Пакет собирается и на других

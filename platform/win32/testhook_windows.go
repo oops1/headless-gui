@@ -3,7 +3,7 @@
 package win32
 
 // testhook_windows.go — внутренности окна для интеграционных тестов
-// window/core (internal/testhook): ядро и живое окно Win32 проверяются
+// window/core и platform/a11y (internal/testhook): ядро и живое окно Win32 проверяются
 // вместе, а открытого API ради этого бэкенд не заводит.
 
 import (

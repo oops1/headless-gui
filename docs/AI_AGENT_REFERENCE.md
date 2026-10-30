@@ -8605,7 +8605,8 @@ type AccessActionHandler interface {
   goroutine (`callOnLoop`) and refuses a hidden/disabled owner. Before
   `AccessInvoke/Focus/Select` it moves input focus to the owner if the owner is
   `Focusable` and not an `OverlayDrawer` (a menu would be closed by it).
-- `Window.accessibilityNodeAction(node, kind)` is the single entry the bridges
+- `accessibilityNodeAction(host, node, kind)` in `platform/a11y/a11y.go`
+  (`host` is the window's `native.AccessHost`) is the single entry the bridges
   use. A node with an `ActionID` whose owner implements the interface gets the
   action from it, and the owner's answer is final (no fallback click). Anything
   else behaves as before: Focus → focus the widget; Invoke/Select/Toggle →
@@ -8716,9 +8717,11 @@ accent colour, which on an accent button (OK) was the colour of its fill.
 
 Tests: `widget/base/accessibility_nodes_test.go`, `widget/base/focusring_test.go`,
 `engine/accessibility_action_test.go`, `engine/focusring_test.go`,
-`window/a11y_node_test.go` (all platforms), `window/a11y_nodes_windows_test.go`
-(UIA through the vtables), `window/a11y_nodes_linux_test.go`,
-`window/a11y_nodes_live_linux_test.go` (AT-SPI, the second on the real bus).
+`platform/a11y/a11y_node_test.go` (all platforms),
+`platform/a11y/a11y_nodes_windows_test.go` (UIA through the vtables),
+`platform/a11y/a11y_nodes_linux_test.go`,
+`platform/a11y/a11y_nodes_live_linux_test.go` (AT-SPI, the second on the real
+bus).
 
 ## v3.38.1: Windows 10 — a large window no longer stays blank
 

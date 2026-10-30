@@ -17,7 +17,7 @@
 // a11y_textrange.go; здесь только COM: разбор аргументов, счётчики ссылок,
 // SAFEARRAY и вызовы в виджет.
 //
-// Текст всегда спрашивается у ЖИВОГО виджета (widget.AccessTextProvider), а не
+// Текст всегда спрашивается у ЖИВОГО виджета (base.AccessTextProvider), а не
 // из снимка семантики: снимок отстаёт на сто пятьдесят миллисекунд, а
 // скринридер, прочитав слово под кареткой по устаревшему снимку, назвал бы
 // слово, которое уже стёрто. Цена — перевод строки в руны на каждый вызов
@@ -50,7 +50,8 @@
 //   - Выделение единственное (SupportedTextSelection_Single): AddToSelection
 //     работает, лишь пока выделения нет.
 //   - Единицы Format и Page трактуются как Document (см. a11y_textrange.go).
-package core
+
+package a11y
 
 import (
 	"sync"
@@ -58,7 +59,7 @@ import (
 	"unsafe"
 
 	"github.com/oops1/headless-gui/v3/platform/win32"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v3/widget/base"
 	"golang.org/x/sys/windows"
 )
 
@@ -99,10 +100,10 @@ func uiaSupportsText(e *uiaElement) bool {
 	if node == nil || node.Widget == nil || !uiaSupportsValue(node.Info.Role) {
 		return false
 	}
-	if a11yHasState(node.Info.States, widget.StatePassword) {
+	if a11yHasState(node.Info.States, base.StatePassword) {
 		return false
 	}
-	_, ok := widget.AccessTextOf(node.Widget)
+	_, ok := base.AccessTextOf(node.Widget)
 	return ok
 }
 
@@ -240,7 +241,7 @@ func (tr *uiaTextRange) set(r a11yRange) {
 
 // load возвращает живой текст элемента рунами и диапазон, усечённый до него.
 // ok=false — элемента (или текста у него) уже нет.
-func (tr *uiaTextRange) load() ([]rune, a11yRange, widget.AccessTextProvider, bool) {
+func (tr *uiaTextRange) load() ([]rune, a11yRange, base.AccessTextProvider, bool) {
 	tp, ok := uiaTextOf(tr.elem)
 	if !ok {
 		return nil, a11yRange{}, nil, false
@@ -354,7 +355,7 @@ func safeArrayOfDoubles(vals []float64) uintptr {
 // uiaTextElement находит элемент по COM-указателю ITextProvider и проверяет,
 // что текст у него ещё есть: дерево могло перестроиться, а клиент держит
 // старый указатель.
-func uiaTextElement(this uintptr) (*uiaElement, widget.AccessTextProvider, uintptr) {
+func uiaTextElement(this uintptr) (*uiaElement, base.AccessTextProvider, uintptr) {
 	e := uiaLookup(this)
 	if e == nil {
 		return nil, nil, win32.EFail
@@ -368,7 +369,7 @@ func uiaTextElement(this uintptr) (*uiaElement, widget.AccessTextProvider, uintp
 
 // uiaCurrentSelection — выделение виджета, усечённое до длины текста. Без
 // выделения — пустой диапазон на каретке: так UIA и ждёт его в GetSelection.
-func uiaCurrentSelection(tp widget.AccessTextProvider, n int) a11yRange {
+func uiaCurrentSelection(tp base.AccessTextProvider, n int) a11yRange {
 	from, to := tp.AccessSelection()
 	return a11yClampRange(a11yRange{from, to}, n)
 }
@@ -804,13 +805,13 @@ func uiaRangeMoveEndpointByRange(this uintptr, ep int32, target uintptr, tep int
 // (AccessSelectionSetter); иначе остаётся поставить каретку на его конец —
 // лучше, чем отказ: скринридер хотя бы переведёт курсор. Пустой диапазон —
 // просто каретка.
-func uiaSelectRange(e *uiaElement, tp widget.AccessTextProvider, r a11yRange) uintptr {
-	sel, canSel := tp.(widget.AccessSelectionSetter)
-	caret, canCaret := tp.(widget.AccessCaretSetter)
+func uiaSelectRange(e *uiaElement, tp base.AccessTextProvider, r a11yRange) uintptr {
+	sel, canSel := tp.(base.AccessSelectionSetter)
+	caret, canCaret := tp.(base.AccessCaretSetter)
 	if !canSel && !canCaret {
 		return win32.ENotImpl
 	}
-	e.b.win.postToEngine(func() {
+	e.b.host.PostToEngine(func() {
 		switch {
 		case canSel:
 			sel.AccessSetSelection(r.Start, r.End)
@@ -947,7 +948,7 @@ func (b *uiaBridge) emitTextEvents() {
 
 // textStateOf — текущее текстовое состояние виджета: то, что сравнивается
 // между проходами цикла событий.
-func textStateOf(tp widget.AccessTextProvider) a11yTextState {
+func textStateOf(tp base.AccessTextProvider) a11yTextState {
 	from, to := tp.AccessSelection()
 	return a11yTextState{Text: tp.AccessText(), Caret: tp.AccessCaret(), SelFrom: from, SelTo: to}
 }

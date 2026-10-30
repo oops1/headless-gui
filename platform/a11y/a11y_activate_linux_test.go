@@ -1,6 +1,6 @@
 //go:build linux && !android
 
-package core
+package a11y
 
 import (
 	"image"
@@ -26,7 +26,7 @@ func newATSPIActionBridge(t *testing.T) (*atspiBridge, *a11yView, *widget.Button
 
 	win := newTestWindow(root)
 	win.scale = 1
-	b := &atspiBridge{win: win, appName: ":1.7"}
+	b := &atspiBridge{host: win.host(), appName: ":1.7"}
 	v := b.ids.assign(win.accessibilitySnapshot())
 	return b, v, btn, &clicks
 }

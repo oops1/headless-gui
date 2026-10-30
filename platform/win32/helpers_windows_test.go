@@ -2,8 +2,8 @@
 
 package win32
 
-// helpers_windows_test.go — копии помощников тестов window/core
-// (a11y_windows_test.go, pointerlock_test.go, rawkey_test.go): тестовые
+// helpers_windows_test.go — копии помощников тестов platform/a11y
+// (a11y_windows_test.go) и window/core (pointerlock_test.go, rawkey_test.go): тестовые
 // помощники между пакетами не делятся.
 
 import (

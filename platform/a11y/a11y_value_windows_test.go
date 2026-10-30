@@ -1,6 +1,6 @@
 //go:build windows
 
-package core
+package a11y
 
 import (
 	"image"
@@ -54,7 +54,7 @@ func newUIAValueScene(t *testing.T) *uiaValueScene {
 
 	win := New(eng, "Окно UIA")
 	win.scale = 1
-	b := &uiaBridge{win: win, elems: map[int32]*uiaElement{}}
+	b := &uiaBridge{host: win.host(), elems: map[int32]*uiaElement{}}
 	b.refresh(true)
 	t.Cleanup(func() {
 		b.mu.Lock()

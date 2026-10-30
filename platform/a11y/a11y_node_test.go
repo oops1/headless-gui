@@ -1,4 +1,4 @@
-package core
+package a11y
 
 import (
 	"image"
@@ -389,7 +389,7 @@ func TestA11ySnapshot_DialogNamed(t *testing.T) {
 }
 
 // showDialogForTest показывает модальный диалог в движке окна.
-func showDialogForTest(t *testing.T, win *Window, dlg widget.ModalWidget) {
+func showDialogForTest(t *testing.T, win *testWin, dlg widget.ModalWidget) {
 	t.Helper()
 	e, ok := win.eng.(interface{ ShowModal(widget.ModalWidget) })
 	if !ok {

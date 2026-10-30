@@ -12,7 +12,8 @@
 // плавающей точкой (они приходят в XMM-регистрах, до которых Go-колбэк не
 // добирается). Это касается единственного метода — ElementProviderFromPoint;
 // как с ним поступаем, описано в a11y_windows.go.
-package core
+
+package a11y
 
 import (
 	"errors"

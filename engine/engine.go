@@ -1145,7 +1145,7 @@ func (e *Engine) activateAccessibleNow(w widget.Widget) bool {
 //
 // Владелец обязан реализовывать widget.AccessActionHandler: без него
 // возвращается false, и решать, что делать дальше (прежнее нажатие в центр
-// владельца), предстоит мосту, — см. Window.accessibilityNodeAction.
+// владельца), предстоит мосту, — см. accessibilityNodeAction в platform/a11y.
 // Метод потокобезопасен: действие выполняется на горутине движка, а вызывают
 // его со своих потоков мосты доступности (D-Bus, COM-поток UIA). Над скрытым
 // или выключенным владельцем действий нет — как у FocusAccessible.

@@ -1,4 +1,4 @@
-package core
+package a11y
 
 import "unicode"
 
@@ -12,7 +12,7 @@ import "unicode"
 // проверяется в общем прогоне тестов. COM-обвязка (a11y_textpattern_windows.go)
 // только разбирает аргументы и вызывает эти функции.
 //
-// Позиции — в РУНАХ, как и у widget.AccessTextProvider. Диапазон — полуинтервал
+// Позиции — в РУНАХ, как и у base.AccessTextProvider. Диапазон — полуинтервал
 // [Start, End): пустой (Start == End) означает «точку» между символами, то есть
 // каретку.
 //

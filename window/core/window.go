@@ -457,10 +457,11 @@ type Window struct {
 	trayMenuNative bool
 
 	// ── Доступность (accessibility) ──────────────────────────────────────────
-	// a11y — платформенный мост (AT-SPI на Linux), поднимается в Run(), если
-	// система сообщает о включённой доступности. a11yForce — явное решение
-	// приложения (SetAccessibilityEnabled), важнее автоопределения.
-	a11y      a11yBridge
+	// a11y — мост доступности (platform/a11y: UI Automation на Windows,
+	// AT-SPI на Linux), поднимается в bringUp; без возможности доступности —
+	// nil. a11yForce — явное решение приложения (SetAccessibilityEnabled),
+	// важнее автоопределения моста.
+	a11y      native.AccessBridge
 	a11yForce *bool
 
 	// onFilesDropped — колбэк приложения для Drag&Drop файлов из ОС
@@ -907,9 +908,10 @@ func (win *Window) bringUp() error {
 	// заданное до Run(). На платформах без поддержки — no-op.
 	win.applyPendingTray()
 
-	// Мост доступности (AT-SPI на Linux): поднимается, только если система
-	// сообщает о включённой доступности или приложение попросило явно.
-	// Снимается в tearDown.
+	// Мост доступности — возможность platform/a11y, если фасад её подключил
+	// (window — да, window/minimal — нет): UI Automation на Windows, AT-SPI на
+	// Linux; поднимать ли его, решает мост (SetAccessibilityEnabled,
+	// HEADLESS_GUI_A11Y, на Linux — org.a11y.Status). Снимается в tearDown.
 	win.startAccessibility()
 
 	// Запускаем горутину чтения кадров из движка

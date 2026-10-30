@@ -41,7 +41,7 @@
 //     HEADLESS_GUI_UIA_LOG=<файл> (см. uiaLog).
 //
 // Действия скринридера (SetFocus, Invoke, Toggle) уходят в движок через
-// accessibilityFocus/accessibilityActivate — см. accessibilityActor в a11y.go.
+// accessibilityNodeAction (a11y.go) и хост окна (native.AccessHost).
 // Активация выполняется СИНТЕТИЧЕСКИМ КЛИКОМ по центру виджета, поэтому
 // перекрытый другим виджетом элемент нажать не удастся (см. ActivateAccessible).
 //
@@ -52,7 +52,7 @@
 // спрашивает «выбрана ли», а нажатие выбирает пункт. Пункту меню — Invoke
 // (или Toggle, если он с отметкой) и ExpandCollapse, если у него подменю.
 // Узлам, которые рисует сам виджет-владелец (панели сравнения, пункты меню),
-// действия доставляются через widget.AccessActionHandler владельца
+// действия доставляются через base.AccessActionHandler владельца
 // (accessibilityNodeAction), а не кликом в центр виджета.
 //
 // Прокрученный за край элемент отдаётся с IsOffscreen=true и пустой
@@ -65,7 +65,8 @@
 // координаты — см. комментарий у этого метода. Всплывающее меню, вынесенное
 // движком в отдельное окно ОС, UIA спрашивает у окна меню, а не у главного, и
 // его пункты в дереве главного окна видны, но под курсором не находятся.
-package core
+
+package a11y
 
 import (
 	"os"
@@ -76,8 +77,9 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/platform/win32"
-	"github.com/oops1/headless-gui/v3/widget"
+	"github.com/oops1/headless-gui/v3/widget/base"
 	"golang.org/x/sys/windows"
 )
 
@@ -170,62 +172,62 @@ const (
 )
 
 // uiaControlType переводит роль движка в тип элемента UIA.
-func uiaControlType(r widget.AccessRole) int32 {
+func uiaControlType(r base.AccessRole) int32 {
 	switch r {
-	case widget.RoleWindow:
+	case base.RoleWindow:
 		return uiaCtrlWindow
-	case widget.RolePanel:
+	case base.RolePanel:
 		return uiaCtrlPane
-	case widget.RoleGroup:
+	case base.RoleGroup:
 		return uiaCtrlGroup
-	case widget.RoleButton:
+	case base.RoleButton:
 		return uiaCtrlButton
-	case widget.RoleCheckBox, widget.RoleSwitch:
+	case base.RoleCheckBox, base.RoleSwitch:
 		return uiaCtrlCheckBox
-	case widget.RoleRadioButton:
+	case base.RoleRadioButton:
 		return uiaCtrlRadioButton
-	case widget.RoleSlider:
+	case base.RoleSlider:
 		return uiaCtrlSlider
-	case widget.RoleProgressBar:
+	case base.RoleProgressBar:
 		return uiaCtrlProgressBar
-	case widget.RoleTextInput:
+	case base.RoleTextInput:
 		return uiaCtrlEdit
-	case widget.RoleDocument:
+	case base.RoleDocument:
 		return uiaCtrlDocument
-	case widget.RoleLabel:
+	case base.RoleLabel:
 		return uiaCtrlText
-	case widget.RoleComboBox:
+	case base.RoleComboBox:
 		return uiaCtrlComboBox
-	case widget.RoleList:
+	case base.RoleList:
 		return uiaCtrlList
-	case widget.RoleTabControl:
+	case base.RoleTabControl:
 		return uiaCtrlTab
-	case widget.RoleMenuBar:
+	case base.RoleMenuBar:
 		return uiaCtrlMenuBar
-	case widget.RoleSpinner:
+	case base.RoleSpinner:
 		return uiaCtrlSpinner
-	case widget.RoleImage:
+	case base.RoleImage:
 		return uiaCtrlImage
-	case widget.RoleDialog:
+	case base.RoleDialog:
 		// Диалог в UIA — окно, отличаемое свойством IsDialog.
 		return uiaCtrlWindow
-	case widget.RoleMenu:
+	case base.RoleMenu:
 		return uiaCtrlMenu
-	case widget.RoleMenuItem:
+	case base.RoleMenuItem:
 		return uiaCtrlMenuItem
 	}
 	return uiaCtrlCustom
 }
 
 // uiaFocusable — может ли элемент получить фокус клавиатуры.
-func uiaFocusable(info widget.AccessInfo) bool {
-	if a11yHasState(info.States, widget.StateDisabled) {
+func uiaFocusable(info base.AccessInfo) bool {
+	if a11yHasState(info.States, base.StateDisabled) {
 		return false
 	}
 	switch info.Role {
-	case widget.RoleButton, widget.RoleCheckBox, widget.RoleRadioButton, widget.RoleSwitch,
-		widget.RoleSlider, widget.RoleTextInput, widget.RoleComboBox, widget.RoleList,
-		widget.RoleTabControl, widget.RoleSpinner, widget.RoleMenuItem:
+	case base.RoleButton, base.RoleCheckBox, base.RoleRadioButton, base.RoleSwitch,
+		base.RoleSlider, base.RoleTextInput, base.RoleComboBox, base.RoleList,
+		base.RoleTabControl, base.RoleSpinner, base.RoleMenuItem:
 		return true
 	}
 	return false
@@ -349,19 +351,19 @@ func (e *uiaElement) node() *a11yNode {
 }
 
 // role — роль узла элемента (RoleUnknown, если узла уже нет).
-func (e *uiaElement) role() widget.AccessRole {
+func (e *uiaElement) role() base.AccessRole {
 	if n := e.node(); n != nil {
 		return n.Info.Role
 	}
-	return widget.RoleUnknown
+	return base.RoleUnknown
 }
 
 // info — семантика узла элемента (пустая, если узла уже нет).
-func (e *uiaElement) info() widget.AccessInfo {
+func (e *uiaElement) info() base.AccessInfo {
 	if n := e.node(); n != nil {
 		return n.Info
 	}
-	return widget.AccessInfo{Role: widget.RoleUnknown}
+	return base.AccessInfo{Role: base.RoleUnknown}
 }
 
 // ─── Поддержка паттернов по роли ─────────────────────────────────────────────
@@ -372,24 +374,24 @@ func (e *uiaElement) info() widget.AccessInfo {
 // Радиокнопке по спецификации положен SelectionItem, а не Invoke: клиент хочет
 // уметь спросить «выбрана ли» (см. uiaSupportsSelectionItem). Флажок и
 // переключатель сюда НЕ входят: у них Toggle.
-func uiaSupportsInvoke(info widget.AccessInfo) bool {
+func uiaSupportsInvoke(info base.AccessInfo) bool {
 	switch info.Role {
-	case widget.RoleButton:
+	case base.RoleButton:
 		return true
-	case widget.RoleMenuItem:
-		return !a11yHasState(info.States, widget.StateCheckable)
+	case base.RoleMenuItem:
+		return !a11yHasState(info.States, base.StateCheckable)
 	}
 	return false
 }
 
 // uiaSupportsToggle — узлы с двумя состояниями (Toggle вместо Invoke): флажок,
 // переключатель и пункт меню с отметкой.
-func uiaSupportsToggle(info widget.AccessInfo) bool {
+func uiaSupportsToggle(info base.AccessInfo) bool {
 	switch info.Role {
-	case widget.RoleCheckBox, widget.RoleSwitch:
+	case base.RoleCheckBox, base.RoleSwitch:
 		return true
-	case widget.RoleMenuItem:
-		return a11yHasState(info.States, widget.StateCheckable)
+	case base.RoleMenuItem:
+		return a11yHasState(info.States, base.StateCheckable)
 	}
 	return false
 }
@@ -397,16 +399,16 @@ func uiaSupportsToggle(info widget.AccessInfo) bool {
 // uiaSupportsSelectionItem — узлы, которые бывают «выбраны»: радиокнопка.
 // Контейнера выбора (группы радиокнопок) движок не публикует, поэтому
 // SelectionContainer отдаётся пустым — спецификация это допускает.
-func uiaSupportsSelectionItem(info widget.AccessInfo) bool {
-	return info.Role == widget.RoleRadioButton
+func uiaSupportsSelectionItem(info base.AccessInfo) bool {
+	return info.Role == base.RoleRadioButton
 }
 
 // uiaSupportsExpandCollapse — узлы с раскрываемым содержимым: пункт меню с
 // подменю. Раскрываемую группу без подменю (Expander) этим паттерном не
 // объявляем: свёрнутое состояние у неё в дереве никак не помечено, а
 // раскрыть её программно движок не умеет.
-func uiaSupportsExpandCollapse(info widget.AccessInfo) bool {
-	return a11yHasState(info.States, widget.StateHasPopup)
+func uiaSupportsExpandCollapse(info base.AccessInfo) bool {
+	return a11yHasState(info.States, base.StateHasPopup)
 }
 
 // ─── Таблицы виртуальных методов ─────────────────────────────────────────────
@@ -760,7 +762,7 @@ func uiaSetFocus(this uintptr) uintptr {
 	}
 	// Узел из AccessChildren получает фокус сам (AccessActionHandler владельца),
 	// а не его владелец целиком.
-	if !e.b.win.accessibilityNodeAction(node, widget.AccessFocus) {
+	if !accessibilityNodeAction(e.b.host, node, base.AccessFocus) {
 		uiaLog("SetFocus(%d) → отказ (виджет не принимает фокус)", e.id)
 		return win32.SOK
 	}
@@ -840,8 +842,8 @@ func uiaGetFocus(this uintptr, out *uintptr) uintptr {
 // между ними только в том, ЧТО клиент об элементе думает: Invoke — действие
 // без состояния, Toggle — переключение, после которого клиент перечитает
 // ToggleState. Узел из AccessChildren получает действие от владельца
-// (widget.AccessActionHandler), а не кликом в центр владельца.
-func uiaDoNode(this uintptr, what string, kind widget.AccessActionKind) uintptr {
+// (base.AccessActionHandler), а не кликом в центр владельца.
+func uiaDoNode(this uintptr, what string, kind base.AccessActionKind) uintptr {
 	e := uiaLookup(this)
 	if e == nil {
 		return win32.EFail
@@ -851,7 +853,7 @@ func uiaDoNode(this uintptr, what string, kind widget.AccessActionKind) uintptr 
 		uiaLog("%s(%d) → узла нет в снимке", what, e.id)
 		return uiaEElementNotAvailable
 	}
-	if !e.b.win.accessibilityNodeAction(node, kind) {
+	if !accessibilityNodeAction(e.b.host, node, kind) {
 		uiaLog("%s(%d) → отказ (виджет выключен, скрыт или без границ)", what, e.id)
 		return uiaEElementNotEnabled
 	}
@@ -865,16 +867,16 @@ func uiaDoNode(this uintptr, what string, kind widget.AccessActionKind) uintptr 
 }
 
 // uiaInvoke — IInvokeProvider::Invoke.
-func uiaInvoke(this uintptr) uintptr { return uiaDoNode(this, "Invoke", widget.AccessInvoke) }
+func uiaInvoke(this uintptr) uintptr { return uiaDoNode(this, "Invoke", base.AccessInvoke) }
 
 // uiaToggle — IToggleProvider::Toggle. Отдельного «установить в состояние X» в
 // паттерне нет: клиент переключает и перечитывает ToggleState.
-func uiaToggle(this uintptr) uintptr { return uiaDoNode(this, "Toggle", widget.AccessToggle) }
+func uiaToggle(this uintptr) uintptr { return uiaDoNode(this, "Toggle", base.AccessToggle) }
 
 // ─── ISelectionItemProvider: радиокнопка ────────────────────────────────────
 
 // uiaSelect — ISelectionItemProvider::Select: выбрать радиокнопку.
-func uiaSelect(this uintptr) uintptr { return uiaDoNode(this, "Select", widget.AccessSelect) }
+func uiaSelect(this uintptr) uintptr { return uiaDoNode(this, "Select", base.AccessSelect) }
 
 // uiaSelected — выбран ли узел. Спрашивается у самого виджета, если он умеет
 // отвечать (радиокнопка), а не берётся из снимка: снимок обновляется раз в
@@ -884,7 +886,7 @@ func uiaSelected(node *a11yNode) bool {
 	if s, ok := node.Widget.(interface{ IsSelected() bool }); ok && node.ActionID == "" {
 		return s.IsSelected()
 	}
-	return a11yHasState(node.Info.States, widget.StateSelected)
+	return a11yHasState(node.Info.States, base.StateSelected)
 }
 
 // uiaAddToSelection — ISelectionItemProvider::AddToSelection. Группа
@@ -902,7 +904,7 @@ func uiaAddToSelection(this uintptr) uintptr {
 	if uiaSelected(node) {
 		return win32.SOK
 	}
-	return uiaDoNode(this, "AddToSelection", widget.AccessSelect)
+	return uiaDoNode(this, "AddToSelection", base.AccessSelect)
 }
 
 // uiaRemoveFromSelection — ISelectionItemProvider::RemoveFromSelection.
@@ -957,10 +959,10 @@ func uiaGetSelectionContainer(this uintptr, out *uintptr) uintptr {
 // ─── IExpandCollapseProvider: пункт меню с подменю ──────────────────────────
 
 // uiaExpand — IExpandCollapseProvider::Expand: раскрыть подменю пункта.
-func uiaExpand(this uintptr) uintptr { return uiaDoNode(this, "Expand", widget.AccessExpand) }
+func uiaExpand(this uintptr) uintptr { return uiaDoNode(this, "Expand", base.AccessExpand) }
 
 // uiaCollapse — IExpandCollapseProvider::Collapse: закрыть подменю пункта.
-func uiaCollapse(this uintptr) uintptr { return uiaDoNode(this, "Collapse", widget.AccessCollapse) }
+func uiaCollapse(this uintptr) uintptr { return uiaDoNode(this, "Collapse", base.AccessCollapse) }
 
 // uiaGetExpandCollapseState — get_ExpandCollapseState.
 func uiaGetExpandCollapseState(this uintptr, out *int32) uintptr {
@@ -976,7 +978,7 @@ func uiaGetExpandCollapseState(this uintptr, out *int32) uintptr {
 	if node == nil {
 		return uiaEElementNotAvailable
 	}
-	if a11yHasState(node.Info.States, widget.StateExpanded) {
+	if a11yHasState(node.Info.States, base.StateExpanded) {
 		*out = uiaExpanded
 	}
 	uiaLog("ExpandCollapseState(%d) → %d", e.id, *out)
@@ -998,7 +1000,7 @@ func uiaGetToggleState(this uintptr, out *int32) uintptr {
 	if node == nil {
 		return uiaEElementNotAvailable
 	}
-	if a11yHasState(node.Info.States, widget.StateChecked) {
+	if a11yHasState(node.Info.States, base.StateChecked) {
 		*out = uiaToggleOn
 	}
 	uiaLog("ToggleState(%d) → %d", e.id, *out)
@@ -1018,7 +1020,7 @@ func cursorScreenPoint() (int32, int32, bool) {
 // ─── Мост ────────────────────────────────────────────────────────────────────
 
 func init() {
-	newA11yBridge = func(win *Window) a11yBridge { return &uiaBridge{win: win} }
+	native.RegisterAccessibility(func(h native.AccessHost) native.AccessBridge { return &uiaBridge{host: h} })
 	// Запрос клиента доступности (скринридер, Инспектор UIA) приходит окну
 	// бэкенда сообщением WM_GETOBJECT; бэкенд спрашивает об этом нас.
 	win32.AddMessageHook(wmGetObject, uiaHandleGetObject)
@@ -1026,7 +1028,7 @@ func init() {
 
 // uiaBridge — состояние моста для одного окна.
 type uiaBridge struct {
-	win *Window
+	host native.AccessHost
 
 	mu      sync.RWMutex
 	ids     a11yIDPool
@@ -1060,13 +1062,13 @@ var (
 	uiaBridges  = map[uintptr]*uiaBridge{}
 )
 
-// start поднимает мост: он ничего не занимает в системе — просто становится
+// Start поднимает мост: он ничего не занимает в системе — просто становится
 // готов отвечать на WM_GETOBJECT.
-func (b *uiaBridge) start() error {
+func (b *uiaBridge) Start() error {
 	if !uiaAvailable() || !b.enabled() {
 		return errUIAUnavailable
 	}
-	nw, ok := b.win.native.(*Win32Window)
+	nw, ok := b.host.Native().(*win32.Win32Window)
 	if !ok || nw.HWND() == 0 {
 		return errUIAUnavailable
 	}
@@ -1088,18 +1090,18 @@ func (b *uiaBridge) start() error {
 // ничего: ни горутины, ни подписки, ни снимков семантики.
 func (b *uiaBridge) ensureEventLoop() {
 	b.loopOnce.Do(func() {
-		b.notifier = widget.RegisterUINotifier(b.markDirty, nil)
+		b.notifier = base.RegisterUINotifier(b.markDirty, nil)
 		go b.eventLoop()
 	})
 }
 
-// stop снимает мост и отключает провайдеры от клиентов.
-func (b *uiaBridge) stop() {
+// Stop снимает мост и отключает провайдеры от клиентов.
+func (b *uiaBridge) Stop() {
 	b.stopOnce.Do(func() {
 		if b.stopCh != nil {
 			close(b.stopCh)
 		}
-		widget.UnregisterUINotifier(b.notifier)
+		base.UnregisterUINotifier(b.notifier)
 		uiaBridgeMu.Lock()
 		delete(uiaBridges, b.hwnd)
 		uiaBridgeMu.Unlock()
@@ -1127,8 +1129,8 @@ func (b *uiaBridge) enabled() bool {
 	if v := os.Getenv("HEADLESS_GUI_A11Y"); v != "" {
 		return v != "0" && !strings.EqualFold(v, "false")
 	}
-	if b.win.a11yForce != nil {
-		return *b.win.a11yForce
+	if on, set := b.host.AccessibilityForced(); set {
+		return on
 	}
 	return true
 }
@@ -1140,7 +1142,7 @@ func (b *uiaBridge) markDirty() {
 }
 
 // hostProvider — провайдер самого окна (UiaHostProviderFromHwnd). Создаётся
-// РОВНО ОДИН раз (в start, на UI-потоке) и отдаётся клиенту с AddRef: каждый
+// РОВНО ОДИН раз (в Start, на UI-потоке) и отдаётся клиенту с AddRef: каждый
 // вызов UiaHostProviderFromHwnd возвращает НОВЫЙ COM-объект, а UIA сверяет
 // элементы по идентичности объекта — новый экземпляр на каждый запрос она
 // принимает за другой элемент окна.
@@ -1179,7 +1181,7 @@ func (b *uiaBridge) refresh(force bool) a11yChanges {
 	old := b.view
 	b.mu.Unlock()
 
-	snap := b.win.accessibilitySnapshot()
+	snap := accessibilitySnapshot(b.host)
 	var oldSnap *a11ySnapshot
 	if old != nil {
 		oldSnap = old.Snap
@@ -1314,34 +1316,34 @@ func (b *uiaBridge) emitChanges(ch a11yChanges) {
 		differs := func(state string) bool {
 			return a11yHasState(prev.Info.States, state) != a11yHasState(cur.Info.States, state)
 		}
-		if differs(widget.StateDisabled) {
+		if differs(base.StateDisabled) {
 			raiseProp(idx, uiaPropIsEnabled, func(v *comVariant, n *a11yNode) {
-				v.setBool(!a11yHasState(n.Info.States, widget.StateDisabled))
+				v.setBool(!a11yHasState(n.Info.States, base.StateDisabled))
 			})
 		}
-		if differs(widget.StateOffscreen) {
+		if differs(base.StateOffscreen) {
 			raiseProp(idx, uiaPropIsOffscreen, func(v *comVariant, n *a11yNode) {
-				v.setBool(a11yHasState(n.Info.States, widget.StateOffscreen))
+				v.setBool(a11yHasState(n.Info.States, base.StateOffscreen))
 			})
 		}
-		if differs(widget.StateSelected) && uiaSupportsSelectionItem(cur.Info) {
+		if differs(base.StateSelected) && uiaSupportsSelectionItem(cur.Info) {
 			raiseProp(idx, uiaPropSelectionItemIsSel, func(v *comVariant, n *a11yNode) {
-				v.setBool(a11yHasState(n.Info.States, widget.StateSelected))
+				v.setBool(a11yHasState(n.Info.States, base.StateSelected))
 			})
 		}
-		if differs(widget.StateChecked) && uiaSupportsToggle(cur.Info) {
+		if differs(base.StateChecked) && uiaSupportsToggle(cur.Info) {
 			raiseProp(idx, uiaPropToggleState, func(v *comVariant, n *a11yNode) {
 				state := int32(uiaToggleOff)
-				if a11yHasState(n.Info.States, widget.StateChecked) {
+				if a11yHasState(n.Info.States, base.StateChecked) {
 					state = uiaToggleOn
 				}
 				v.setI4(state)
 			})
 		}
-		if differs(widget.StateExpanded) && uiaSupportsExpandCollapse(cur.Info) {
+		if differs(base.StateExpanded) && uiaSupportsExpandCollapse(cur.Info) {
 			raiseProp(idx, uiaPropExpandCollapseState, func(v *comVariant, n *a11yNode) {
 				state := int32(uiaExpandCollapsed)
-				if a11yHasState(n.Info.States, widget.StateExpanded) {
+				if a11yHasState(n.Info.States, base.StateExpanded) {
 					state = uiaExpanded
 				}
 				v.setI4(state)
@@ -1364,7 +1366,7 @@ func (b *uiaBridge) fillProperty(id int32, prop int32, out *comVariant) {
 	case uiaPropName:
 		name := node.Info.Name
 		if name == "" && isRoot {
-			name = b.win.title
+			name = b.host.Title()
 		}
 		out.setString(name)
 	case uiaPropControlType:
@@ -1378,21 +1380,21 @@ func (b *uiaBridge) fillProperty(id int32, prop int32, out *comVariant) {
 	case uiaPropHelpText:
 		// У пункта меню «описание» — сочетание клавиш: оно отдаётся как
 		// AcceleratorKey, а не как справка.
-		if node.Info.Role != widget.RoleMenuItem {
+		if node.Info.Role != base.RoleMenuItem {
 			out.setString(node.Info.Description)
 		}
 	case uiaPropAcceleratorKey:
-		if node.Info.Role == widget.RoleMenuItem {
+		if node.Info.Role == base.RoleMenuItem {
 			out.setString(node.Info.Description)
 		}
 	case uiaPropIsDialog:
-		out.setBool(node.Info.Role == widget.RoleDialog)
+		out.setBool(node.Info.Role == base.RoleDialog)
 	case uiaPropSelectionItemIsSel:
-		out.setBool(a11yHasState(node.Info.States, widget.StateSelected))
+		out.setBool(a11yHasState(node.Info.States, base.StateSelected))
 	case uiaPropToggleState:
 		if uiaSupportsToggle(node.Info) {
 			state := int32(uiaToggleOff)
-			if a11yHasState(node.Info.States, widget.StateChecked) {
+			if a11yHasState(node.Info.States, base.StateChecked) {
 				state = uiaToggleOn
 			}
 			out.setI4(state)
@@ -1400,13 +1402,13 @@ func (b *uiaBridge) fillProperty(id int32, prop int32, out *comVariant) {
 	case uiaPropExpandCollapseState:
 		if uiaSupportsExpandCollapse(node.Info) {
 			state := int32(uiaExpandCollapsed)
-			if a11yHasState(node.Info.States, widget.StateExpanded) {
+			if a11yHasState(node.Info.States, base.StateExpanded) {
 				state = uiaExpanded
 			}
 			out.setI4(state)
 		}
 	case uiaPropIsEnabled:
-		out.setBool(!a11yHasState(node.Info.States, widget.StateDisabled))
+		out.setBool(!a11yHasState(node.Info.States, base.StateDisabled))
 	case uiaPropHasKeyboardFocus:
 		out.setBool(v.Snap.Focus >= 0 && v.id(v.Snap.Focus) == id)
 	case uiaPropIsKeyboardFocusabl:
@@ -1416,9 +1418,9 @@ func (b *uiaBridge) fillProperty(id int32, prop int32, out *comVariant) {
 	case uiaPropIsOffscreen:
 		// Прокручен за край окна прокрутки или закрыт (меню, которое не
 		// показано): на экране элемента нет.
-		out.setBool(a11yHasState(node.Info.States, widget.StateOffscreen))
+		out.setBool(a11yHasState(node.Info.States, base.StateOffscreen))
 	case uiaPropIsPassword:
-		out.setBool(a11yHasState(node.Info.States, widget.StatePassword))
+		out.setBool(a11yHasState(node.Info.States, base.StatePassword))
 	case uiaPropValueValue:
 		out.setString(node.Info.Value)
 	case uiaPropNativeWindowHandle:
@@ -1488,7 +1490,7 @@ func (b *uiaBridge) boundsOf(id int32) uiaRect {
 	if node == nil {
 		return uiaRect{}
 	}
-	scale := b.win.scale
+	scale := b.host.Scale()
 	if scale <= 0 {
 		scale = 1
 	}
@@ -1500,8 +1502,8 @@ func (b *uiaBridge) boundsOf(id int32) uiaRect {
 		return uiaRect{}
 	}
 	ox, oy := 0, 0
-	if b.win.native != nil {
-		ox, oy = b.win.native.GetPosition()
+	if b.host.Native() != nil {
+		ox, oy = b.host.Native().GetPosition()
 	}
 	return uiaRect{
 		left:   float64(ox) + float64(r.Min.X)*scale,
@@ -1514,13 +1516,13 @@ func (b *uiaBridge) boundsOf(id int32) uiaRect {
 // hitTestScreen ищет элемент под точкой экрана.
 func (b *uiaBridge) hitTestScreen(x, y int32) *uiaElement {
 	v := b.current()
-	scale := b.win.scale
+	scale := b.host.Scale()
 	if scale <= 0 {
 		scale = 1
 	}
 	ox, oy := 0, 0
-	if b.win.native != nil {
-		ox, oy = b.win.native.GetPosition()
+	if b.host.Native() != nil {
+		ox, oy = b.host.Native().GetPosition()
 	}
 	lx := int(float64(int(x)-ox)/scale + 0.5)
 	ly := int(float64(int(y)-oy)/scale + 0.5)
@@ -1573,21 +1575,21 @@ func uiaHandleGetObject(hwnd, wparam, lparam uintptr) (uintptr, bool) {
 // объявляли поле пустым.
 
 // uiaSupportsValue — роли, у которых есть текстовое содержимое.
-func uiaSupportsValue(r widget.AccessRole) bool {
+func uiaSupportsValue(r base.AccessRole) bool {
 	switch r {
-	case widget.RoleTextInput, widget.RoleDocument:
+	case base.RoleTextInput, base.RoleDocument:
 		return true
 	}
 	return false
 }
 
 // uiaTextOf возвращает текстовую семантику виджета элемента.
-func uiaTextOf(e *uiaElement) (widget.AccessTextProvider, bool) {
+func uiaTextOf(e *uiaElement) (base.AccessTextProvider, bool) {
 	node := e.node()
 	if node == nil || node.Widget == nil {
 		return nil, false
 	}
-	return widget.AccessTextOf(node.Widget)
+	return base.AccessTextOf(node.Widget)
 }
 
 // uiaGetValue — IValueProvider::get_Value.
@@ -1638,8 +1640,8 @@ func uiaGetValueIsReadOnly(this uintptr, out *int32) uintptr {
 	if node == nil {
 		return uiaEElementNotAvailable
 	}
-	if !a11yHasState(node.Info.States, widget.StateReadOnly) &&
-		!a11yHasState(node.Info.States, widget.StateDisabled) {
+	if !a11yHasState(node.Info.States, base.StateReadOnly) &&
+		!a11yHasState(node.Info.States, base.StateDisabled) {
 		*out = 0
 	}
 	return win32.SOK
@@ -1659,12 +1661,12 @@ func uiaSetValue(this uintptr, bstr uintptr) uintptr {
 	if !ok {
 		return uiaEElementNotAvailable
 	}
-	setter, ok := tp.(widget.AccessTextSetter)
+	setter, ok := tp.(base.AccessTextSetter)
 	if !ok || tp.AccessReadOnly() {
 		return uiaEElementNotEnabled
 	}
 	text := bstrToString(bstr)
-	e.b.win.postToEngine(func() { setter.AccessSetText(text) })
+	e.b.host.PostToEngine(func() { setter.AccessSetText(text) })
 	uiaLog("SetValue(%d, %d симв.)", e.id, len([]rune(text)))
 	return win32.SOK
 }

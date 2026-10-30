@@ -1,6 +1,6 @@
 //go:build windows
 
-package core
+package a11y
 
 import (
 	"image"
@@ -40,7 +40,7 @@ func newUIAScene(t *testing.T, root widget.Widget) *uiaScene {
 	sc.eng.SetRoot(root)
 	win := New(sc.eng, "Сцена UIA")
 	win.scale = 1
-	sc.b = &uiaBridge{win: win, elems: map[int32]*uiaElement{}}
+	sc.b = &uiaBridge{host: win.host(), elems: map[int32]*uiaElement{}}
 	sc.b.refresh(true)
 	t.Cleanup(func() {
 		sc.b.mu.Lock()

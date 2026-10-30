@@ -1,6 +1,6 @@
 //go:build windows
 
-package core
+package a11y
 
 import (
 	"image"
@@ -54,7 +54,7 @@ type textScene struct {
 // flush выполняет правки, которые провайдер поставил на горутину движка:
 // движок в тесте не запущен, и очередь Post иначе осталась бы нетронутой.
 func (sc *textScene) flush() {
-	sc.b.win.eng.(interface{ Flush() }).Flush()
+	winOf(sc.b.host).eng.(interface{ Flush() }).Flush()
 }
 
 func newTextScene(t *testing.T) *textScene {
@@ -184,7 +184,7 @@ func TestUIAText_NotOnPassword(t *testing.T) {
 
 	win := New(eng, "Окно UIA")
 	win.scale = 1
-	b := &uiaBridge{win: win, elems: map[int32]*uiaElement{}}
+	b := &uiaBridge{host: win.host(), elems: map[int32]*uiaElement{}}
 	b.refresh(true)
 	t.Cleanup(func() {
 		b.mu.Lock()

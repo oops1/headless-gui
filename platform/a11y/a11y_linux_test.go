@@ -1,6 +1,6 @@
 //go:build linux && !android
 
-package core
+package a11y
 
 import (
 	"image"
@@ -158,7 +158,7 @@ func TestATSPIStableIDs(t *testing.T) {
 // имена, индексы и число детей.
 func TestATSPICacheItems(t *testing.T) {
 	win := newTestWindow(widget.NewWindow("Кэш", 200, 100))
-	b := &atspiBridge{win: win, appName: ":1.7"}
+	b := &atspiBridge{host: win.host(), appName: ":1.7"}
 	win.title = "Кэш"
 	v := b.ids.assign(a11yFlatten(buildTestAccessTree("abc")))
 
@@ -232,11 +232,11 @@ func newATSPITestBridge(t *testing.T) (*atspiBridge, *engine.Engine, *widget.Tex
 
 	win := New(eng, "Окно доступности")
 	win.scale = 1
-	b := &atspiBridge{win: win}
-	if err := b.start(); err != nil {
+	b := &atspiBridge{host: win.host()}
+	if err := b.Start(); err != nil {
 		t.Skipf("мост не поднялся (нет реестра AT-SPI?): %v", err)
 	}
-	t.Cleanup(b.stop)
+	t.Cleanup(b.Stop)
 	return b, eng, ti
 }
 
@@ -389,7 +389,7 @@ func TestATSPIBridgeLive(t *testing.T) {
 // (Orca, Accerciser, pyatspi): поднимает мост и держит его заданное число
 // секунд, чтобы приложение можно было найти в дереве рабочего стола.
 //
-//	HEADLESS_GUI_A11Y_HOLD=30 go test ./window -run TestATSPIHold
+//	HEADLESS_GUI_A11Y_HOLD=30 go test ./platform/a11y -run TestATSPIHold
 //
 // Без переменной окружения тест пропускается.
 func TestATSPIHoldForManualCheck(t *testing.T) {

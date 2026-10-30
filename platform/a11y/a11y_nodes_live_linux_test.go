@@ -1,6 +1,6 @@
 //go:build linux && !android
 
-package core
+package a11y
 
 import (
 	"image"
@@ -26,11 +26,11 @@ func newATSPILiveBridge(t *testing.T, root widget.Widget) (*atspiBridge, *engine
 	eng.SetRoot(root)
 	win := New(eng, "Живое окно")
 	win.scale = 1
-	b := &atspiBridge{win: win}
-	if err := b.start(); err != nil {
+	b := &atspiBridge{host: win.host()}
+	if err := b.Start(); err != nil {
 		t.Skipf("мост не поднялся (нет реестра AT-SPI?): %v", err)
 	}
-	t.Cleanup(b.stop)
+	t.Cleanup(b.Stop)
 	return b, eng
 }
 

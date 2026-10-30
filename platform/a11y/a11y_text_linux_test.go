@@ -1,6 +1,6 @@
 //go:build linux && !android
 
-package core
+package a11y
 
 import (
 	"image"

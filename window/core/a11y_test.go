@@ -1,156 +1,217 @@
 package core
 
 import (
+	"errors"
 	"image"
 	"testing"
 
+	"github.com/oops1/headless-gui/v3/engine"
+	"github.com/oops1/headless-gui/v3/platform/native"
 	"github.com/oops1/headless-gui/v3/widget"
 )
 
-// buildTestAccessTree — дерево семантики для проверок плоского снимка:
-//
-//	окно (0,0-200x100)
-//	├── кнопка «Да»   (10,10-60x30)
-//	├── панель        (0,40-200x60)
-//	│   └── чекбокс   (10,50-80x20), отмечен
-//	└── поле ввода    (100,10-90x20), в фокусе
-func buildTestAccessTree(focusValue string) *widget.AccessNode {
-	btn := &widget.AccessNode{AccessInfo: widget.AccessInfo{
-		Role: widget.RoleButton, Name: "Да", Bounds: image.Rect(10, 10, 70, 40)}}
-	chk := &widget.AccessNode{AccessInfo: widget.AccessInfo{
-		Role: widget.RoleCheckBox, Name: "Флажок", Bounds: image.Rect(10, 50, 90, 70),
-		States: []string{widget.StateChecked}}}
-	panel := &widget.AccessNode{AccessInfo: widget.AccessInfo{
-		Role: widget.RolePanel, Bounds: image.Rect(0, 40, 200, 100)},
-		Children: []*widget.AccessNode{chk}}
-	edit := &widget.AccessNode{AccessInfo: widget.AccessInfo{
-		Role: widget.RoleTextInput, Value: focusValue, Bounds: image.Rect(100, 10, 190, 30),
-		States: []string{widget.StateFocused}}}
-	return &widget.AccessNode{AccessInfo: widget.AccessInfo{
-		Role: widget.RoleWindow, Name: "Окно", Bounds: image.Rect(0, 0, 200, 100)},
-		Children: []*widget.AccessNode{btn, panel, edit}}
+// Движок отдаёт всё, что адаптер у него спрашивает: расхождение сигнатур —
+// ошибка сборки, а не тихий отказ утверждения типа.
+var (
+	_ accessibilityTreeProvider = (*engine.Engine)(nil)
+	_ accessibilityActor        = (*engine.Engine)(nil)
+	_ accessibilityNodeActor    = (*engine.Engine)(nil)
+)
+
+// fakeBridge — мост доступности для тестов ядра.
+type fakeBridge struct {
+	startErr error
+	started  int
+	stopped  int
+	host     native.AccessHost
+	// createdAtStart — окно ОС было создано, когда мост поднимали.
+	createdAtStart bool
 }
 
-// TestA11yFlatten — разворачивание дерева в плоский снимок: связи, индексы, фокус.
-func TestA11yFlatten(t *testing.T) {
-	s := a11yFlatten(buildTestAccessTree("abc"))
-	if len(s.Nodes) != 5 {
-		t.Fatalf("узлов %d, want 5", len(s.Nodes))
-	}
-	root := s.node(a11yRootID)
-	if root.Parent != -1 || len(root.Children) != 3 {
-		t.Fatalf("корень: parent=%d, детей=%d", root.Parent, len(root.Children))
-	}
-	// Порядок обхода в глубину: 0 окно, 1 кнопка, 2 панель, 3 чекбокс, 4 поле.
-	if s.Nodes[1].Info.Name != "Да" || s.Nodes[3].Info.Role != widget.RoleCheckBox ||
-		s.Nodes[4].Info.Role != widget.RoleTextInput {
-		t.Fatalf("порядок узлов нарушен: %+v", s.Nodes)
-	}
-	if s.Nodes[3].Parent != 2 || s.Nodes[3].Index != 0 {
-		t.Errorf("чекбокс: parent=%d index=%d, want 2/0", s.Nodes[3].Parent, s.Nodes[3].Index)
-	}
-	if s.Nodes[4].Index != 2 {
-		t.Errorf("поле ввода: index=%d, want 2", s.Nodes[4].Index)
-	}
-	if s.Focus != 4 {
-		t.Errorf("фокус = %d, want 4", s.Focus)
-	}
-	if a11yFlatten(nil).Focus != -1 || len(a11yFlatten(nil).Nodes) != 0 {
-		t.Error("пустое дерево должно давать пустой снимок без фокуса")
-	}
-}
-
-// TestA11yHitTest — попадание точкой: самый глубокий узел, последний из
-// перекрывающихся, промах вне корня.
-func TestA11yHitTest(t *testing.T) {
-	s := a11yFlatten(buildTestAccessTree("abc"))
-	cases := []struct {
-		x, y int
-		want int32
-	}{
-		{20, 20, 1},    // кнопка
-		{20, 60, 3},    // чекбокс внутри панели
-		{150, 60, 2},   // панель (мимо чекбокса)
-		{150, 20, 4},   // поле ввода
-		{95, 5, 0},     // корень
-		{-5, 5, -1},    // мимо окна
-		{300, 300, -1}, // мимо окна
-	}
-	for _, c := range cases {
-		if got := s.hitTest(c.x, c.y); got != c.want {
-			t.Errorf("hitTest(%d,%d) = %d, want %d", c.x, c.y, got, c.want)
+func (b *fakeBridge) Start() error {
+	b.started++
+	if f, ok := b.host.Native().(*initFake); ok {
+		for _, e := range f.log {
+			if e == "create" {
+				b.createdAtStart = true
+			}
 		}
 	}
-	var empty *a11ySnapshot
-	if empty.hitTest(0, 0) != -1 {
-		t.Error("hitTest по nil-снимку должен вернуть -1")
+	return b.startErr
+}
+func (b *fakeBridge) Stop() { b.stopped++ }
+
+// registerFakeAccess подключает фабрику мостов на время теста.
+func registerFakeAccess(t *testing.T, b *fakeBridge) {
+	t.Helper()
+	t.Cleanup(native.RegisterAccessibility(func(h native.AccessHost) native.AccessBridge {
+		b.host = h
+		return b
+	}))
+}
+
+// Без возможности доступности (window/minimal, тестовый бинарь ядра) мост не
+// поднимается и окно работает как прежде.
+func TestAccessibility_NoCapabilityNoop(t *testing.T) {
+	if f, ok := native.Accessibility(); ok && f != nil {
+		t.Skip("доступность подключена в этом бинаре")
+	}
+	win := newTestWindow(widget.NewWindow("x", 100, 100))
+	win.startAccessibility()
+	if win.a11y != nil {
+		t.Fatal("мост поднят без возможности доступности")
+	}
+	win.stopAccessibility()
+}
+
+// С возможностью мост поднимается и снимается; мост, который не поднялся, окну
+// не достаётся.
+func TestAccessibility_FactoryStartStop(t *testing.T) {
+	b := &fakeBridge{}
+	registerFakeAccess(t, b)
+	win := newTestWindow(widget.NewWindow("x", 100, 100))
+	win.startAccessibility()
+	if b.started != 1 || win.a11y != b {
+		t.Fatalf("Start звали %d раз, мост окна %v", b.started, win.a11y)
+	}
+	win.startAccessibility() // второй раз — не заводит второй мост
+	if b.started != 1 {
+		t.Errorf("повторный startAccessibility поднял мост ещё раз")
+	}
+	win.stopAccessibility()
+	if b.stopped != 1 || win.a11y != nil {
+		t.Errorf("Stop звали %d раз, мост окна %v", b.stopped, win.a11y)
+	}
+
+	failing := &fakeBridge{startErr: errors.New("нет службы")}
+	registerFakeAccess(t, failing)
+	win2 := newTestWindow(widget.NewWindow("x", 100, 100))
+	win2.startAccessibility()
+	if win2.a11y != nil {
+		t.Error("мост, который не поднялся, достался окну")
 	}
 }
 
-// TestA11yDiff — диффы снимков: фокус, имя, значение, состояния, структура.
-func TestA11yDiff(t *testing.T) {
-	old := a11yFlatten(buildTestAccessTree("abc"))
-
-	// Значение поля изменилось.
-	cur := a11yFlatten(buildTestAccessTree("abcd"))
-	ch := a11yDiff(old, cur)
-	if ch.Structural {
-		t.Fatal("смена значения — не структурное изменение")
+// bringUp поднимает мост после создания окна ОС, tearDown снимает.
+func TestAccessibility_BringUpAndTearDown(t *testing.T) {
+	b := &fakeBridge{}
+	registerFakeAccess(t, b)
+	win, f := initBringUp(t, "1", nil)
+	if b.started != 1 {
+		t.Fatalf("bringUp не поднял мост (Start %d раз)", b.started)
 	}
-	if len(ch.ValueChanged) != 1 || ch.ValueChanged[0] != 4 {
-		t.Errorf("ValueChanged = %v, want [4]", ch.ValueChanged)
+	if b.host.Native() != native.NativeWindow(f) {
+		t.Error("мост получил не то окно ОС")
 	}
-	if ch.FocusLost != -1 || ch.FocusGained != -1 {
-		t.Errorf("фокус не менялся, а диффом сообщено: %d → %d", ch.FocusLost, ch.FocusGained)
+	if !b.createdAtStart {
+		t.Errorf("мост поднят до создания окна ОС (журнал бэкенда %v)", f.log)
 	}
-
-	// Фокус ушёл на кнопку, чекбокс снят, имя кнопки другое.
-	tree := buildTestAccessTree("abc")
-	tree.Children[2].States = nil
-	tree.Children[0].States = []string{widget.StateFocused}
-	tree.Children[0].Name = "Нет"
-	tree.Children[1].Children[0].States = nil
-	cur = a11yFlatten(tree)
-	ch = a11yDiff(old, cur)
-	if ch.FocusLost != 4 || ch.FocusGained != 1 {
-		t.Errorf("фокус: %d → %d, want 4 → 1", ch.FocusLost, ch.FocusGained)
-	}
-	if len(ch.NameChanged) != 1 || ch.NameChanged[0] != 1 {
-		t.Errorf("NameChanged = %v, want [1]", ch.NameChanged)
-	}
-	// Состояния изменились у кнопки (получила focused) и у чекбокса (снят).
-	if len(ch.StateChanged) != 3 {
-		t.Errorf("StateChanged = %v, want три узла (кнопка, чекбокс, поле)", ch.StateChanged)
-	}
-
-	// Удалили узел — структурное изменение.
-	tree = buildTestAccessTree("abc")
-	tree.Children = tree.Children[:2]
-	ch = a11yDiff(old, a11yFlatten(tree))
-	if !ch.Structural {
-		t.Error("удаление узла должно давать Structural")
-	}
-
-	// Первый снимок (old == nil) — тоже структурное изменение с фокусом.
-	ch = a11yDiff(nil, cur)
-	if !ch.Structural || ch.FocusGained != 1 {
-		t.Errorf("первый снимок: Structural=%v focus=%d", ch.Structural, ch.FocusGained)
+	win.tearDown()
+	if b.stopped != 1 {
+		t.Errorf("tearDown не снял мост (Stop %d раз)", b.stopped)
 	}
 }
 
-// TestA11ySnapshotWithoutBridge — окно без движка-провайдера семантики отдаёт
-// пустой снимок, а не панику.
-func TestA11ySnapshotWithoutBridge(t *testing.T) {
-	root := widget.NewWindow("T", 200, 100)
-	btn := widget.NewButton("Да")
-	btn.SetBounds(image.Rect(10, 10, 70, 40))
+// a11yHost — окно глазами моста: дерево и действия движка, заголовок, масштаб,
+// решение SetAccessibilityEnabled.
+func TestA11yHost_Adapter(t *testing.T) {
+	eng := engine.New(200, 100, 20)
+	root := widget.NewWindow("Хост", 200, 100)
+	btn := widget.NewButton("Кнопка")
+	btn.SetBounds(image.Rect(20, 50, 120, 80))
+	clicks := 0
+	btn.OnClick = func() { clicks++ }
 	root.AddChild(btn)
-	win := newTestWindow(root)
-	s := win.accessibilitySnapshot()
-	if len(s.Nodes) == 0 {
-		t.Fatal("движок должен отдавать семантику")
+	eng.SetRoot(root)
+	win := New(eng, "Хост")
+	win.scale = 1.5
+	h := a11yHost{win}
+
+	if h.AccessibilityTree() == nil {
+		t.Fatal("дерево семантики не отдано")
 	}
-	if s.Nodes[a11yRootID].Info.Role != widget.RoleWindow {
-		t.Errorf("корень снимка: %v", s.Nodes[a11yRootID].Info)
+	if h.Title() != "Хост" || h.Scale() != 1.5 || h.Native() != nil {
+		t.Errorf("заголовок %q, масштаб %v, окно ОС %v", h.Title(), h.Scale(), h.Native())
+	}
+	if !h.FocusAccessible(btn) || !btn.IsFocused() {
+		t.Error("FocusAccessible не сфокусировал кнопку")
+	}
+	if !h.ActivateAccessible(btn) || clicks != 1 {
+		t.Errorf("ActivateAccessible: нажатий %d", clicks)
+	}
+	if h.FocusAccessible(nil) || h.ActivateAccessible(nil) {
+		t.Error("действие над nil = true")
+	}
+	done := make(chan struct{})
+	h.PostToEngine(func() { close(done) })
+	eng.Flush()
+	select {
+	case <-done:
+	default:
+		t.Error("PostToEngine не выполнил функцию на движке")
+	}
+	if _, set := h.AccessibilityForced(); set {
+		t.Error("решение доступности до SetAccessibilityEnabled")
+	}
+	win.SetAccessibilityEnabled(false)
+	if on, set := h.AccessibilityForced(); !set || on {
+		t.Errorf("после SetAccessibilityEnabled(false): on=%v set=%v", on, set)
+	}
+	win.SetAccessibilityEnabled(true)
+	if on, set := h.AccessibilityForced(); !set || !on {
+		t.Errorf("после SetAccessibilityEnabled(true): on=%v set=%v", on, set)
+	}
+}
+
+// actOwner — владелец узлов доступности с обработчиком действий.
+type actOwner struct {
+	widget.Base
+	reply bool
+	calls []string
+}
+
+func (o *actOwner) Draw(widget.DrawContext) {}
+
+func (o *actOwner) AccessChildren() []widget.AccessInfo {
+	return []widget.AccessInfo{{ID: "R", Role: widget.RoleButton, Name: "Узел", Bounds: o.Bounds()}}
+}
+
+func (o *actOwner) AccessAction(id string, k widget.AccessActionKind) bool {
+	o.calls = append(o.calls, id+":"+k.String())
+	return o.reply
+}
+
+// Действие узлу владельца доходит до его обработчика через адаптер и движок;
+// ответ обработчика — ответ адаптера.
+func TestA11yHost_AccessAction(t *testing.T) {
+	eng := engine.New(200, 100, 20)
+	root := widget.NewWindow("Хост", 200, 100)
+	o := &actOwner{reply: true}
+	o.SetBounds(image.Rect(20, 50, 120, 80))
+	root.AddChild(o)
+	eng.SetRoot(root)
+	h := a11yHost{New(eng, "")}
+	if !h.AccessAction(o, "R", widget.AccessExpand) {
+		t.Fatal("AccessAction отказал, хотя обработчик принял действие")
+	}
+	if len(o.calls) != 1 || o.calls[0] != "R:"+widget.AccessExpand.String() {
+		t.Fatalf("обработчик получил %v", o.calls)
+	}
+	o.reply = false
+	if h.AccessAction(o, "R", widget.AccessInvoke) {
+		t.Error("AccessAction принял действие, от которого обработчик отказался")
+	}
+}
+
+// Движок без дерева и действий доступности: хост отвечает «нет».
+func TestA11yHost_PartialEngine(t *testing.T) {
+	win := New(&postEngine{root: widget.NewWindow("x", 100, 100)}, "")
+	h := a11yHost{win}
+	if h.AccessibilityTree() != nil {
+		t.Error("дерево у движка без AccessibilityTree")
+	}
+	btn := widget.NewButton("x")
+	if h.FocusAccessible(btn) || h.ActivateAccessible(btn) || h.AccessAction(btn, "id", widget.AccessInvoke) {
+		t.Error("действие у движка без действий доступности = true")
 	}
 }
