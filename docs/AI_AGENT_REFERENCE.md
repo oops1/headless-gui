@@ -2866,7 +2866,9 @@ mb.ShowOpenFile(opts, func(path string, ok bool) {})  // places sidebar, breadcr
 // the dialog lists the SERVER's file system:
 opts.AllowedRoots = []string{"/srv/uploads"}          // per dialog
 widget.SetDefaultAllowedRoots("/srv/uploads")         // for all new dialogs
-mb.ShowSaveFile(opts, onResult)                       // compact form + overwrite warning
+mb.ShowSaveFile(opts, onResult)                       // the same browser + overwrite
+                                                      // confirmation; opts.Compact —
+                                                      // the old compact form
 mb.ShowPickFolder(opts, onResult)
 ```
 
@@ -10522,3 +10524,25 @@ Where window code lives now (ADR-0013):
   windows, `TestX11Contract`/`TestWaylandContract` on real servers when
   `DISPLAY`/`WAYLAND_DISPLAY` is set, `TestCocoaContract` builds). The capability
   matrix of the backends is in `window/README.md`.
+
+## v4.1 (unreleased, branch `develop`): Save As browses folders (RDP client Tandem)
+
+- `ShowSaveFile` builds the same browser as `ShowOpenFile` (places, path bar, up/refresh,
+  list filtered by the selected filter), Save button, Name + filter row; the overwrite
+  warning sits on the button row. `FileDialogOptions.Compact` keeps the old compact form
+  (height 232); it does nothing for Open and FolderPick.
+- Name field in Save (`widget/dialog/dialog_file_path.go`, `saveTarget`): relative to the
+  current folder or absolute; an existing folder name enters it and puts `InitialName`
+  back; a name without an extension gets the first extension of the selected filter.
+  An existing file asks `dlg.file.replace` (Yes/No message box on top): No keeps the
+  dialog open. A full path in the Open name field is taken as is.
+- Path input in every mode: a click on the empty part of the path bar (`crumbBar.OnEdit`;
+  the bar keeps `crumbEditGap` = 24 px free on the right, a too long last name is
+  ellipsized) shows `pathInput` (a `TextInput` with the current folder selected, focus
+  through `internal/focusreq`). Enter goes there (`Dialog.HandleInputBinding` →
+  `confirm` → `commitPathEdit`; a file path goes to its folder and fills the name); a
+  missing path or one outside `AllowedRoots` shows `dlg.file.badpath` as the field's
+  validation error. Escape cancels through `Dialog.OnClosing` (the dialog stays), and so
+  does losing focus.
+- New strings (EN, RU): `dlg.file.replace.title`, `dlg.file.replace` (`%s` — file name),
+  `dlg.file.badpath`.
