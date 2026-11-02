@@ -156,16 +156,57 @@ func (fd *FileDialog) filterExt() string {
 		return ""
 	}
 	for _, e := range fd.opts.Filters[fd.filter].Exts {
-		e = strings.TrimPrefix(strings.TrimSpace(e), "*")
-		if e == "" || e == "." || e == ".*" {
-			continue
+		if e = normExt(e); e != "" {
+			return e
 		}
-		if !strings.HasPrefix(e, ".") {
-			e = "." + e
-		}
-		return e
 	}
 	return ""
+}
+
+// normExt приводит расширение фильтра к виду «.rdp» («*.rdp», «rdp» — тоже);
+// у «*», «.*» и пустого — "".
+func normExt(e string) string {
+	e = strings.TrimPrefix(strings.TrimSpace(e), "*")
+	if e == "" || e == "." || e == ".*" {
+		return ""
+	}
+	if !strings.HasPrefix(e, ".") {
+		e = "." + e
+	}
+	return e
+}
+
+// hasExt — есть ли расширение ext (без учёта регистра) у какого-нибудь из
+// фильтров.
+func hasExt(filters []FileFilter, ext string) bool {
+	for _, f := range filters {
+		for _, e := range f.Exts {
+			if n := normExt(e); n != "" && strings.EqualFold(n, ext) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// matchNameToFilter — смена фильтра в Save меняет расширение в поле имени на
+// расширение нового фильтра, как в Windows: «cert.cer» → «cert.pem». Меняется
+// только расширение, которое есть в списке фильтров; имя без расширения, с
+// чужим расширением («отчёт.v2») или уже подходящее новому фильтру остаётся,
+// фильтр «все файлы» имя не трогает. Предупреждение обновляет вызывающий.
+func (fd *FileDialog) matchNameToFilter() {
+	if fd.opts.Mode != FileSave || fd.nameIn == nil {
+		return
+	}
+	name := strings.TrimSpace(fd.nameIn.GetText())
+	ext := filepath.Ext(name)
+	newExt := fd.filterExt() // "" — «все файлы» или номер вне списка
+	// Имя без расширения отсеивает hasExt: пустого расширения у фильтров нет.
+	if newExt == "" || !hasExt(fd.opts.Filters, ext) ||
+		hasExt(fd.opts.Filters[fd.filter:fd.filter+1], ext) {
+		return
+	}
+	fd.nameIn.SetText(strings.TrimSuffix(name, ext) + newExt)
 }
 
 // confirmReplace спрашивает, заменить ли существующий файл: «Да» — выбор

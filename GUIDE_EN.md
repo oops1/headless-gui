@@ -3124,9 +3124,12 @@ mb.ShowPickFolder(widget.FileDialogOptions{}, ...)
 up to parent folders. Now it is the same browser as Open: double-click a folder
 to enter it, click a file to put its name into the Name field. A name without an
 extension gets the extension of the selected filter (`conn` → `conn.rdp`); a
-folder name in the field enters that folder. For an existing file the warning
-next to the buttons shows at once, and before replacing it the dialog asks
-"Do you want to replace it?": "No" keeps the dialog open. The compact form is
+folder name in the field enters that folder. Changing the filter also changes
+the extension in the name, as in Windows, when one of the listed filters has
+that extension: `cert.cer` → `cert.pem`; the "all files" filter and an
+extension the new filter accepts leave the name as it is. For an existing file
+the warning next to the buttons shows at once, and before replacing it the
+dialog asks "Do you want to replace it?": "No" keeps the dialog open. The compact form is
 still there — `FileDialogOptions{Compact: true}`; it has path input too.
 
 A click on the empty part of the path bar opens path input, as in Explorer:

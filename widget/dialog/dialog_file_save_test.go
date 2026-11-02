@@ -148,6 +148,96 @@ func TestFileSave_FilterExtension(t *testing.T) {
 	}
 }
 
+// certFilters — фильтры, как у сохранения сертификата в Tandem.
+var certFilters = []FileFilter{
+	{Label: "DER", Exts: []string{".cer"}},
+	{Label: "PEM", Exts: []string{".pem", ".crt"}},
+	{Label: "*"},
+}
+
+// pickFilter переключает список фильтров диалога стрелками, как с клавиатуры:
+// OnChange списка тот же, что при выборе мышью. Других списков в этих тестах нет.
+func pickFilter(t *testing.T, fd *FileDialog, keys ...base.KeyCode) {
+	t.Helper()
+	for _, c := range fd.Dialog().Children() {
+		if dd, ok := c.(*base.Dropdown); ok {
+			for _, k := range keys {
+				dd.OnKeyEvent(base.KeyEvent{Code: k, Pressed: true})
+			}
+			return
+		}
+	}
+	t.Fatal("в диалоге нет списка фильтров")
+}
+
+// Смена фильтра в Save меняет расширение в имени на расширение нового фильтра,
+// как в Windows; имя без расширения, с чужим расширением или уже подходящее
+// новому фильтру остаётся, «все файлы» имя не трогает. В обзоре и в
+// компактной форме одинаково.
+func TestFileSave_FilterChangesExtension(t *testing.T) {
+	down, up := base.KeyDown, base.KeyUp
+	for _, compact := range []bool{false, true} {
+		for _, c := range []struct {
+			name string
+			keys []base.KeyCode // от первого фильтра (DER)
+			want string
+		}{
+			{"cert.cer", []base.KeyCode{down}, "cert.pem"},
+			{"CERT.CER", []base.KeyCode{down}, "CERT.pem"},
+			{"cert.cer", []base.KeyCode{down, up}, "cert.cer"},
+			{"cert.crt", []base.KeyCode{down}, "cert.crt"},
+			{"cert.cer", []base.KeyCode{down, down}, "cert.pem"},
+			{"cert", []base.KeyCode{down}, "cert"},
+			{"notes.v2", []base.KeyCode{down}, "notes.v2"},
+			{filepath.Join("sub", "cert.cer"), []base.KeyCode{down}, filepath.Join("sub", "cert.pem")},
+		} {
+			fd, _, _ := openSave(t, FileDialogOptions{StartDir: t.TempDir(), InitialName: c.name,
+				Filters: certFilters, Compact: compact})
+			pickFilter(t, fd, c.keys...)
+			if got := fd.nameIn.GetText(); got != c.want {
+				t.Fatalf("Compact %v, имя %q, стрелки %v: стало %q, ожидалось %q", compact, c.name, c.keys, got, c.want)
+			}
+		}
+	}
+}
+
+// Новое расширение сразу проверяется на перезапись, и сохраняется файл с ним.
+func TestFileSave_FilterChangeWarnsAndSaves(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "cert.pem"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fd, rm, res := openSave(t, FileDialogOptions{StartDir: dir, InitialName: "cert.cer", Filters: certFilters})
+	if fd.warnIco.IsVisible() {
+		t.Fatal("предупреждение при новом имени")
+	}
+	pickFilter(t, fd, base.KeyDown)
+	if !fd.warnIco.IsVisible() {
+		t.Fatal("нет предупреждения: после смены фильтра имя совпало с cert.pem")
+	}
+	fd.confirm()
+	q := rm.top()
+	if q == nil || q == fd.Dialog() || q.DefaultAction == nil {
+		t.Fatal("нет вопроса о замене cert.pem")
+	}
+	q.DefaultAction() // «Да»
+	if want := filepath.Join(dir, "cert.pem"); !res.ok || res.path != want {
+		t.Fatalf("результат %+v, ожидался %q", *res, want)
+	}
+}
+
+// В Open имя в поле — то, что ищут, а не то, что создают: смена фильтра его
+// не меняет.
+func TestFileOpen_FilterKeepsName(t *testing.T) {
+	fd := NewMessageBox(&recModal{}).ShowOpenFile(FileDialogOptions{StartDir: t.TempDir(), Filters: certFilters},
+		func(string, bool) {})
+	fd.SetFileName("cert.cer")
+	pickFilter(t, fd, base.KeyDown)
+	if got := fd.nameIn.GetText(); got != "cert.cer" {
+		t.Fatalf("Open: имя после смены фильтра %q", got)
+	}
+}
+
 // Существующий файл: сначала подтверждение; «Нет» оставляет диалог, «Да»
 // (Enter) — выбор. Подтверждение учитывает и расширение фильтра.
 func TestFileSave_ConfirmReplace(t *testing.T) {
