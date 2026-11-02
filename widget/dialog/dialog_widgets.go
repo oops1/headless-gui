@@ -46,7 +46,14 @@ type crumbBar struct {
 
 	// OnNavigate вызывается при клике по сегменту (передаётся его полный путь).
 	OnNavigate func(dir string)
+	// OnEdit вызывается при клике по пустому месту полосы — мимо сегментов:
+	// диалог показывает на её месте поле ввода пути (как в Проводнике).
+	OnEdit func()
 }
+
+// crumbEditGap — пустое место справа от сегментов, которое строка пути с
+// OnEdit оставляет под щелчок для ввода пути даже при длинном пути.
+const crumbEditGap = 24
 
 type crumbSeg struct {
 	label string
@@ -109,23 +116,18 @@ func (cb *crumbBar) Draw(ctx base.DrawContext) {
 	const fs = 11
 	sepW := ctx.MeasureText("›", fs)
 	avail := b.Dx() - 20
+	if cb.OnEdit != nil {
+		// Справа всегда остаётся пустое место: щелчок по нему — ввод пути.
+		avail -= crumbEditGap
+	}
 
 	// Ширины сегментов; при переполнении отбрасываем головные («… › tail»).
 	widths := make([]int, len(segs))
-	total := 0
 	for i, s := range segs {
 		widths[i] = ctx.MeasureText(s.label, fs)
-		total += widths[i]
-		if i > 0 {
-			total += sepW + 12
-		}
 	}
-	first := 0
 	ellW := ctx.MeasureText("…", fs)
-	for total > avail && first < len(segs)-1 {
-		total -= widths[first] + sepW + 12
-		first++
-	}
+	first := crumbFirst(widths, sepW, ellW, avail)
 
 	x := b.Min.X + 10
 	ty := b.Min.Y + (b.Dy()-14)/2
@@ -135,6 +137,9 @@ func (cb *crumbBar) Draw(ctx base.DrawContext) {
 		ctx.DrawTextSize("›", x, ty, fs, base.ActiveTheme().InputPlaceholder)
 		x += sepW + 6
 	}
+	// Последний сегмент шире полосы и после отбрасывания головных: имя
+	// обрезается «…» по правой границе, а не уходит за край полосы.
+	right := b.Min.X + 10 + avail
 	drawn := segs[first:]
 	for i := range drawn {
 		if i > 0 {
@@ -145,14 +150,40 @@ func (cb *crumbBar) Draw(ctx base.DrawContext) {
 		if i == len(drawn)-1 {
 			col = base.ActiveTheme().Accent
 		}
-		w := ctx.MeasureText(drawn[i].label, fs)
+		label := drawn[i].label
+		w := ctx.MeasureText(label, fs)
+		if x+w > right {
+			label = base.EllipsizeText(ctx, label, right-x, fs)
+			w = ctx.MeasureText(label, fs)
+		}
 		drawn[i].hit = image.Rect(x-2, b.Min.Y, x+w+4, b.Max.Y)
-		ctx.DrawTextSize(drawn[i].label, x, ty, fs, col)
+		ctx.DrawTextSize(label, x, ty, fs, col)
 		x += w + 6
 	}
 	cb.mu.Lock()
 	cb.segs = drawn
 	cb.mu.Unlock()
+}
+
+// crumbFirst — сколько головных сегментов отбросить, чтобы остальные
+// поместились в avail (последний не отбрасывается никогда). Без головных
+// впереди рисуется «… › » — помещаться должно и оно, иначе хвост уезжает за
+// правый край. Сегменты разделены «›» с отступами по 6 точек.
+func crumbFirst(widths []int, sepW, ellW, avail int) int {
+	total := 0
+	for i, w := range widths {
+		total += w
+		if i > 0 {
+			total += sepW + 12
+		}
+	}
+	lead := ellW + sepW + 12
+	first := 0
+	for first < len(widths)-1 && (total > avail || first > 0 && total+lead > avail) {
+		total -= widths[first] + sepW + 12
+		first++
+	}
+	return first
 }
 
 func (cb *crumbBar) OnMouseButton(e base.MouseEvent) bool {
@@ -169,6 +200,9 @@ func (cb *crumbBar) OnMouseButton(e base.MouseEvent) bool {
 			}
 			return true
 		}
+	}
+	if cb.OnEdit != nil {
+		cb.OnEdit()
 	}
 	return true // клик по полосе поглощаем
 }

@@ -55,7 +55,7 @@ type FileDialogMode = dialog.FileDialogMode
 
 const (
 	FileOpen   = dialog.FileOpen   // выбор существующего файла
-	FileSave   = dialog.FileSave   // сохранение (компактная форма с именем)
+	FileSave   = dialog.FileSave   // сохранение: обзор папок, имя и тип файла
 	FolderPick = dialog.FolderPick // выбор папки
 )
 
@@ -79,9 +79,10 @@ func DefaultAllowedRoots() []string { return dialog.DefaultAllowedRoots() }
 // Полностью на движке: работает в headless-режиме и показывает файловую
 // систему ПРОЦЕССА (в стриминге — сервера). Темизируется и локализуется.
 //
-// Open/FolderPick — браузер с панелью мест, breadcrumb-путём и списком
-// с колонками; Save — компактная форма (путь + имя + предупреждение),
-// как в принятых дизайн-мокапах.
+// Open, Save и FolderPick — браузер с панелью мест, breadcrumb-путём и
+// списком с колонками; щелчок по пустому месту пути открывает его ввод.
+// Компактная форма Save (путь + имя + предупреждение) — по
+// FileDialogOptions.Compact.
 type FileDialog = dialog.FileDialog
 
 // ── dialog_file_choices.go ──
