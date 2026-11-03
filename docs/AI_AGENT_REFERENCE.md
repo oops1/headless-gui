@@ -10546,3 +10546,13 @@ Where window code lives now (ADR-0013):
   does losing focus.
 - New strings (EN, RU): `dlg.file.replace.title`, `dlg.file.replace` (`%s` — file name),
   `dlg.file.badpath`.
+
+## v4.1.1 (unreleased, branch `develop`): Save As changes the extension with the filter
+
+- Changing the filter in Save (`matchNameToFilter` in `widget/dialog/dialog_file_path.go`,
+  browser and compact form) swaps the name's extension for the new filter's first one
+  when some listed filter has that extension, as Windows does (`cert.cer` → `cert.pem`).
+  A name without an extension, an unknown extension (`notes.v2`), one the new filter
+  already accepts and the "all files" filter keep the name; case doesn't matter; a path
+  in the field is kept. Open keeps the name. The overwrite warning follows the new name.
+  No API change.
