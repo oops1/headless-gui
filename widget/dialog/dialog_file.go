@@ -20,7 +20,7 @@ type FileDialogMode int
 
 const (
 	FileOpen   FileDialogMode = iota // выбор существующего файла
-	FileSave                         // сохранение (компактная форма с именем)
+	FileSave                         // сохранение: обзор папок, имя и тип файла
 	FolderPick                       // выбор папки
 )
 
@@ -69,6 +69,10 @@ type FileDialogOptions struct {
 	// такой же, как без этого поля. Как приложение узнаёт выбор — см.
 	// FileDialogChoice и FileDialog.Choice.
 	Choices []FileDialogChoice
+	// Compact — «Сохранить как» в компактной форме: строка пути, имя и тип
+	// файла, без панели мест и списка. По умолчанию Save — тот же обзор, что
+	// у Open. В Open и FolderPick не действует.
+	Compact bool
 }
 
 var (
@@ -144,9 +148,10 @@ type fileEntry struct {
 // Полностью на движке: работает в headless-режиме и показывает файловую
 // систему ПРОЦЕССА (в стриминге — сервера). Темизируется и локализуется.
 //
-// Open/FolderPick — браузер с панелью мест, breadcrumb-путём и списком
-// с колонками; Save — компактная форма (путь + имя + предупреждение),
-// как в принятых дизайн-мокапах.
+// Open, Save и FolderPick — браузер с панелью мест, breadcrumb-путём и
+// списком с колонками; щелчок по пустому месту пути открывает его ввод.
+// Компактная форма Save (путь + имя + предупреждение) — по
+// FileDialogOptions.Compact.
 type FileDialog struct {
 	eng      ModalShower
 	dlg      *Dialog
@@ -164,8 +169,11 @@ type FileDialog struct {
 	places  *placeList      // nil в компактном Save
 	table   *fileTable      // nil в компактном Save
 	nameIn  *text.TextInput // nil в FolderPick
-	warnLbl *base.Label
+	warnLbl *base.Label     // предупреждение о перезаписи (только Save)
 	warnIco *DialogIcon
+
+	pathIn      *pathInput // ввод пути на месте строки пути (dialog_file_path.go)
+	pathEditing bool       // идёт ввод пути
 }
 
 // ShowOpenFile показывает диалог выбора файла.
@@ -219,7 +227,7 @@ func (mb *MessageBox) showFileDialog(opts FileDialogOptions, onResult func(path 
 	opts.Choices = normChoices(opts.Choices)
 
 	fd := &FileDialog{eng: mb.eng, opts: opts, onResult: onResult, roots: roots}
-	if opts.Mode == FileSave {
+	if opts.Mode == FileSave && opts.Compact {
 		fd.buildSaveCompact(mb, title)
 	} else {
 		fd.buildBrowser(mb, title)
@@ -231,8 +239,9 @@ func (mb *MessageBox) showFileDialog(opts FileDialogOptions, onResult func(path 
 	return fd
 }
 
-// buildBrowser — полный браузер (Open / FolderPick), мокап dlg_fileopen:
-// breadcrumb + ↑/⟳, панель мест, список с колонками, имя+фильтр, кнопки.
+// buildBrowser — полный браузер (Open / Save / FolderPick), мокап
+// dlg_fileopen: breadcrumb + ↑/⟳, панель мест, список с колонками,
+// имя+фильтр, кнопки; у Save слева от кнопок — предупреждение о перезаписи.
 func (fd *FileDialog) buildBrowser(mb *MessageBox, title string) {
 	const (
 		dlgW   = 640
@@ -247,10 +256,10 @@ func (fd *FileDialog) buildBrowser(mb *MessageBox, title string) {
 	// extraH = 0 и dlgH остаётся прежним 460.
 	nameY := panelY + panelH + 12
 	plan := planChoices(fd.opts.Choices, dlgW-2*padX)
-	// В Open ряд «имя + фильтр» занят, и списки идут под ним, прибавляя
+	// В Open и Save ряд «имя + фильтр» занят, и списки идут под ним, прибавляя
 	// высоту; в FolderPick этот ряд пуст — первый ряд списков встаёт в него.
 	choiceY, extraH := nameY, plan.height()
-	if fd.opts.Mode == FileOpen {
+	if fd.opts.Mode != FolderPick {
 		choiceY += choiceRowH
 	} else if extraH > 0 {
 		extraH -= choiceRowH
@@ -264,6 +273,7 @@ func (fd *FileDialog) buildBrowser(mb *MessageBox, title string) {
 	fd.crumb.SetBounds(image.Rect(padX, crumbY, dlgW-padX-112, crumbY+30))
 	fd.crumb.OnNavigate = fd.navigate
 	dlg.AddChild(fd.crumb)
+	fd.addPathInput(dlg)
 
 	upBtn := base.NewButton("↑")
 	upBtn.FocusRing = true
@@ -292,10 +302,10 @@ func (fd *FileDialog) buildBrowser(mb *MessageBox, title string) {
 	fd.table.OnActivate = fd.activate
 	dlg.AddChild(fd.table)
 
-	// ── Имя файла + фильтр (только Open) ─────────────────────────────────
+	// ── Имя файла + фильтр (Open и Save) ─────────────────────────────────
 	var nameLbl *base.Label
 	var filterDD *base.Dropdown
-	if fd.opts.Mode == FileOpen {
+	if fd.opts.Mode != FolderPick {
 		nameLbl = base.NewLabel(base.Tr("dlg.file.name"), base.ActiveTheme().LabelText)
 		nameLbl.FontSize = 11
 		nameLbl.SetBounds(image.Rect(padX, nameY+7, padX+42, nameY+25))
@@ -303,6 +313,10 @@ func (fd *FileDialog) buildBrowser(mb *MessageBox, title string) {
 
 		fd.nameIn = text.NewTextInput("")
 		fd.nameIn.SetBounds(image.Rect(padX+44, nameY, padX+44+330, nameY+30))
+		if fd.opts.Mode == FileSave {
+			fd.nameIn.SetText(fd.opts.InitialName)
+			fd.nameIn.OnChange = func(string) { fd.updateWarning() }
+		}
 		dlg.AddChild(fd.nameIn)
 
 		filterDD = fd.newFilterDropdown()
@@ -315,10 +329,28 @@ func (fd *FileDialog) buildBrowser(mb *MessageBox, title string) {
 
 	// ── Кнопки ───────────────────────────────────────────────────────────
 	okKey := "dlg.open"
-	if fd.opts.Mode == FolderPick {
+	switch fd.opts.Mode {
+	case FolderPick:
 		okKey = "dlg.select"
+	case FileSave:
+		okKey = "dlg.save"
 	}
 	okBtn, cancelBtn := fd.addBottomButtons(mb, dlg, dlgW, dlgH, okKey)
+
+	// Предупреждение о перезаписи (Save) — на ряду кнопок, слева от них:
+	// высота диалога та же, что у Open.
+	if fd.opts.Mode == FileSave {
+		bb := okBtn.Bounds()
+		fd.warnIco = NewDialogIcon(SeverityWarning)
+		fd.warnIco.SetBounds(image.Rect(padX+2, bb.Min.Y+4, padX+24, bb.Min.Y+26))
+		fd.warnIco.SetVisible(false)
+		dlg.AddChild(fd.warnIco)
+
+		fd.warnLbl = base.NewLabel("", severityColor(SeverityWarning))
+		fd.warnLbl.FontSize = 10
+		fd.warnLbl.SetBounds(image.Rect(padX+30, bb.Min.Y+7, bb.Min.X-8, bb.Min.Y+23))
+		dlg.AddChild(fd.warnLbl)
+	}
 
 	dlg.OnLanguageChange(func() {
 		okBtn.SetText(base.Tr(okKey))
@@ -328,6 +360,7 @@ func (fd *FileDialog) buildBrowser(mb *MessageBox, title string) {
 		if nameLbl != nil {
 			nameLbl.SetText(base.Tr("dlg.file.name"))
 		}
+		fd.updateWarning()
 	})
 }
 
@@ -351,6 +384,7 @@ func (fd *FileDialog) buildSaveCompact(mb *MessageBox, title string) {
 	fd.crumb.SetBounds(image.Rect(padX, crumbY, dlgW-padX, crumbY+30))
 	fd.crumb.OnNavigate = fd.navigate
 	dlg.AddChild(fd.crumb)
+	fd.addPathInput(dlg) // без списка папок путь вводится только так
 
 	lblY := crumbY + 42
 	nameLbl := newMutedLabel(base.Tr("dlg.file.filename"))
@@ -512,6 +546,7 @@ func (fd *FileDialog) navigate(dir string) {
 	}
 	fd.cur = dir
 	fd.reload()
+	fd.updateWarning() // то же имя в другой папке может уже существовать
 }
 
 // reload перечитывает текущий каталог с учётом фильтра.
@@ -550,6 +585,7 @@ func (fd *FileDialog) selectEntry(idx int) {
 	e := fd.entries[idx]
 	if !e.dir && fd.nameIn != nil {
 		fd.nameIn.SetText(e.name)
+		fd.updateWarning() // SetText не зовёт OnChange
 	}
 }
 
@@ -582,10 +618,9 @@ func (fd *FileDialog) updateWarning() {
 	if fd.opts.Mode != FileSave || fd.warnLbl == nil {
 		return
 	}
-	name := strings.TrimSpace(fd.nameIn.GetText())
 	warn := false
-	if name != "" {
-		if st, err := os.Stat(filepath.Join(fd.cur, name)); err == nil && !st.IsDir() {
+	if p, isDir, ok := fd.saveTarget(); ok && !isDir {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
 			warn = true
 		}
 	}
@@ -600,6 +635,12 @@ func (fd *FileDialog) updateWarning() {
 
 // confirm подтверждает выбор согласно режиму.
 func (fd *FileDialog) confirm() {
+	if fd.pathEditing {
+		// Enter в поле пути — переход по пути, а не выбор файла: Enter
+		// диалог получает раньше поля (HandleInputBinding).
+		fd.commitPathEdit()
+		return
+	}
 	switch fd.opts.Mode {
 	case FolderPick:
 		// Выделенная папка приоритетнее текущего каталога.
@@ -611,11 +652,21 @@ func (fd *FileDialog) confirm() {
 		}
 		fd.finish(fd.cur)
 	case FileSave:
-		name := strings.TrimSpace(fd.nameIn.GetText())
-		if name == "" {
+		p, isDir, ok := fd.saveTarget()
+		if !ok {
 			return
 		}
-		fd.finish(filepath.Join(fd.cur, name))
+		if isDir {
+			// Имя папки — вход в неё, как в Проводнике; в поле — прежнее имя.
+			fd.navigate(p)
+			fd.SetFileName(fd.opts.InitialName)
+			return
+		}
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			fd.confirmReplace(p)
+			return
+		}
+		fd.finish(p)
 	default: // FileOpen
 		name := strings.TrimSpace(fd.nameIn.GetText())
 		if name == "" {
@@ -627,7 +678,7 @@ func (fd *FileDialog) confirm() {
 			}
 			return
 		}
-		p := filepath.Join(fd.cur, name)
+		p := fd.resolvePath(name)
 		// Если имя оказалось папкой — входим в неё.
 		if st, err := os.Stat(p); err == nil && st.IsDir() {
 			fd.navigate(p)

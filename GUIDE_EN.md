@@ -3116,12 +3116,26 @@ id := mb.ShowInput("", "Name:", "default", validate, onResult); id.SetHint("hint
 pd := mb.ShowProgress("Copying", "file.jpg", onCancel)
 pd.SetDetail("34 of 120 · 61 MB/s"); pd.SetProgress(0.28) // or SetIndeterminate(true)
 mb.ShowOpenFile(widget.FileDialogOptions{Filters: ...}, func(path string, ok bool) { ... })
-mb.ShowSaveFile(widget.FileDialogOptions{InitialName: "a.txt"}, ...)  // compact form
+mb.ShowSaveFile(widget.FileDialogOptions{InitialName: "a.txt"}, ...)  // folder browser
 mb.ShowPickFolder(widget.FileDialogOptions{}, ...)
 ```
 
+**Save As.** `ShowSaveFile` used to show a compact form where you could only go
+up to parent folders. Now it is the same browser as Open: double-click a folder
+to enter it, click a file to put its name into the Name field. A name without an
+extension gets the extension of the selected filter (`conn` → `conn.rdp`); a
+folder name in the field enters that folder. For an existing file the warning
+next to the buttons shows at once, and before replacing it the dialog asks
+"Do you want to replace it?": "No" keeps the dialog open. The compact form is
+still there — `FileDialogOptions{Compact: true}`; it has path input too.
+
+A click on the empty part of the path bar opens path input, as in Explorer:
+Enter goes to the path (a path to a file goes to its folder and puts the name
+into the Name field), Escape or a click elsewhere cancels, and the dialog stays
+open.
+
 Hotkeys: Enter — default button, Escape/✕ — cancel, Ctrl+C in a MessageBox
-copies its content in the Windows format (`---` separators). The Open
+copies its content in the Windows format (`---` separators). The file
 browser has a places sidebar (custom Places + home/drives), a clickable
 breadcrumb path, Name/Size/Modified columns and extension filters.
 

@@ -12,10 +12,16 @@ import (
 // Каталог — временный: путь результата проверяем целиком.
 func openChoiceDialog(t *testing.T, mode FileDialogMode, choices []FileDialogChoice, onResult func(string, bool)) (*FileDialog, string) {
 	t.Helper()
+	return openModeDialog(t, fileMode{mode: mode}, choices, onResult)
+}
+
+// openModeDialog — то же для режима из allFileModes (с компактным Save).
+func openModeDialog(t *testing.T, m fileMode, choices []FileDialogChoice, onResult func(string, bool)) (*FileDialog, string) {
+	t.Helper()
 	dir := t.TempDir()
 	mb := NewMessageBox(&stubModal{})
-	opts := FileDialogOptions{StartDir: dir, InitialName: "a.txt", Choices: choices}
-	switch mode {
+	opts := FileDialogOptions{StartDir: dir, InitialName: "a.txt", Choices: choices, Compact: m.compact}
+	switch m.mode {
 	case FileSave:
 		return mb.ShowSaveFile(opts, onResult), dir
 	case FolderPick:
@@ -47,14 +53,18 @@ func dialogButtons(fd *FileDialog) []*base.Button {
 	return out
 }
 
-var allFileModes = []struct {
-	name string
-	mode FileDialogMode
-	h    int // высота диалога без дополнительных списков
-}{
-	{"Open", FileOpen, 460},
-	{"Save", FileSave, 232},
-	{"Folder", FolderPick, 460},
+type fileMode struct {
+	name    string
+	mode    FileDialogMode
+	compact bool // Save в компактной форме (FileDialogOptions.Compact)
+	h       int  // высота диалога без дополнительных списков
+}
+
+var allFileModes = []fileMode{
+	{"Open", FileOpen, false, 460},
+	{"Save", FileSave, false, 460},
+	{"SaveCompact", FileSave, true, 232},
+	{"Folder", FolderPick, false, 460},
 }
 
 // Список появляется в обоих видах диалога: полном (Open, FolderPick) и
@@ -62,8 +72,8 @@ var allFileModes = []struct {
 func TestFileDialogChoices_AppearsAndDefault(t *testing.T) {
 	for _, m := range allFileModes {
 		t.Run(m.name, func(t *testing.T) {
-			plain, _ := openChoiceDialog(t, m.mode, nil, nil)
-			fd, _ := openChoiceDialog(t, m.mode, []FileDialogChoice{{
+			plain, _ := openModeDialog(t, m, nil, nil)
+			fd, _ := openModeDialog(t, m, []FileDialogChoice{{
 				ID: "enc", Label: "Кодировка:", Options: []string{"UTF-8", "UTF-16", "CP1251"}, Default: 2,
 			}}, nil)
 
@@ -102,7 +112,7 @@ func TestFileDialogChoices_ChoiceInResultCallback(t *testing.T) {
 			var gotPath string
 			var gotOK bool
 			gotIdx, gotFound := -1, false
-			fd, dir := openChoiceDialog(t, m.mode, []FileDialogChoice{EncodingChoice()}, func(p string, ok bool) {
+			fd, dir := openModeDialog(t, m, []FileDialogChoice{EncodingChoice()}, func(p string, ok bool) {
 				gotPath, gotOK = p, ok
 				gotIdx, gotFound = fd.Choice(EncodingChoiceID)
 			})
@@ -168,7 +178,7 @@ func TestFileDialogChoices_EmptyKeepsDialog(t *testing.T) {
 	for _, m := range allFileModes {
 		t.Run(m.name, func(t *testing.T) {
 			for _, choices := range [][]FileDialogChoice{nil, {}, {{ID: "x"}}} { // последний — отброшен как пустой
-				fd, _ := openChoiceDialog(t, m.mode, choices, nil)
+				fd, _ := openModeDialog(t, m, choices, nil)
 				if got := fd.Dialog().Bounds().Dy(); got != m.h {
 					t.Fatalf("choices=%v: высота диалога %d, исходная %d", choices, got, m.h)
 				}
@@ -178,8 +188,8 @@ func TestFileDialogChoices_EmptyKeepsDialog(t *testing.T) {
 			}
 			// Число виджетов: сравниваем с диалогом, собранным теми же вызовами
 			// без поля — различие дали бы только лишние виджеты списков.
-			a, _ := openChoiceDialog(t, m.mode, nil, nil)
-			b, _ := openChoiceDialog(t, m.mode, []FileDialogChoice{}, nil)
+			a, _ := openModeDialog(t, m, nil, nil)
+			b, _ := openModeDialog(t, m, []FileDialogChoice{}, nil)
 			if x, y := len(a.Dialog().Children()), len(b.Dialog().Children()); x != y {
 				t.Fatalf("число виджетов %d и %d", x, y)
 			}
@@ -192,8 +202,8 @@ func TestFileDialogChoices_EmptyKeepsDialog(t *testing.T) {
 func TestFileDialogChoices_Layout(t *testing.T) {
 	for _, m := range allFileModes {
 		t.Run(m.name, func(t *testing.T) {
-			plain, _ := openChoiceDialog(t, m.mode, nil, nil)
-			fd, _ := openChoiceDialog(t, m.mode, []FileDialogChoice{EncodingChoice()}, nil)
+			plain, _ := openModeDialog(t, m, nil, nil)
+			fd, _ := openModeDialog(t, m, []FileDialogChoice{EncodingChoice()}, nil)
 
 			wantGrow := choiceRowH
 			if m.mode == FolderPick {
@@ -247,7 +257,7 @@ func TestFileDialogChoices_ManyWrapRows(t *testing.T) {
 	for _, id := range []string{"a", "b", "c", "d", "e", "f"} {
 		list = append(list, FileDialogChoice{ID: id, Label: "Подпись " + id + ":", Options: []string{"Первый вариант", "Второй длинный вариант"}})
 	}
-	fd, _ := openChoiceDialog(t, FileSave, list, nil)
+	fd, _ := openModeDialog(t, fileMode{mode: FileSave, compact: true}, list, nil)
 	plan := planChoices(normChoices(list), 540-2*dlgPad)
 	if len(plan.rows) < 2 {
 		t.Fatalf("шесть списков уместились в %d ряд — перенос не проверен", len(plan.rows))
