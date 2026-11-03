@@ -442,6 +442,7 @@ func (fd *FileDialog) newFilterDropdown() *base.Dropdown {
 	dd.OnChange = func(i int, _ string) {
 		fd.filter = i
 		fd.reload()
+		fd.matchNameToFilter()
 		fd.updateWarning()
 	}
 	return dd
