@@ -33,6 +33,52 @@ type PopupFrame struct {
 	// при хосте, объявившем SetPopupFade). nil — в покое. Img на шагах
 	// перехода тот же: меняется только окно.
 	Transition *PopupTransition
+	// Pad — запас вокруг тела оверлея в логических точках, уже включённый
+	// в Rect и Img: там лежат тень и прозрачное. Не ноль только у хоста,
+	// объявившего SetPopupShadow. Тело оверлея — Rect.Inset(Pad): по нему
+	// хост вписывает окно в рабочую область монитора.
+	Pad int
+}
+
+// SetPopupShadow сообщает, что окна хоста попапов показывают альфу точек
+// кадра смешанной с тем, что под ними (или сами выкраивают окно по сплошным
+// точкам). Тогда кадр каждого попапа берёт запас под тень вокруг тела
+// оверлея (PopupFrame.Pad): тень и сглаженные скруглённые углы движок рисует
+// сам, как в холсте. По умолчанию — нет: кадр ровно по границам оверлея, и
+// хост, кладущий картинку непрозрачно, видит её как прежде.
+func (m *Manager) SetPopupShadow(on bool) {
+	if m.popupShadow.Swap(on) == on {
+		return
+	}
+	// Картинки кэша сняты с прежним запасом — следующий кадр перерисует их.
+	m.popupMu.Lock()
+	for _, ent := range m.popupCache {
+		ent.img = nil
+	}
+	m.lastPopupSig = nil
+	m.popupMu.Unlock()
+}
+
+// PopupShadow сообщает, объявил ли хост попапов альфу точек.
+func (m *Manager) PopupShadow() bool { return m.popupShadow.Load() }
+
+// popupPad — запас под тень вокруг оверлея od (логические точки): его
+// собственный (widget.OverlayMarginer) или запас под тень меню темы — тот
+// же, что берут переходы оверлеев в холсте.
+func popupPad(od widget.OverlayDrawer) int {
+	if om, ok := od.(widget.OverlayMarginer); ok {
+		return max(om.OverlayMargin(), 0)
+	}
+	return widget.DefaultOverlayMargin()
+}
+
+// padRect — место попапа в кадре: границы оверлея с запасом под тень.
+func padRect(it PopupItem, shadow bool) (image.Rectangle, int) {
+	if !shadow {
+		return it.Rect, 0
+	}
+	pad := popupPad(it.OD)
+	return it.Rect.Inset(-pad), pad
 }
 
 // PopupTransition — шаг перехода окна-попапа.
@@ -87,10 +133,11 @@ type PopupItem struct {
 // Холста у записи нет: все попапы рендерятся в один холст-заготовку арены
 // (Arena, ADR-0009).
 type popupEntry struct {
-	rect image.Rectangle
+	rect image.Rectangle // границы оверлея с запасом pad
 	img  *image.RGBA
 	hash uint64
 	seen uint64
+	pad  int // запас под тень, логические точки (PopupFrame.Pad)
 
 	// Переход (popuptrans.go): trans — идёт, closing — оверлей уже закрыт,
 	// slide — сдвиг при доле 0 (логический). Доля и признак конца пишет тик.
@@ -161,7 +208,11 @@ func (m *Manager) RenderPopups(canvas *raster.Canvas, root widget.Widget, modals
 	m.popupGen++
 	gen := m.popupGen
 	tr := m.popupTransSpec(canvas)
+	shadow := m.popupShadow.Load()
 	for _, it := range items {
+		// Запас под тень: окно-попап берёт его вокруг тела оверлея, и тень
+		// со сглаженными углами рисуется в кадр, как в холсте.
+		rect, pad := padRect(it, shadow)
 		ent := m.popupCache[it.ID]
 		fresh := ent == nil
 		if fresh {
@@ -169,12 +220,13 @@ func (m *Manager) RenderPopups(canvas *raster.Canvas, root widget.Widget, modals
 			m.popupCache[it.ID] = ent
 		}
 		ent.seen = gen
-		if ent.img == nil || ent.rect != it.Rect || dirtyAll || canvas.PhysRect(it.Rect).Overlaps(damage) {
-			oc := m.popupArena.CanvasFor(canvas, it.Rect)
-			ent.img = RenderOverlayShifted(oc, it.OD, it.Rect, it.Off)
+		if ent.img == nil || ent.rect != rect || dirtyAll || canvas.PhysRect(rect).Overlaps(damage) {
+			oc := m.popupArena.CanvasFor(canvas, rect)
+			ent.img = RenderOverlayShifted(oc, it.OD, rect, it.Off)
 			ent.hash = hashRGBA(ent.img)
-			ent.rect = it.Rect
+			ent.rect = rect
 		}
+		ent.pad = pad
 		// Панель, анимирующая себя сама (desktop.Flyout), перехода движка не
 		// получает ни при появлении, ни при исчезновении.
 		ent.self = isSelfAnimated(it.OD)
@@ -229,7 +281,7 @@ func (m *Manager) RenderPopups(canvas *raster.Canvas, root widget.Widget, modals
 	// Арена живёт, пока есть открытые попапы (исчезающим она не нужна: у них
 	// готовая картинка), и держит размер самого большого из них — закрытое
 	// большое меню не оставляет её раздутой.
-	m.popupArena.trim(items)
+	m.popupArena.trim(items, shadow)
 	m.popupBytes.Store(uint64(m.popupBytesLocked()))
 
 	changed := !samePopupSig(m.lastPopupSig, sig)
@@ -289,13 +341,14 @@ func (a *Arena) Release() { *a = Arena{} }
 // нужного самому большому из них: следующий рендер заведёт её по размеру.
 // Пока открыты попапы разного размера, буфер равен большему и не
 // перевыделяется от кадра к кадру.
-func (a *Arena) trim(items []PopupItem) {
+func (a *Arena) trim(items []PopupItem, shadow bool) {
 	if a.c == nil {
 		return
 	}
 	need := 0
 	for _, it := range items {
-		need = max(need, a.c.ScratchBytes(it.Rect.Dx(), it.Rect.Dy()))
+		r, _ := padRect(it, shadow)
+		need = max(need, a.c.ScratchBytes(r.Dx(), r.Dy()))
 	}
 	if need == 0 || cap(a.c.Back().Pix) > need {
 		a.Release()

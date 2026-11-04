@@ -192,6 +192,9 @@ func (win *Window) installPopupHost() {
 		if pf, ok := win.eng.(interface{ SetPopupFade(bool) }); ok {
 			pf.SetPopupFade(true)
 		}
+		// Буфер xdg_popup — ARGB: тень и скруглённые углы компоновщик
+		// смешивает сам, кадр берёт запас под тень.
+		declarePopupShadow(win.eng)
 		win.setPopupCursor(win.childPopups.syncCursorOverride)
 		return
 	}
@@ -210,7 +213,20 @@ func (win *Window) installPopupHost() {
 	if pf, ok := win.eng.(interface{ SetPopupFade(bool) }); ok {
 		pf.SetPopupFade(true)
 	}
+	declarePopupShadow(win.eng)
 	win.setPopupCursor(win.popupHost.syncCursorOverride)
+}
+
+// declarePopupShadow сообщает движку, что окна-попапы показывают альфу точек
+// (engine.SetPopupShadow): тень и сглаженные скруглённые углы меню рисует
+// движок, кадр попапа берёт под них запас. Так у всех хостов пакета: Win32 —
+// слоистое окно с UpdateLayeredWindow, X11 с композитором и Wayland — ARGB,
+// X11 без композитора выкраивает окно по сплошным точкам (тень отрезается,
+// чернеть нечему).
+func declarePopupShadow(eng any) {
+	if ps, ok := eng.(interface{ SetPopupShadow(bool) }); ok {
+		ps.SetPopupShadow(true)
+	}
 }
 
 // detectScale возвращает HiDPI-масштаб: env HEADLESS_GUI_SCALE имеет

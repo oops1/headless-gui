@@ -10556,3 +10556,28 @@ Where window code lives now (ADR-0013):
   already accepts and the "all files" filter keep the name; case doesn't matter; a path
   in the field is kept. Open keeps the name. The overwrite warning follows the new name.
   No API change.
+
+## v4.2.0 (unreleased, branch `develop`): popup windows draw their own shadow and rounded corners
+
+- `Engine.SetPopupShadow(on)` / `PopupShadow()` (`core/overlay/popuphost.go`): the popup
+  host shows per-pixel alpha, so each `PopupFrame` gets a margin around the overlay body —
+  `PopupFrame.Pad` (logical points), already inside `Rect` and `Img`; the body is
+  `Rect.Inset(Pad)`. The margin is `widget.OverlayMarginer` or
+  `widget.DefaultOverlayMargin()` (`popupPad`). Off by default: `Pad` = 0, frames exactly
+  `OverlayBounds` as before. Toggling drops the cached popup pictures.
+- `window/core` declares it for every host (`declarePopupShadow` in `installPopupHost`,
+  `eng.SetPopupShadow(true)` in `dock_host.go`/`modal_host.go`). `positionPopup` fits the
+  BODY into the work area (`pad` argument): the margin may go off screen.
+- Win32 popups (`platform/win32/popupulw_windows.go`): `CreatePopup` sets `ulw.on`; frame
+  (`BlitPopupRegion`/`BlitRGBADirty`), position (`SetPosition`) and whole-window alpha
+  (`SetPopupAlpha`) are only recorded, and one `UpdateLayeredWindow(ULW_ALPHA)` on the
+  window thread (`ulwSchedule` → `postUICall(ulwFlush)`) puts them together. Never call
+  `SetLayeredWindowAttributes` on such a window — the two layered paths are exclusive.
+  `SetSize` does nothing for it (the frame sets the size); `GetPosition` returns the
+  requested position. On failure `ulwFallback` returns to `StretchDIBits` +
+  `SetWindowRgn` over `raster.SolidBands`. Test hook: `testhook.Win32PopupAlpha`.
+- X11 popups with a compositor set a SHAPE input shape from the bands
+  (`x11InputShape`, `inputMajor`): the transparent margin passes clicks through.
+- Tests: `engine/popupshadow_test.go`, `window/core/popup_pad_test.go`,
+  `window/core/popup_ulw_windows_test.go` (live desktop: transparent corner shows what is
+  below, a translucent strip blends), `TestX11Popup_CompositorInputShape`.

@@ -190,7 +190,7 @@ func (ent *popupEntry) sig(id uintptr) popupSig {
 
 // frame — кадр попапа для хоста.
 func (ent *popupEntry) frame(id uintptr) PopupFrame {
-	return PopupFrame{ID: id, Rect: ent.rect, Img: ent.img, Transition: ent.transition()}
+	return PopupFrame{ID: id, Rect: ent.rect, Img: ent.img, Transition: ent.transition(), Pad: ent.pad}
 }
 
 // isSelfAnimated — анимирует ли оверлей себя сам.

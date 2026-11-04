@@ -5819,9 +5819,9 @@ eng.SetOverlayTransitions(true)    // off by default
   `PopupFrame.Transition` carries `Opacity`, `Offset` and `Closing`, and a host that
   declares `Engine.SetPopupFade(true)` keeps the window of a disappearing menu until the
   transition ends. `window.Window` and the dialog and panel hosts declare it themselves.
-  Win32 — whole-window opacity (a layered window); X11 with a compositor — a copy of the
-  frame with a multiplier; X11 without a compositor and Wayland — no transition: the window
-  appears and disappears at once.
+  Win32 — whole-window opacity (in the same `UpdateLayeredWindow` call that puts the
+  frame); X11 with a compositor — a copy of the frame with a multiplier; X11 without a
+  compositor and Wayland — no transition: the window appears and disappears at once.
 - **Your own overlay** only needs `OverlayBounds` (`widget.OverlayBoundsProvider`): without
   it the overlay is drawn at once, with no transition. One that animates itself
   (`desktop.Flyout`) opts out with `widget.SelfAnimatedOverlay`; a shadow reaching further
@@ -5851,6 +5851,54 @@ decorative: "reduced motion" zeroes them.
 dropped frame would leave it half-transparent) and an X11 check on a test machine; a
 separate engine-level transition for submenus; tooltip and modal transitions by the same
 mechanism.
+
+### Shadow and rounded corners of popup windows (v4.2)
+
+Menus, dropdown lists and other overlays shown in their own OS windows (`SetPopupSink`)
+look the same as in the canvas: rounded corners are antialiased and the menu's soft shadow
+lies around it — over the application window and over other applications' windows when
+the menu crosses the edge. The engine draws the shadow and the rounding; the OS window only
+blends per-pixel alpha with what is below it. The application does nothing:
+`window.Window` and the dialog and panel hosts declare it themselves.
+
+Before, on Windows anything transparent in a popup frame came out black: a rounded menu
+had black corners and no shadow at all — the frame was cut at the menu body.
+
+- **Shadow margin.** A host that declared `Engine.SetPopupShadow(true)` gets each popup
+  frame with a margin around the overlay body: `PopupFrame.Pad` (logical points) is already
+  included in `Rect` and `Img`, the body is `Rect.Inset(Pad)`. The margin is the overlay's
+  `widget.OverlayMarginer` or the theme's menu shadow margin
+  (`widget.DefaultOverlayMargin`, the same as the in-canvas transitions use). Without the
+  declaration `Pad` is 0 and the frame is exactly `OverlayBounds`, as before: a host that
+  puts the picture opaquely sees nothing extra.
+- **At the screen edge** the menu body, not the margin, is fitted into the work area: the
+  shadow may go past the edge or lie on the taskbar, while the menu sits flush with it.
+- **Win32** — a layered window; `UpdateLayeredWindow` puts the frame with per-pixel alpha
+  on the window thread, together with the position, in one call. Pixels with alpha 0 let
+  the mouse through — the transparent margin doesn't catch clicks. If the call fails, the
+  window goes back to the old path: `StretchDIBits` and a shape of the solid pixels — no
+  shadow, but no black either.
+- **X11 with a compositor** — an ARGB window, the compositor blends the alpha; only the
+  painted pixels catch clicks (a SHAPE input shape). **X11 without a compositor** — the
+  window is cut to the solid pixels: no shadow, stepped corners, no black. **Wayland** — an
+  ARGB `xdg_popup` buffer, the input region is the painted part. **macOS** — overlays in
+  the canvas, as before.
+
+```go
+// Your own popup host with per-pixel alpha:
+eng.SetPopupSink(func(frames []engine.PopupFrame) {
+	for _, f := range frames {
+		body := f.Rect.Inset(f.Pad) // where the menu body is; the shadow is around it
+		_ = body
+	}
+})
+eng.SetPopupShadow(true)
+```
+
+Application and dialog windows in their own OS windows are rounded and shadowed by the
+system: on Windows 11 — DWM (`SetCornerRadius`), on Windows 10 the corners are square and
+the shadow comes from the DWM frame; the `widget.Window` body is then drawn square
+(`SquareCorners`).
 
 ### Shared glyph cache of the process (v4.0, in progress)
 

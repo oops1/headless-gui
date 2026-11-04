@@ -73,6 +73,13 @@ type X11Window struct {
 	shapeMajor byte
 	shapeLast  []image.Rectangle
 	shapeSent  bool
+	// inputMajor — опкод SHAPE у попапа, чью альфу смешивает композитор:
+	// окно прямоугольное, но клики ловит только закрашенное (форма ввода),
+	// а прозрачный запас вокруг меню пропускает их к окну под ним.
+	// inputLast/inputSent — как shapeLast/shapeSent.
+	inputMajor byte
+	inputLast  []image.Rectangle
+	inputSent  bool
 	// composited — альфу окна-попапа с 32-битным visual'ом смешивает
 	// композитор (x11InitPopupShape): переходы попапа идут копией кадра с
 	// множителем (window/core/popup_fade.go).

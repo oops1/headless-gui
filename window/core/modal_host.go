@@ -370,6 +370,7 @@ func (h *dialogHost) create(hm *hostedModal) {
 			ph := newPopupHost(nw, inv, eng, scale, &surf.in)
 			eng.SetPopupSink(ph.apply)
 			eng.SetPopupFade(true)
+			eng.SetPopupShadow(true)
 			surf.setPopupCursor(ph.syncCursorOverride)
 			h.mu.Lock()
 			hm.popupHost = ph

@@ -93,6 +93,9 @@ type Manager struct {
 	popupFade      atomic.Bool
 	popupTicked    atomic.Bool
 	popupClosingBu []uintptr
+	// popupShadow — окна хоста показывают альфу точек (SetPopupShadow):
+	// кадр попапа берёт запас под тень вокруг тела оверлея.
+	popupShadow atomic.Bool
 
 	// ── Tooltip ─────────────────────────────────────────────────────────────
 	ttMu       sync.Mutex

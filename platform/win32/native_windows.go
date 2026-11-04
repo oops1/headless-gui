@@ -398,6 +398,11 @@ type Win32Window struct {
 	popupAlpha    float64
 	popupAlphaSet bool
 
+	// ulw — вывод окна-попапа через UpdateLayeredWindow: альфа точек кадра
+	// (тень, скруглённые углы) смешивается с тем, что под окном
+	// (popupulw_windows.go).
+	ulw popupULW
+
 	mu         sync.Mutex
 	frameBuf   []byte // BGRA пиксели для StretchDIBits (top-down: строка 0 — верхняя)
 	bufW, bufH int    // размер кадра, лежащего в frameBuf (для растянутого блита)
@@ -675,12 +680,16 @@ func (w *Win32Window) enableFileDrop() {
 // кнопки на панели задач (WS_EX_TOOLWINDOW). Позиция задаётся позже (SetPosition).
 // Помечается noQuit — уничтожение попапа не завершает цикл сообщений приложения.
 //
-// Окно слоистое (WS_EX_LAYERED): прозрачность целиком задаёт
-// SetLayeredWindowAttributes, а рисуется оно как прежде — StretchDIBits в
-// WM_PAINT и выкройка SetWindowRgn. Без атрибутов слоистое окно невидимо,
-// поэтому они ставятся до показа (createInternal).
+// Окно слоистое (WS_EX_LAYERED) и выводится UpdateLayeredWindow с альфой
+// точек (popupulw_windows.go): тень меню и сглаженные скруглённые углы,
+// которые рисует движок, смешиваются с тем, что под окном. Прозрачность
+// целиком на переходах — в том же вызове. До первого кадра окно невидимо.
 func (w *Win32Window) CreatePopup(width, height int) error {
 	w.noQuit = true
+	w.ulw.on.Store(true)
+	w.ulw.mu.Lock()
+	w.ulw.alpha = w.layeredAlphaByte()
+	w.ulw.mu.Unlock()
 	style := uint32(wsPopup)
 	exStyle := uint32(wsExNoactivate | wsExToolwindow | wsExTopmost | wsExLayered)
 	return w.createInternal("", width, height, style, exStyle, swShowNoActivate, false)
@@ -690,25 +699,29 @@ func (w *Win32Window) CreatePopup(width, height int) error {
 // popupAlphaSetter. До создания окна запоминается и ставится при создании.
 func (w *Win32Window) SetPopupAlpha(a float64) {
 	w.popupAlpha, w.popupAlphaSet = a, true
+	if w.ulwActive() {
+		w.ulwSetAlpha(w.layeredAlphaByte())
+		return
+	}
 	if w.hwnd != 0 {
 		w.applyLayeredAlpha()
 	}
 }
 
-// applyLayeredAlpha кладёт прозрачность в слоистое окно.
-func (w *Win32Window) applyLayeredAlpha() {
-	a := 255
-	if w.popupAlphaSet {
-		a = int(w.popupAlpha*255 + 0.5)
-		if a < 0 {
-			a = 0
-		}
-		if a > 255 {
-			a = 255
-		}
+// layeredAlphaByte — заказанная прозрачность окна целиком, 0…255.
+func (w *Win32Window) layeredAlphaByte() byte {
+	if !w.popupAlphaSet {
+		return 255
 	}
+	a := int(w.popupAlpha*255 + 0.5)
+	return byte(min(max(a, 0), 255))
+}
+
+// applyLayeredAlpha кладёт прозрачность в слоистое окно без
+// UpdateLayeredWindow (прежний путь попапа, ulwFallback).
+func (w *Win32Window) applyLayeredAlpha() {
 	const lwaAlpha = 0x2
-	procSetLayeredWindowAttributes.Call(uintptr(w.hwnd), 0, uintptr(a), lwaAlpha)
+	procSetLayeredWindowAttributes.Call(uintptr(w.hwnd), 0, uintptr(w.layeredAlphaByte()), lwaAlpha)
 }
 
 func (w *Win32Window) createInternal(title string, width, height int, style, exStyle uint32, showCmd uintptr, centerOnScreen bool) error {
@@ -803,8 +816,10 @@ func (w *Win32Window) createInternal(title string, width, height int, style, exS
 		w.applyBorderless(true)
 	}
 
-	// Слоистое окно (попап) без атрибутов невидимо — ставим до показа.
-	if exStyle&wsExLayered != 0 {
+	// Слоистое окно без атрибутов невидимо — ставим до показа. Попап с
+	// UpdateLayeredWindow их не получает: оба пути взаимоисключающие, и
+	// окно появится с первым кадром.
+	if exStyle&wsExLayered != 0 && !w.ulw.on.Load() {
 		w.applyLayeredAlpha()
 	}
 
@@ -875,6 +890,9 @@ func (w *Win32Window) SetSize(width, height int) {
 	}
 	w.width = width
 	w.height = height
+	if w.ulwActive() {
+		return // размер попапа с альфой точек задаёт кадр (UpdateLayeredWindow)
+	}
 	if w.hwnd != 0 {
 		var r rect
 		procGetWindowRect.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&r)))
@@ -935,6 +953,11 @@ func (w *Win32Window) SetPosition(x, y int) {
 		w.fs.mu.Unlock()
 		return
 	}
+	if w.ulwActive() {
+		// Попап с альфой точек: место ляжет одним вызовом с кадром.
+		w.ulwSetPosition(x, y)
+		return
+	}
 	if w.hwnd != 0 {
 		// SWP_NOACTIVATE обязателен: перемещение не должно активировать окно.
 		// Без него позиционирование окна-попапа (WS_EX_NOACTIVATE защищает
@@ -976,6 +999,11 @@ func (w *Win32Window) WorkAreaAt(x, y int) image.Rectangle {
 }
 
 func (w *Win32Window) GetPosition() (int, int) {
+	if w.ulwActive() {
+		if x, y, ok := w.ulwPosition(); ok {
+			return x, y // заказанное место: окно встанет туда с кадром
+		}
+	}
 	if w.hwnd != 0 {
 		var r rect
 		procGetWindowRect.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&r)))
@@ -1064,6 +1092,10 @@ func convertFrameToBGRA(dst []byte, img *image.RGBA, dirty image.Rectangle, widt
 // Буфер кадра переиспользуется между вызовами (полный кадр, top-down DIB).
 func (w *Win32Window) BlitRGBADirty(img *image.RGBA, dirty image.Rectangle) {
 	if w.hwnd == 0 || img == nil {
+		return
+	}
+	if w.ulwActive() {
+		w.ulwSetImage(img) // попап с альфой точек: кадр целиком, без dirty
 		return
 	}
 	b := img.Bounds()
@@ -1486,6 +1518,7 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		w.frameDead = true
 		w.freeFrameBuf() // память VirtualAlloc сборщик мусора не вернёт
 		w.mu.Unlock()
+		w.ulwRelease() // DIB-секция попапа (popupulw_windows.go)
 		// Вторичные окна модалок (noQuit) не завершают цикл сообщений — иначе
 		// закрытие диалога уронило бы всё приложение. Главное окно — завершает.
 		if !w.noQuit {

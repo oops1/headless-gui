@@ -7,6 +7,8 @@ import (
 	"image"
 	"image/color"
 	"testing"
+
+	"github.com/oops1/headless-gui/v4/platform/native"
 )
 
 // Кадр каскадного меню: два сплошных тела, вокруг полупрозрачная тень.
@@ -107,8 +109,59 @@ func TestX11Popup_CompositorKeepsAlpha(t *testing.T) {
 	}
 	w.BlitPopupRegion(shapeTestFrame(), nil)
 	argbWaitReq(t, fx, 72, 1)
-	if n := len(shapeRequests(fx)); n != 0 {
-		t.Errorf("ShapeRectangles при композиторе: %d", n)
+	for _, r := range shapeRequests(fx) {
+		if r[5] == x11ShapeKindBounding {
+			t.Errorf("видимая форма при композиторе: %v", r[:8])
+		}
+	}
+}
+
+// С композитором окно прямоугольное, но клики ловит только закрашенное:
+// прозрачный запас под тень вокруг меню (PopupFrame.Pad) пропускает их к
+// окну под ним. Форма ввода — по bands; без bands — окно целиком; та же
+// форма повторно не шлётся.
+func TestX11Popup_CompositorInputShape(t *testing.T) {
+	w, fx := newArgbPopupWindow(t, 0x49, false)
+	fx.exts = map[string]byte{"SHAPE": shapeTestMajor}
+	fx.cmOwner = 0x200001
+	argbCreatePopup(t, w)
+	if w.inputMajor != shapeTestMajor {
+		t.Fatalf("inputMajor %d: с композитором нужна форма ввода", w.inputMajor)
+	}
+	rects := func(req []byte) []image.Rectangle {
+		var out []image.Rectangle
+		for o := 16; o+8 <= len(req); o += 8 {
+			x, y := int(int16(binary.LittleEndian.Uint16(req[o:]))), int(int16(binary.LittleEndian.Uint16(req[o+2:])))
+			wd, ht := int(binary.LittleEndian.Uint16(req[o+4:])), int(binary.LittleEndian.Uint16(req[o+6:]))
+			out = append(out, image.Rect(x, y, x+wd, y+ht))
+		}
+		return out
+	}
+	bands := []image.Rectangle{image.Rect(2, 2, 30, 40), image.Rect(30, 10, 62, 30)}
+	w.BlitPopupRegion(shapeTestFrame(), bands)
+	argbWaitReq(t, fx, 72, 1)
+	reqs := shapeRequests(fx)
+	if len(reqs) != 1 || reqs[0][5] != x11ShapeKindInput {
+		t.Fatalf("ждали одну форму ввода, пришло %d", len(reqs))
+	}
+	if got := rects(reqs[0]); !native.SameRects(got, bands) {
+		t.Errorf("форма ввода %v, ждали %v", got, bands)
+	}
+
+	w.BlitPopupRegion(shapeTestFrame(), bands)
+	argbWaitReq(t, fx, 72, 2)
+	if n := len(shapeRequests(fx)); n != 1 {
+		t.Errorf("та же форма ввода отправлена повторно: %d запросов", n)
+	}
+
+	w.BlitPopupRegion(shapeTestFrame(), nil)
+	argbWaitReq(t, fx, 72, 3)
+	reqs = shapeRequests(fx)
+	if len(reqs) != 2 {
+		t.Fatalf("без bands форма ввода не обновилась: %d запросов", len(reqs))
+	}
+	if got, want := rects(reqs[1]), []image.Rectangle{image.Rect(0, 0, 64, 48)}; !native.SameRects(got, want) {
+		t.Errorf("без bands форма ввода %v, ждали окно целиком %v", got, want)
 	}
 }
 
