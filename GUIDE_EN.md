@@ -5819,8 +5819,8 @@ eng.SetOverlayTransitions(true)    // off by default
   `PopupFrame.Transition` carries `Opacity`, `Offset` and `Closing`, and a host that
   declares `Engine.SetPopupFade(true)` keeps the window of a disappearing menu until the
   transition ends. `window.Window` and the dialog and panel hosts declare it themselves.
-  Win32 — whole-window opacity (in the same `UpdateLayeredWindow` call that puts the
-  frame); X11 with a compositor — a copy of the frame with a multiplier; X11 without a
+  Win32 — whole-window opacity (`UpdateLayeredWindow` or, for menus by DWM,
+  `SetLayeredWindowAttributes`); X11 with a compositor — a copy of the frame with a multiplier; X11 without a
   compositor and Wayland — no transition: the window appears and disappears at once.
 - **Your own overlay** only needs `OverlayBounds` (`widget.OverlayBoundsProvider`): without
   it the overlay is drawn at once, with no transition. One that animates itself
@@ -5852,53 +5852,75 @@ dropped frame would leave it half-transparent) and an X11 check on a test machin
 separate engine-level transition for submenus; tooltip and modal transitions by the same
 mechanism.
 
-### Shadow and rounded corners of popup windows (v4.2)
+### Shadows of windows, menus and popups: DWM or the engine (v4.2)
 
-Menus, dropdown lists and other overlays shown in their own OS windows (`SetPopupSink`)
-look the same as in the canvas: rounded corners are antialiased and the menu's soft shadow
-lies around it — over the application window and over other applications' windows when
-the menu crosses the edge. The engine draws the shadow and the rounding; the OS window only
-blends per-pixel alpha with what is below it. The application does nothing:
-`window.Window` and the dialog and panel hosts declare it themselves.
-
-Before, on Windows anything transparent in a popup frame came out black: a rounded menu
-had black corners and no shadow at all — the frame was cut at the menu body.
-
-- **Shadow margin.** A host that declared `Engine.SetPopupShadow(true)` gets each popup
-  frame with a margin around the overlay body: `PopupFrame.Pad` (logical points) is already
-  included in `Rect` and `Img`, the body is `Rect.Inset(Pad)`. The margin is the overlay's
-  `widget.OverlayMarginer` or the theme's menu shadow margin
-  (`widget.DefaultOverlayMargin`, the same as the in-canvas transitions use). Without the
-  declaration `Pad` is 0 and the frame is exactly `OverlayBounds`, as before: a host that
-  puts the picture opaquely sees nothing extra.
-- **At the screen edge** the menu body, not the margin, is fitted into the work area: the
-  shadow may go past the edge or lie on the taskbar, while the menu sits flush with it.
-- **Win32** — a layered window; `UpdateLayeredWindow` puts the frame with per-pixel alpha
-  on the window thread, together with the position, in one call. Pixels with alpha 0 let
-  the mouse through — the transparent margin doesn't catch clicks. If the call fails, the
-  window goes back to the old path: `StretchDIBits` and a shape of the solid pixels — no
-  shadow, but no black either.
-- **X11 with a compositor** — an ARGB window, the compositor blends the alpha; only the
-  painted pixels catch clicks (a SHAPE input shape). **X11 without a compositor** — the
-  window is cut to the solid pixels: no shadow, stepped corners, no black. **Wayland** — an
-  ARGB `xdg_popup` buffer, the input region is the painted part. **macOS** — overlays in
-  the canvas, as before.
+DWM gives the shadow and rounded corners to a window, a dialog, a menu and a dropdown list
+when it gives them; when it doesn't and a shadow is needed, the engine draws it itself.
+The application does nothing — this is the default (`window.ShadowAuto`). To choose the
+source explicitly:
 
 ```go
-// Your own popup host with per-pixel alpha:
-eng.SetPopupSink(func(frames []engine.PopupFrame) {
-	for _, f := range frames {
-		body := f.Rect.Inset(f.Pad) // where the menu body is; the shadow is around it
-		_ = body
-	}
-})
-eng.SetPopupShadow(true)
+win.SetShadowSource(window.ShadowAuto)   // default: DWM where it gives a shadow, else the engine
+win.SetShadowSource(window.ShadowSystem) // DWM only: where it gives none — no shadow
+win.SetShadowSource(window.ShadowEngine) // always the engine: the DWM shadow is removed, square corners
 ```
 
-Application and dialog windows in their own OS windows are rounded and shadowed by the
-system: on Windows 11 — DWM (`SetCornerRadius`), on Windows 10 the corners are square and
-the shadow comes from the DWM frame; the `widget.Window` body is then drawn square
-(`SquareCorners`).
+The choice applies to the window, its menus and popups, and to the dialogs and floating
+panels the window opens in their own OS windows. The window changes its shadow at once,
+popups from their next show.
+
+**Where DWM gives a shadow and where it doesn't.**
+
+| | DWM gives | the engine draws (`ShadowAuto`) |
+|---|---|---|
+| window, dialog (Windows 11) | rounding and shadow | — |
+| window, dialog (Windows 10) | shadow from the DWM frame, square corners | — |
+| window with window shadows turned off (performance options, RDP) | nothing | its own shadow window |
+| rounded menu, popup (Windows 11) | rounding and shadow, per cascade level | — |
+| square popup, Windows 10, X11, Wayland | nothing | shadow and antialiased corners in the frame |
+
+"DWM gives a shadow" means composition is on and window shadows aren't turned off in the
+system (`SPI_GETDROPSHADOW`): remote desktop sessions with a light experience and a
+cleared "Show shadows under windows" have none. A change of the setting is picked up live.
+
+- **Menus by DWM** (Windows 11). A cascading menu is shown as one window per level, each
+  with its own DWM shadow: one window's shadow would follow the bounding rectangle, under
+  the empty space between the menu and the submenu too. A level's frame has no shadow of
+  its own and square corners; DWM rounds the window (`DWMWCP_ROUND` for a radius of 6 or
+  more, else `DWMWCP_ROUNDSMALL`). DWM gives no shadow to a square popup — the engine draws
+  its shadow.
+- **Menus by the engine.** The popup frame takes a shadow margin (`PopupFrame.Pad`), the
+  shadow and antialiased corners are drawn into it as in the canvas; the OS window blends
+  per-pixel alpha: Win32 — `UpdateLayeredWindow` (pixels with alpha 0 let the mouse
+  through), X11 with a compositor — ARGB and an input shape of the painted pixels, X11
+  without a compositor — a shape of the solid pixels (no shadow, no black), Wayland — an
+  ARGB `xdg_popup` buffer. At the screen edge the menu body, not the shadow margin, is
+  fitted into the work area.
+- **The window's own shadow** (Win32) is a separate OS window right below the window:
+  layered, transparent to the mouse, never activated, not on the taskbar or in Alt+Tab; it
+  follows the window and is absent for a maximized, minimized, fullscreen and
+  `Style.Borderless` window. Its look comes from the theme tokens (`widget.WindowShadow`,
+  `widget.DialogShadow` for dialogs), without them a soft shadow (blur 16, offset 6). The
+  picture is assembled from a small sample, so resizing a large window doesn't blur the
+  whole outline again. On X11 and Wayland the window manager gives windows their shadow.
+
+**Your own popup host** declares what its windows can do with flags:
+
+```go
+eng.SetPopupSink(func(frames []engine.PopupFrame) {
+	for _, f := range frames {
+		switch {
+		case f.System: // shadow and rounding with radius f.Corner are up to the OS window
+		default: // the body is f.Rect.Inset(f.Pad), the shadow is around it in the frame's alpha
+		}
+	}
+})
+eng.SetPopupShadowMode(engine.PopupShadowSystem | engine.PopupShadowEngine)
+```
+
+`PopupShadowNone` (the default) — the frame is exactly `OverlayBounds`, as before. The
+engine learns an overlay's parts from `widget.OverlayPartsProvider` (`PopupMenu` and the
+widgets with a menu inside report the cascade levels and the radius).
 
 ### Shared glyph cache of the process (v4.0, in progress)
 

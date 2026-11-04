@@ -29,7 +29,9 @@ func shadowMenuFrames(t *testing.T, shadow bool, scale float64) (PopupFrame, ima
 		last = f
 		mu.Unlock()
 	})
-	e.SetPopupShadow(shadow)
+	if shadow {
+		e.SetPopupShadowMode(PopupShadowEngine)
+	}
 	root := widget.NewPanel(color.RGBA{R: 200, G: 200, B: 200, A: 255})
 	root.ShowHeader = false
 	root.SetBounds(image.Rect(0, 0, 400, 300))
@@ -91,5 +93,89 @@ func TestPopupShadow_FrameCarriesShadowAndRoundCorners(t *testing.T) {
 		if a := alpha(pad, pad); a == 255 {
 			t.Errorf("scale %v: угол тела за скруглением сплошной — скругления нет", scale)
 		}
+	}
+}
+
+// Режим системы (DWM Windows 11): каскадное меню отдаётся окнами по уровням,
+// без своей тени и с прямыми углами — скругляет и оттеняет ОС; радиус —
+// в кадре. Прямоугольному меню ОС тени не даёт — при флаге движка её рисует
+// движок, без него меню остаётся как было.
+func systemMenuFrames(t *testing.T, mode PopupShadowMode, corner int) ([]PopupFrame, *widget.PopupMenu) {
+	t.Helper()
+	e := New(640, 420, 60)
+	t.Cleanup(e.Stop)
+	var mu sync.Mutex
+	var last []PopupFrame
+	e.SetPopupSink(func(f []PopupFrame) {
+		mu.Lock()
+		last = f
+		mu.Unlock()
+	})
+	e.SetPopupShadowMode(mode)
+	root := widget.NewPanel(color.RGBA{R: 200, G: 200, B: 200, A: 255})
+	root.ShowHeader = false
+	root.SetBounds(image.Rect(0, 0, 640, 420))
+	m := widget.NewPopupMenu()
+	m.CornerRadius = corner
+	m.Elevation = 8
+	m.ShadowColor = color.RGBA{A: 90}
+	m.SubMenuDelay = 0
+	m.Background = color.RGBA{R: 250, G: 250, B: 250, A: 255}
+	m.SetItems([]widget.MenuItem{
+		{Text: "Масштаб", SubItems: []widget.MenuItem{{Text: "100%"}, {Text: "125%"}}},
+		{Text: "Строка состояния"},
+	})
+	root.AddChild(m)
+	e.SetRoot(root)
+	m.Show(60, 60)
+	body := m.OverlayBounds()
+	m.OnMouseMove(body.Min.X+20, body.Min.Y+m.ItemHeight/2+4)
+	e.RenderOnce()
+	mu.Lock()
+	defer mu.Unlock()
+	return append([]PopupFrame(nil), last...), m
+}
+
+func TestPopupShadowSystem_CascadeByLevels(t *testing.T) {
+	testreset.Globals(t)
+	frames, m := systemMenuFrames(t, PopupShadowSystem|PopupShadowEngine, 8)
+	parts := m.OverlayParts()
+	if len(parts) != 2 {
+		t.Fatalf("уровней меню %d, ждали 2 (подменю не раскрылось?)", len(parts))
+	}
+	if len(frames) != 2 {
+		t.Fatalf("кадров %d, ждали окно на каждый уровень", len(frames))
+	}
+	if frames[0].ID == frames[1].ID {
+		t.Fatal("у уровней один ключ окна")
+	}
+	for i, f := range frames {
+		if !f.System || f.Corner != 8 || f.Pad != 0 || f.Rect != parts[i].Rect {
+			t.Errorf("уровень %d: System=%v Corner=%d Pad=%d Rect=%v, ждали true, 8, 0, %v",
+				i, f.System, f.Corner, f.Pad, f.Rect, parts[i].Rect)
+		}
+		// Углы кадра сплошные: скругление даст окно ОС, а окно без альфы
+		// показало бы прозрачное чёрным.
+		b := f.Img.Bounds()
+		for _, p := range []image.Point{b.Min, {b.Max.X - 1, b.Min.Y}, {b.Min.X, b.Max.Y - 1}, b.Max.Sub(image.Pt(1, 1))} {
+			if a := f.Img.RGBAAt(p.X, p.Y).A; a != 255 {
+				t.Errorf("уровень %d: угол %v прозрачен (альфа %d)", i, p, a)
+			}
+		}
+	}
+}
+
+func TestPopupShadowSystem_SquareMenuFallsBack(t *testing.T) {
+	testreset.Globals(t)
+	// Прямоугольное меню при «система или движок» — тень рисует движок.
+	frames, _ := systemMenuFrames(t, PopupShadowSystem|PopupShadowEngine, 0)
+	if len(frames) != 1 || frames[0].System || frames[0].Pad == 0 {
+		t.Fatalf("прямоугольное меню: %d кадров, System=%v Pad=%d; ждали один кадр движка с запасом",
+			len(frames), frames[0].System, frames[0].Pad)
+	}
+	// Только система — без тени и без запаса.
+	frames, m := systemMenuFrames(t, PopupShadowSystem, 0)
+	if len(frames) != 1 || frames[0].System || frames[0].Pad != 0 || frames[0].Rect != m.OverlayBounds() {
+		t.Fatalf("только система, прямоугольное: %+v", frames[0])
 	}
 }

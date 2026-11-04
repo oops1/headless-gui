@@ -371,6 +371,9 @@ func (tb *ToolBar) DrawOverlay(ctx DrawContext) { tb.menu.DrawOverlay(ctx) }
 // OverlayBounds отдаёт прямоугольник открытого меню (для выноса в окно ОС).
 func (tb *ToolBar) OverlayBounds() image.Rectangle { return tb.menu.OverlayBounds() }
 
+// OverlayParts отдаёт уровни открытого меню (widget.OverlayPartsProvider).
+func (tb *ToolBar) OverlayParts() []OverlayPart { return tb.menu.OverlayParts() }
+
 // Dismiss закрывает меню переполнения. Реализует Dismissable.
 func (tb *ToolBar) Dismiss() { tb.menu.Dismiss() }
 

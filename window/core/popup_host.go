@@ -79,6 +79,10 @@ type hostedPopup struct {
 	img    *image.RGBA     // последний контент (физические пиксели)
 	w, h   int             // физический размер контента
 	pad    int             // запас под тень вокруг тела в rect (логический, PopupFrame.Pad)
+	// system — тень и скругление окна даёт ОС (PopupFrame.System) с радиусом
+	// corner (логический). Решается при создании окна.
+	system bool
+	corner int
 	closed bool
 
 	// Переход появления и исчезновения (engine.PopupTransition, задача 3.4).
@@ -208,6 +212,7 @@ func (h *popupHost) apply(frames []engine.PopupFrame) {
 			}
 			// Новый оверлей — окно создаётся на UI-потоке.
 			hp = &hostedPopup{rect: f.Rect, img: f.Img, w: pw, h: ph, pad: f.Pad,
+				system: f.System, corner: f.Corner,
 				alpha: alpha, offset: offset, fade: h.fadeHint()}
 			hp.setOrigin(f.Rect, h.scale)
 			h.windows[f.ID] = hp
@@ -345,12 +350,22 @@ func (h *popupHost) createPopup(id uintptr) {
 	pw, ph := hp.w, hp.h
 	alpha := hp.alpha
 	carrier := h.carrier
+	system, corner := hp.system, hp.corner
 	h.mu.Unlock()
 
 	nw := newNativeWindow() // хук: тесты подставляют окно ОС
 	pop, ok := nw.(popupWindow)
 	if !ok {
 		return // бэкенд без поддержки окон-попапов (host не должен был ставиться)
+	}
+	// Кто оформляет окно — до создания: окну с тенью и скруглением ОС
+	// (PopupFrame.System) нужен другой вывод, чем окну с альфой точек.
+	if sd, ok := nw.(popupSystemDecor); ok {
+		r := 0
+		if system {
+			r = max(corner, 1)
+		}
+		sd.SetPopupSystem(r)
 	}
 	// Прозрачность окна — до создания: окно, рождённое непрозрачным и
 	// погашенное следом, мигнуло бы целиком.

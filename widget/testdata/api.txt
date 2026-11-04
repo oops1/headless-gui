@@ -823,6 +823,8 @@ type OverlayAnchorer
 type OverlayBoundsProvider
 type OverlayDrawer
 type OverlayMarginer
+type OverlayPart
+type OverlayPartsProvider
 type OverlayRectsProvider
 type Owner
 type OwnerAnimationLoop

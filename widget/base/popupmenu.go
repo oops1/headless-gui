@@ -1078,6 +1078,23 @@ func (m *PopupMenu) OverlayRects() []image.Rectangle {
 	return out
 }
 
+// OverlayParts возвращает открытые уровни меню — само меню и каскадные
+// подменю — с радиусом их углов. Реализует widget.OverlayPartsProvider.
+func (m *PopupMenu) OverlayParts() []OverlayPart {
+	if atomic.LoadInt32(&m.open) == 0 {
+		return nil
+	}
+	var out []OverlayPart
+	for lvl := m; lvl != nil; lvl, _ = lvl.openChildOf() {
+		corner := lvl.CornerRadius
+		if currentStyle().Classic3D {
+			corner = 0 // выпуклая рамка Windows 2000 — прямые углы
+		}
+		out = append(out, OverlayPart{Rect: lvl.popupRect(), Corner: corner})
+	}
+	return out
+}
+
 // roundedBodyRects разбивает прямоугольник со скруглёнными углами радиуса
 // radius на прямоугольники, ни один пиксель которых не лежит за дугой.
 //

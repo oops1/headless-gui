@@ -232,6 +232,8 @@ func (h *dockFloatHost) create(fp *floatingPane) {
 	}
 	nw.SetResizable(false)
 	nw.SetMinSize(pw, ph)
+	// Тень окна панели — как у родителя: DWM или своя (shadow.go).
+	applyShadowSource(nw, shadowSourceOf(h.parent), scale, false)
 
 	// Owner БЕЗ модальности: панель поверх главного окна и сворачивается с ним,
 	// но НЕ блокирует его (SetEnabled(false) не вызываем).
@@ -293,7 +295,7 @@ func (h *dockFloatHost) create(fp *floatingPane) {
 			pph := newPopupHost(nw, inv, eng, scale, &surf.in)
 			eng.SetPopupSink(pph.apply)
 			eng.SetPopupFade(true)
-			eng.SetPopupShadow(true)
+			declarePopupShadow(eng, shadowSourceOf(h.parent), nw)
 			surf.setPopupCursor(pph.syncCursorOverride)
 			h.mu.Lock()
 			fp.popupHost = pph

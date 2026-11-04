@@ -114,3 +114,48 @@ func TestWin32PopupULW_ResizeAndMove(t *testing.T) {
 		t.Errorf("после смены кадра на экране %06x, ждали 3cc814", c)
 	}
 }
+
+// Попап, которому тень и скругление даёт ОС (PopupFrame.System, Windows 11
+// с тенями DWM): угол окна скруглён — там видно то, что под окном, а под
+// окном — тень DWM.
+func TestWin32PopupSystem_DWMRoundsAndShadows(t *testing.T) {
+	carrier := newWin32TestWindow(t)
+	if !carrier.SystemPopupShadow() {
+		t.Skip("ОС не даёт тень попапам (не Windows 11 или тени DWM выключены)")
+	}
+	h := newPopupHost(carrier, carrier, &pcEngine{}, 1, nil)
+	t.Cleanup(func() { h.closeAll(); pumpWin32() })
+	settleScreen()
+	cx, cy := carrier.GetPosition()
+	rect := image.Rect(40, 40, 240, 190)
+	px, py := cx+rect.Min.X, cy+rect.Min.Y
+	under, ok := screenPixel(px, py)
+	if !ok {
+		t.Skip("экран не читается")
+	}
+	underBelow, _ := screenPixel(px+100, py+150+4)
+
+	img := image.NewRGBA(image.Rect(0, 0, 200, 150))
+	for i := 0; i < len(img.Pix); i += 4 {
+		img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = 220, 30, 40, 255
+	}
+	h.apply([]engine.PopupFrame{{ID: 1, Rect: rect, Img: img, System: true, Corner: 8}})
+	settleScreen()
+	h.mu.Lock()
+	hp := h.windows[1]
+	h.mu.Unlock()
+	if hp == nil || hp.native == nil {
+		t.Skip("окно-попап не поднялось")
+	}
+	if c, _ := screenPixel(px+100, py+75); c != 0x281edc {
+		t.Fatalf("тело попапа %06x, ждали 281edc", c)
+	}
+	if c, _ := screenPixel(px, py); c == 0x281edc || c == 0 {
+		t.Errorf("угол окна %06x — не скруглён (под окном было %06x)", c, under)
+	}
+	if c, _ := screenPixel(px+100, py+150+4); lumOf(c) >= lumOf(underBelow) {
+		t.Errorf("под окном %06x не темнее %06x — тени DWM нет", c, underBelow)
+	}
+}
+
+func lumOf(c uint32) int { return int(c&0xFF) + int(c>>8&0xFF) + int(c>>16&0xFF) }

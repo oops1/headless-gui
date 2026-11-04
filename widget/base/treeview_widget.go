@@ -137,6 +137,9 @@ func (w *TreeViewWidget) DrawOverlay(ctx DrawContext) { w.nodeMenu.DrawOverlay(c
 // OverlayBounds отдаёт прямоугольник открытого меню (для выноса в окно ОС).
 func (w *TreeViewWidget) OverlayBounds() image.Rectangle { return w.nodeMenu.OverlayBounds() }
 
+// OverlayParts отдаёт уровни открытого меню (widget.OverlayPartsProvider).
+func (w *TreeViewWidget) OverlayParts() []OverlayPart { return w.nodeMenu.OverlayParts() }
+
 // Dismiss закрывает контекстное меню узла. Реализует Dismissable.
 func (w *TreeViewWidget) Dismiss() { w.nodeMenu.Dismiss() }
 

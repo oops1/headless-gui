@@ -10557,27 +10557,44 @@ Where window code lives now (ADR-0013):
   in the field is kept. Open keeps the name. The overwrite warning follows the new name.
   No API change.
 
-## v4.2.0 (unreleased, branch `develop`): popup windows draw their own shadow and rounded corners
+## v4.2.0 (unreleased, branch `develop`): shadows — DWM where it gives them, the engine otherwise
 
-- `Engine.SetPopupShadow(on)` / `PopupShadow()` (`core/overlay/popuphost.go`): the popup
-  host shows per-pixel alpha, so each `PopupFrame` gets a margin around the overlay body —
-  `PopupFrame.Pad` (logical points), already inside `Rect` and `Img`; the body is
-  `Rect.Inset(Pad)`. The margin is `widget.OverlayMarginer` or
-  `widget.DefaultOverlayMargin()` (`popupPad`). Off by default: `Pad` = 0, frames exactly
-  `OverlayBounds` as before. Toggling drops the cached popup pictures.
-- `window/core` declares it for every host (`declarePopupShadow` in `installPopupHost`,
-  `eng.SetPopupShadow(true)` in `dock_host.go`/`modal_host.go`). `positionPopup` fits the
-  BODY into the work area (`pad` argument): the margin may go off screen.
-- Win32 popups (`platform/win32/popupulw_windows.go`): `CreatePopup` sets `ulw.on`; frame
-  (`BlitPopupRegion`/`BlitRGBADirty`), position (`SetPosition`) and whole-window alpha
-  (`SetPopupAlpha`) are only recorded, and one `UpdateLayeredWindow(ULW_ALPHA)` on the
-  window thread (`ulwSchedule` → `postUICall(ulwFlush)`) puts them together. Never call
-  `SetLayeredWindowAttributes` on such a window — the two layered paths are exclusive.
-  `SetSize` does nothing for it (the frame sets the size); `GetPosition` returns the
-  requested position. On failure `ulwFallback` returns to `StretchDIBits` +
-  `SetWindowRgn` over `raster.SolidBands`. Test hook: `testhook.Win32PopupAlpha`.
-- X11 popups with a compositor set a SHAPE input shape from the bands
-  (`x11InputShape`, `inputMajor`): the transparent margin passes clicks through.
-- Tests: `engine/popupshadow_test.go`, `window/core/popup_pad_test.go`,
-  `window/core/popup_ulw_windows_test.go` (live desktop: transparent corner shows what is
-  below, a translucent strip blends), `TestX11Popup_CompositorInputShape`.
+- `window.Window.SetShadowSource(window.ShadowAuto|ShadowSystem|ShadowEngine)` /
+  `ShadowSource()` (`window/core/shadow.go`): who gives the shadow to the window, its
+  popups, and the dialogs/floating panels it hosts (`shadowSourceOf(h.parent)` in
+  `modal_host.go`/`dock_host.go`). `applyShadowSource` passes the source
+  (`SetShadowSource(int)`) and the look (`SetEngineShadow`, physical, from
+  `widget.WindowShadow`/`DialogShadow` or `defaultWindowShadow`) to the backend, BEFORE
+  `syncSquareCorners` (the engine shadow drops DWM rounding).
+- Popups: `engine.SetPopupShadowMode(mode)` with flags `PopupShadowEngine` (frame with a
+  shadow margin `PopupFrame.Pad`, the engine draws shadow and antialiased corners) and
+  `PopupShadowSystem` (an overlay implementing `widget.OverlayPartsProvider` whose parts
+  are all rounded is split into one frame per part — keys `ID+i`, i < 8 — with
+  `PopupFrame.System`/`Corner`, rendered by `RenderOverlayFlat`: `Translating.Flat` drops
+  soft shadows and squares round shapes covering a frame corner). Square overlays fall
+  back to the Engine flag. `popupShadowMode(src, carrier)`: Auto → System|Engine when
+  `SystemPopupShadow()` (Win32: Windows 11 + `dwmShadowsOn`), else Engine; System → System
+  or None; Engine → Engine. Closing transitions find the owner via `popupEntry.owner`.
+  `OverlayParts` is delegated by MenuBar, MenuButton, ToolBar, TabControl,
+  TreeViewWidget, DataGridWidget, RowMenuHost, DockPane, TextBox, TextInput, RichText.
+- Win32 popups: `SetPopupSystem(corner)` before `CreatePopup` — corner > 0: the old output
+  path (StretchDIBits, `SetLayeredWindowAttributes` fades) plus
+  `DWMWA_WINDOW_CORNER_PREFERENCE` ROUND (corner >= 6) / ROUNDSMALL in `applyCorners`
+  (popups never touch their region there); 0: `UpdateLayeredWindow` per-pixel alpha
+  (`popupulw_windows.go`: frame, position and alpha are recorded and put by one ULW call
+  on the window thread; never `SetLayeredWindowAttributes` on such a window; fallback
+  `ulwFallback` → StretchDIBits + `SolidBands` region). `positionPopup` fits the BODY into
+  the work area (`pad`).
+- Win32 own window shadow (`shadowwnd_windows.go`): `dwmShadowsOn` (composition +
+  `SPI_GETDROPSHADOW`; a var for tests); `wantsOwnShadow`; a layered
+  `WS_EX_TRANSPARENT|TOOLWINDOW|NOACTIVATE` window of class `HeadlessGUI_Shadow`
+  (DefWindowProc) put right below the window (`SetWindowPos(shadow, hwnd)`, topmost
+  mirrored) on `WM_WINDOWPOSCHANGED`, re-evaluated on `WM_SETTINGCHANGE(SPI_SETDROPSHADOW)`
+  and `WM_DWMCOMPOSITIONCHANGED`, destroyed on `WM_DESTROY`. ShadowEngine disables DWM NC
+  rendering (`setNCRendering`, `ncOff`); `RoundsCorners` → false. Picture: `shadowImage`
+  nine-slices a `shadowSample` (raster `DrawShadow`); the interior stays empty.
+- X11 popups with a compositor set a SHAPE input shape (`x11InputShape`).
+- Tests: `engine/popupshadow_test.go`, `window/core/{shadow,popup_pad}_test.go`,
+  `window/core/popup_ulw_windows_test.go` (live: ULW corners and alpha, DWM popup rounding
+  and shadow), `platform/win32/shadowwnd_windows_test.go` (live own shadow, Auto vs DWM,
+  sample vs full), `TestX11Popup_CompositorInputShape`.

@@ -12,6 +12,9 @@ const HitMinButton
 const KanaLock
 const NumLock
 const ScrollLock
+const ShadowAuto
+const ShadowEngine
+const ShadowSystem
 const SystemThemeDark
 const SystemThemeLight
 const SystemThemeUnknown
@@ -163,6 +166,7 @@ type HitArea
 type LockKeys
 type Monitor
 type NativeWindow
+type ShadowSource
 type Style
 type SystemAppearance
 type SystemTheme

@@ -74,6 +74,14 @@ func (h *RowMenuHost) OverlayBounds() image.Rectangle {
 	return image.Rectangle{}
 }
 
+// OverlayParts отдаёт уровни открытого меню (widget.OverlayPartsProvider).
+func (h *RowMenuHost) OverlayParts() []OverlayPart {
+	if h.Open() {
+		return h.menu.OverlayParts()
+	}
+	return nil
+}
+
 func (h *RowMenuHost) Dismiss() {
 	if h.Open() {
 		h.menu.Close()

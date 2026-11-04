@@ -34,23 +34,48 @@ type PopupFrame struct {
 	// перехода тот же: меняется только окно.
 	Transition *PopupTransition
 	// Pad — запас вокруг тела оверлея в логических точках, уже включённый
-	// в Rect и Img: там лежат тень и прозрачное. Не ноль только у хоста,
-	// объявившего SetPopupShadow. Тело оверлея — Rect.Inset(Pad): по нему
-	// хост вписывает окно в рабочую область монитора.
+	// в Rect и Img: там лежат тень и прозрачное. Не ноль только в режиме
+	// PopupShadowEngine. Тело оверлея — Rect.Inset(Pad): по нему хост
+	// вписывает окно в рабочую область монитора.
 	Pad int
+	// System — тень и скругление окна за хостом (режим PopupShadowSystem):
+	// кадр — ровно тело одной части оверлея (у меню — один уровень
+	// каскада), без тени и с прямыми углами; окно ОС скругляет углы
+	// радиусом Corner и отбрасывает тень само.
+	System bool
+	// Corner — радиус скругления углов тела, логические точки (0 —
+	// прямые). Известен у оверлея, назвавшего свои части
+	// (widget.OverlayPartsProvider); у остальных — 0.
+	Corner int
 }
 
-// SetPopupShadow сообщает, что окна хоста попапов показывают альфу точек
-// кадра смешанной с тем, что под ними (или сами выкраивают окно по сплошным
-// точкам). Тогда кадр каждого попапа берёт запас под тень вокруг тела
-// оверлея (PopupFrame.Pad): тень и сглаженные скруглённые углы движок рисует
-// сам, как в холсте. По умолчанию — нет: кадр ровно по границам оверлея, и
-// хост, кладущий картинку непрозрачно, видит её как прежде.
-func (m *Manager) SetPopupShadow(on bool) {
-	if m.popupShadow.Swap(on) == on {
+// PopupShadowMode — кто рисует тень и скругление окон-попапов. Флаги
+// складываются.
+type PopupShadowMode uint32
+
+const (
+	// PopupShadowNone — никто: кадр ровно по OverlayBounds, рисуется как в
+	// холсте, только без запаса под тень (по умолчанию, прежнее поведение).
+	PopupShadowNone PopupShadowMode = 0
+	// PopupShadowEngine — движок: кадр берёт запас под тень (Pad), тень и
+	// сглаженные углы рисуются в него. Окно хоста показывает альфу точек.
+	PopupShadowEngine PopupShadowMode = 1 << 0
+	// PopupShadowSystem — окно ОС: скруглённые оверлеи, назвавшие свои
+	// части, отдаются по частям (System, Corner) без тени и с прямыми
+	// углами — тень и скругление даёт ОС (DWM Windows 11). Остальным
+	// (прямоугольным: ОС тени им не даёт) — по флагу PopupShadowEngine,
+	// если он тоже взведён, иначе как PopupShadowNone.
+	PopupShadowSystem PopupShadowMode = 1 << 1
+)
+
+// SetPopupShadowMode задаёт, кто рисует тень и скругление окон-попапов
+// (PopupShadowMode). Хост объявляет, что умеют его окна: альфу точек —
+// PopupShadowEngine, тень и скругление ОС — PopupShadowSystem.
+func (m *Manager) SetPopupShadowMode(mode PopupShadowMode) {
+	if PopupShadowMode(m.popupShadow.Swap(uint32(mode))) == mode {
 		return
 	}
-	// Картинки кэша сняты с прежним запасом — следующий кадр перерисует их.
+	// Картинки кэша сняты в прежнем режиме — следующий кадр перерисует их.
 	m.popupMu.Lock()
 	for _, ent := range m.popupCache {
 		ent.img = nil
@@ -59,8 +84,10 @@ func (m *Manager) SetPopupShadow(on bool) {
 	m.popupMu.Unlock()
 }
 
-// PopupShadow сообщает, объявил ли хост попапов альфу точек.
-func (m *Manager) PopupShadow() bool { return m.popupShadow.Load() }
+// PopupShadowMode — режим, заданный SetPopupShadowMode.
+func (m *Manager) PopupShadowMode() PopupShadowMode {
+	return PopupShadowMode(m.popupShadow.Load())
+}
 
 // popupPad — запас под тень вокруг оверлея od (логические точки): его
 // собственный (widget.OverlayMarginer) или запас под тень меню темы — тот
@@ -72,13 +99,53 @@ func popupPad(od widget.OverlayDrawer) int {
 	return widget.DefaultOverlayMargin()
 }
 
-// padRect — место попапа в кадре: границы оверлея с запасом под тень.
-func padRect(it PopupItem, shadow bool) (image.Rectangle, int) {
-	if !shadow {
-		return it.Rect, 0
+// popupPart — то, что становится одним окном-попапом: оверлей целиком или
+// одна его часть (уровень каскадного меню в режиме PopupShadowSystem).
+type popupPart struct {
+	id     uintptr         // ключ окна: ID оверлея, у частей после первой — ID+номер
+	owner  uintptr         // ID оверлея (по нему ищется владелец в дереве)
+	item   PopupItem       // оверлей; item.Rect — тело этой части (экранное)
+	rect   image.Rectangle // место кадра: тело с запасом pad
+	pad    int
+	corner int
+	system bool
+}
+
+// maxPopupParts — частей у одного оверлея не больше: ключи частей — ID+номер,
+// и номер должен оставаться внутри выравнивания структуры виджета (8 байт),
+// чтобы ключ не совпал с указателем на другой виджет.
+const maxPopupParts = 8
+
+// popupPartsOf раскладывает оверлей на окна по режиму mode.
+func popupPartsOf(out []popupPart, it PopupItem, mode PopupShadowMode) []popupPart {
+	if mode&PopupShadowSystem != 0 {
+		if pp, ok := it.OD.(widget.OverlayPartsProvider); ok {
+			parts := pp.OverlayParts()
+			sys := len(parts) > 0 && len(parts) <= maxPopupParts
+			for _, p := range parts {
+				if p.Corner <= 0 || p.Rect.Empty() {
+					sys = false // прямоугольному телу ОС тени не даёт
+				}
+			}
+			if sys {
+				// Части — в координатах оверлея (как OverlayBounds), окну
+				// нужны экранные: тот же сдвиг, что у границ оверлея.
+				for i, p := range parts {
+					sub := it
+					sub.Rect = p.Rect.Sub(it.Off)
+					out = append(out, popupPart{id: it.ID + uintptr(i), owner: it.ID,
+						item: sub, rect: sub.Rect, corner: p.Corner, system: true})
+				}
+				return out
+			}
+		}
 	}
-	pad := popupPad(it.OD)
-	return it.Rect.Inset(-pad), pad
+	part := popupPart{id: it.ID, owner: it.ID, item: it, rect: it.Rect}
+	if mode&PopupShadowEngine != 0 {
+		part.pad = popupPad(it.OD)
+		part.rect = it.Rect.Inset(-part.pad)
+	}
+	return append(out, part)
 }
 
 // PopupTransition — шаг перехода окна-попапа.
@@ -116,6 +183,9 @@ type popupSig struct {
 	off     image.Point
 	closing bool
 	trans   bool
+	// Оформление окна: за ОС ли, радиус углов.
+	system bool
+	corner int
 }
 
 // PopupItem — найденный в дереве хостируемый оверлей (до рендера).
@@ -137,7 +207,12 @@ type popupEntry struct {
 	img  *image.RGBA
 	hash uint64
 	seen uint64
-	pad  int // запас под тень, логические точки (PopupFrame.Pad)
+	// Оформление окна (PopupFrame): запас под тень, радиус углов, тень и
+	// скругление за ОС. owner — ID оверлея, частью которого окно является.
+	pad    int
+	corner int
+	system bool
+	owner  uintptr
 
 	// Переход (popuptrans.go): trans — идёт, closing — оверлей уже закрыт,
 	// slide — сдвиг при доле 0 (логический). Доля и признак конца пишет тик.
@@ -208,25 +283,38 @@ func (m *Manager) RenderPopups(canvas *raster.Canvas, root widget.Widget, modals
 	m.popupGen++
 	gen := m.popupGen
 	tr := m.popupTransSpec(canvas)
-	shadow := m.popupShadow.Load()
+	// Окна попапов: оверлей целиком или по частям, с запасом под тень или
+	// без — по режиму оформления (SetPopupShadowMode).
+	mode := m.PopupShadowMode()
+	parts := m.popupPartsBu[:0]
 	for _, it := range items {
-		// Запас под тень: окно-попап берёт его вокруг тела оверлея, и тень
-		// со сглаженными углами рисуется в кадр, как в холсте.
-		rect, pad := padRect(it, shadow)
-		ent := m.popupCache[it.ID]
+		parts = popupPartsOf(parts, it, mode)
+	}
+	m.popupPartsBu = parts
+	for _, pt := range parts {
+		it := pt.item
+		ent := m.popupCache[pt.id]
 		fresh := ent == nil
 		if fresh {
 			ent = &popupEntry{}
-			m.popupCache[it.ID] = ent
+			m.popupCache[pt.id] = ent
 		}
 		ent.seen = gen
-		if ent.img == nil || ent.rect != rect || dirtyAll || canvas.PhysRect(rect).Overlaps(damage) {
-			oc := m.popupArena.CanvasFor(canvas, rect)
-			ent.img = RenderOverlayShifted(oc, it.OD, rect, it.Off)
+		if ent.img == nil || ent.rect != pt.rect || ent.system != pt.system || ent.corner != pt.corner ||
+			dirtyAll || canvas.PhysRect(pt.rect).Overlaps(damage) {
+			oc := m.popupArena.CanvasFor(canvas, pt.rect)
+			if pt.system {
+				// Тень и скругление даст окно ОС: кадр без тени, углы тела
+				// прямые — иначе за скруглением ОС проступили бы точки,
+				// которые окно без альфы показало бы чёрными.
+				ent.img = RenderOverlayFlat(oc, it.OD, pt.rect, it.Off)
+			} else {
+				ent.img = RenderOverlayShifted(oc, it.OD, pt.rect, it.Off)
+			}
 			ent.hash = hashRGBA(ent.img)
-			ent.rect = rect
+			ent.rect = pt.rect
 		}
-		ent.pad = pad
+		ent.pad, ent.corner, ent.system, ent.owner = pt.pad, pt.corner, pt.system, pt.owner
 		// Панель, анимирующая себя сама (desktop.Flyout), перехода движка не
 		// получает ни при появлении, ни при исчезновении.
 		ent.self = isSelfAnimated(it.OD)
@@ -235,7 +323,7 @@ func (m *Manager) RenderPopups(canvas *raster.Canvas, root widget.Widget, modals
 			itr = popupTrans{}
 		}
 		m.popupOpenStep(ent, it, fresh, itr)
-		sig = append(sig, ent.sig(it.ID))
+		sig = append(sig, ent.sig(pt.id))
 	}
 	// Закрытые оверлеи: исчезают переходом, пока он идёт, — с последней
 	// картинкой и на прежнем месте; без перехода уходят сразу. Переходом —
@@ -253,7 +341,7 @@ func (m *Manager) RenderPopups(canvas *raster.Canvas, root widget.Widget, modals
 			if owners == nil {
 				owners = m.popupOwners(root, modals)
 			}
-			if !owners[id] {
+			if !owners[ent.owner] {
 				ent.stopTrans()
 				delete(m.popupCache, id)
 				continue
@@ -281,16 +369,16 @@ func (m *Manager) RenderPopups(canvas *raster.Canvas, root widget.Widget, modals
 	// Арена живёт, пока есть открытые попапы (исчезающим она не нужна: у них
 	// готовая картинка), и держит размер самого большого из них — закрытое
 	// большое меню не оставляет её раздутой.
-	m.popupArena.trim(items, shadow)
+	m.popupArena.trim(parts)
 	m.popupBytes.Store(uint64(m.popupBytesLocked()))
 
 	changed := !samePopupSig(m.lastPopupSig, sig)
 	var frames []PopupFrame
 	if changed {
 		m.lastPopupSig = append([]popupSig(nil), sig...)
-		frames = make([]PopupFrame, 0, len(items)+len(closing))
-		for _, it := range items {
-			frames = append(frames, m.popupCache[it.ID].frame(it.ID))
+		frames = make([]PopupFrame, 0, len(parts)+len(closing))
+		for _, pt := range parts {
+			frames = append(frames, m.popupCache[pt.id].frame(pt.id))
 		}
 		for _, id := range closing {
 			frames = append(frames, m.popupCache[id].frame(id))
@@ -341,14 +429,13 @@ func (a *Arena) Release() { *a = Arena{} }
 // нужного самому большому из них: следующий рендер заведёт её по размеру.
 // Пока открыты попапы разного размера, буфер равен большему и не
 // перевыделяется от кадра к кадру.
-func (a *Arena) trim(items []PopupItem, shadow bool) {
+func (a *Arena) trim(parts []popupPart) {
 	if a.c == nil {
 		return
 	}
 	need := 0
-	for _, it := range items {
-		r, _ := padRect(it, shadow)
-		need = max(need, a.c.ScratchBytes(r.Dx(), r.Dy()))
+	for _, pt := range parts {
+		need = max(need, a.c.ScratchBytes(pt.rect.Dx(), pt.rect.Dy()))
 	}
 	if need == 0 || cap(a.c.Back().Pix) > need {
 		a.Release()
@@ -434,7 +521,18 @@ func RenderOverlayInto(oc *raster.Canvas, od widget.OverlayDrawer, r image.Recta
 // рисуется в координатах своего виджета, поэтому сперва сдвиг кадра, потом
 // сдвиг на начало попапа.
 func RenderOverlayShifted(oc *raster.Canvas, od widget.OverlayDrawer, r image.Rectangle, off image.Point) *image.RGBA {
-	tc := &Translating{Inner: oc, DX: r.Min.X, DY: r.Min.Y}
+	return renderOverlay(oc, od, &Translating{Inner: oc, DX: r.Min.X, DY: r.Min.Y}, off)
+}
+
+// RenderOverlayFlat — RenderOverlayShifted для окна, которому тень и
+// скругление даёт ОС (PopupShadowSystem): тени оверлей не рисует, а его
+// скруглённые фигуры, накрывающие угол кадра, рисуются с прямыми углами
+// (Translating.Flat).
+func RenderOverlayFlat(oc *raster.Canvas, od widget.OverlayDrawer, r image.Rectangle, off image.Point) *image.RGBA {
+	return renderOverlay(oc, od, &Translating{Inner: oc, DX: r.Min.X, DY: r.Min.Y, Flat: true, Frame: r}, off)
+}
+
+func renderOverlay(oc *raster.Canvas, od widget.OverlayDrawer, tc *Translating, off image.Point) *image.RGBA {
 	if w, ok := od.(widget.Widget); ok {
 		widget.DrawOverlayTraced(w, od, widget.OffsetContext(tc, off.X, off.Y))
 	} else {

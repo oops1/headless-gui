@@ -132,19 +132,34 @@ func (e *Engine) PopupFade() bool {
 	return e.ov.PopupFade()
 }
 
-// SetPopupShadow сообщает, что окна хоста попапов показывают альфу точек
-// кадра (окно ОС смешивает её с тем, что под ним, или выкраивает себя по
-// сплошным точкам). Тогда кадр каждого попапа берёт запас под тень вокруг
-// тела оверлея (PopupFrame.Pad), и тень меню со сглаженными скруглёнными
-// углами рисует сам движок — так же, как в холсте. Хосты пакета window
-// объявляют это сами. По умолчанию — нет: кадр ровно по границам оверлея.
-func (e *Engine) SetPopupShadow(on bool) {
-	e.ov.SetPopupShadow(on)
+// PopupShadowMode — кто рисует тень и скругление окон-попапов (флаги).
+type PopupShadowMode = overlay.PopupShadowMode
+
+const (
+	// PopupShadowNone — никто: кадр ровно по OverlayBounds (по умолчанию).
+	PopupShadowNone = overlay.PopupShadowNone
+	// PopupShadowEngine — движок: кадр с запасом под тень (PopupFrame.Pad),
+	// тень и сглаженные углы рисуются в него; окно показывает альфу точек.
+	PopupShadowEngine = overlay.PopupShadowEngine
+	// PopupShadowSystem — окно ОС: скруглённый оверлей, назвавший свои части
+	// (widget.OverlayPartsProvider), отдаётся по частям без тени и с прямыми
+	// углами (PopupFrame.System, Corner) — скругляет и оттеняет их ОС.
+	// Прямоугольным — по флагу PopupShadowEngine, если он взведён.
+	PopupShadowSystem = overlay.PopupShadowSystem
+)
+
+// SetPopupShadowMode задаёт, кто рисует тень и скругление окон-попапов:
+// хост объявляет, что умеют его окна. Хосты пакета window объявляют это
+// сами: Windows 11 с тенями DWM — PopupShadowSystem|PopupShadowEngine,
+// остальные — PopupShadowEngine (window.Window.SetShadowSource меняет выбор).
+// По умолчанию — PopupShadowNone: кадр ровно по границам оверлея.
+func (e *Engine) SetPopupShadowMode(mode PopupShadowMode) {
+	e.ov.SetPopupShadowMode(mode)
 }
 
-// PopupShadow сообщает, объявил ли хост попапов альфу точек.
-func (e *Engine) PopupShadow() bool {
-	return e.ov.PopupShadow()
+// PopupShadowMode — режим, заданный SetPopupShadowMode.
+func (e *Engine) PopupShadowMode() PopupShadowMode {
+	return e.ov.PopupShadowMode()
 }
 
 // SetPopupSink регистрирует хост popup-оверлеев. sink вызывается из рендер-цикла

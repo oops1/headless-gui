@@ -252,6 +252,11 @@ func (h *dialogHost) create(hm *hostedModal) {
 	nw.SetMinSize(minW, minH)
 	if dlg.CornerRadius > 0 {
 		nw.SetCornerRadius(int(float64(dlg.CornerRadius)*scale + 0.5))
+	}
+	// Тень окна диалога — как у родителя: DWM или своя (shadow.go). До
+	// сверки углов: своя тень снимает скругление DWM.
+	applyShadowSource(nw, shadowSourceOf(h.parent), scale, true)
+	if dlg.CornerRadius > 0 {
 		// ОС с прямыми углами окна (Windows 10, X11) — корпус диалога тоже
 		// прямой, иначе в углах окна виден фон за скруглением.
 		if cr, ok := nw.(cornerRounder); ok && !cr.RoundsCorners() {
@@ -370,7 +375,7 @@ func (h *dialogHost) create(hm *hostedModal) {
 			ph := newPopupHost(nw, inv, eng, scale, &surf.in)
 			eng.SetPopupSink(ph.apply)
 			eng.SetPopupFade(true)
-			eng.SetPopupShadow(true)
+			declarePopupShadow(eng, shadowSourceOf(h.parent), nw)
 			surf.setPopupCursor(ph.syncCursorOverride)
 			h.mu.Lock()
 			hm.popupHost = ph

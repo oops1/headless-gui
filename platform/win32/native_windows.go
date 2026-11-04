@@ -402,6 +402,21 @@ type Win32Window struct {
 	// (тень, скруглённые углы) смешивается с тем, что под окном
 	// (popupulw_windows.go).
 	ulw popupULW
+	// isPopup — окно создано CreatePopup. popupSysCorner — попапу тень и
+	// скругление даёт DWM (SetPopupSystem), логический радиус; 0 — тень
+	// рисует движок, окно выводится с альфой точек.
+	isPopup        bool
+	popupSysCorner int
+
+	// Тень окна (shadowwnd_windows.go): shadowSrc — источник (ShadowSource
+	// window/core), shadowSpec — вид своей тени, shadow — окно-тень (только
+	// поток окна), ncOff — неклиентскую отрисовку DWM сняли ради своей тени.
+	shadowSrc     atomic.Int32
+	shadowMu      sync.Mutex
+	shadowSpec    engineShadowSpec
+	shadowSpecSet bool
+	shadow        *shadowWindow
+	ncOff         bool
 
 	mu         sync.Mutex
 	frameBuf   []byte // BGRA пиксели для StretchDIBits (top-down: строка 0 — верхняя)
@@ -684,15 +699,40 @@ func (w *Win32Window) enableFileDrop() {
 // точек (popupulw_windows.go): тень меню и сглаженные скруглённые углы,
 // которые рисует движок, смешиваются с тем, что под окном. Прозрачность
 // целиком на переходах — в том же вызове. До первого кадра окно невидимо.
+//
+// Попап, которому тень и скругление даёт DWM (SetPopupSystem, Windows 11),
+// выводится по-старому — StretchDIBits, прозрачность окна целиком
+// SetLayeredWindowAttributes, — а углы и тень ему ставит
+// DWMWA_WINDOW_CORNER_PREFERENCE: DWM оттеняет только скруглённый попап.
 func (w *Win32Window) CreatePopup(width, height int) error {
 	w.noQuit = true
-	w.ulw.on.Store(true)
-	w.ulw.mu.Lock()
-	w.ulw.alpha = w.layeredAlphaByte()
-	w.ulw.mu.Unlock()
+	w.isPopup = true
+	if w.popupSysCorner == 0 {
+		w.ulw.on.Store(true)
+		w.ulw.mu.Lock()
+		w.ulw.alpha = w.layeredAlphaByte()
+		w.ulw.mu.Unlock()
+	}
 	style := uint32(wsPopup)
 	exStyle := uint32(wsExNoactivate | wsExToolwindow | wsExTopmost | wsExLayered)
-	return w.createInternal("", width, height, style, exStyle, swShowNoActivate, false)
+	if err := w.createInternal("", width, height, style, exStyle, swShowNoActivate, false); err != nil {
+		return err
+	}
+	w.applyCorners()
+	return nil
+}
+
+// SetPopupSystem — кто оформляет окно-попап (window/core): corner > 0 —
+// тень и скругление радиусом corner (логические точки) даёт DWM, 0 — окно
+// с альфой точек, тень рисует движок. Зовётся до CreatePopup.
+func (w *Win32Window) SetPopupSystem(corner int) {
+	w.popupSysCorner = max(corner, 0)
+}
+
+// SystemPopupShadow — даёт ли ОС тень и скругление скруглённым попапам:
+// Windows 11 (DWMWA_WINDOW_CORNER_PREFERENCE) с включёнными тенями DWM.
+func (w *Win32Window) SystemPopupShadow() bool {
+	return Caps.RoundCorners && dwmShadowsOn()
 }
 
 // SetPopupAlpha задаёт прозрачность окна-попапа целиком (0…1); реализует
@@ -1287,7 +1327,37 @@ const (
 	dwmwaWindowCornerPreference = 33 // DWMWA_WINDOW_CORNER_PREFERENCE
 	dwmwcpDoNotRound            = 1  // DWMWCP_DONOTROUND
 	dwmwcpRound                 = 2  // DWMWCP_ROUND (мягкие углы + тень)
+	dwmwcpRoundSmall            = 3  // DWMWCP_ROUNDSMALL (малый радиус + тень)
 )
+
+// setDwmCornerPref ставит предпочтение формы углов DWM как есть.
+func (w *Win32Window) setDwmCornerPref(pref int32) bool {
+	if w.hwnd == 0 {
+		return false
+	}
+	ret, _, _ := procDwmSetWindowAttribute.Call(
+		uintptr(w.hwnd), uintptr(dwmwaWindowCornerPreference),
+		uintptr(unsafe.Pointer(&pref)), unsafe.Sizeof(pref))
+	return ret == 0
+}
+
+// setNCRendering включает или снимает неклиентскую отрисовку DWM (тень,
+// скругление, рамку) ради своей тени окна. Окно без рамки (Borderless)
+// ведёт applyBorderless.
+func (w *Win32Window) setNCRendering(on bool) {
+	if w.style.borderless.Load() || w.ncOff == !on {
+		return
+	}
+	policy := int32(dwmncrpUseWindowStyle)
+	if !on {
+		policy = dwmncrpDisabled
+		var m dwmMargins
+		procDwmExtendFrameIntoClientArea.Call(uintptr(w.hwnd), uintptr(unsafe.Pointer(&m)))
+	}
+	procDwmSetWindowAttribute.Call(uintptr(w.hwnd), dwmwaNcrenderingPolicy,
+		uintptr(unsafe.Pointer(&policy)), unsafe.Sizeof(policy))
+	w.ncOff = !on
+}
 
 // setDwmCorner просит DWM скруглить/не скруглять углы (Win11). Возвращает true,
 // если вызов успешен (S_OK) — значит ОС поддерживает атрибут и применила его.
@@ -1321,6 +1391,30 @@ func (w *Win32Window) applyCorners() {
 	if w.hwnd == 0 {
 		return
 	}
+	if w.isPopup {
+		// Попап: углы и тень DWM — только у оформляемого ОС; выкройку окна
+		// попапа ведёт его вывод (popuprgn_windows.go), здесь её не трогаем.
+		switch {
+		case w.popupSysCorner >= 6:
+			w.setDwmCornerPref(dwmwcpRound)
+		case w.popupSysCorner > 0:
+			w.setDwmCornerPref(dwmwcpRoundSmall)
+		default:
+			w.setDwmCorner(false)
+		}
+		return
+	}
+	// Своя тень вместо тени DWM (ShadowEngine): неклиентская отрисовка DWM
+	// снята — ни тени, ни скругления; углы прямые, тень — окно-тень.
+	if w.engineShadowOnly() {
+		w.setNCRendering(false)
+		w.setDwmCorner(false)
+		procSetWindowRgn.Call(uintptr(w.hwnd), 0, 1)
+		w.updateShadowWnd()
+		return
+	}
+	w.setNCRendering(true)
+	defer w.updateShadowWnd() // своя тень, если DWM её не даёт
 	if w.cornerRadius <= 0 || w.maximized || w.fs.on.Load() || w.style.borderless.Load() {
 		// Прямые углы (или развёрнутое окно, или Style.Borderless — тени у
 		// него нет, applyBorderless): DWM → не скруглять, регион снять.
@@ -1353,7 +1447,7 @@ type dwmMargins struct{ Left, Right, Top, Bottom int32 }
 // у окна с прямыми углами и у Style.Borderless — нет: корпус тогда рисуется
 // прямоугольным.
 func (w *Win32Window) RoundsCorners() bool {
-	if w.style.borderless.Load() {
+	if w.style.borderless.Load() || w.engineShadowOnly() {
 		return false
 	}
 	if w.hwnd == 0 {
@@ -1518,7 +1612,8 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		w.frameDead = true
 		w.freeFrameBuf() // память VirtualAlloc сборщик мусора не вернёт
 		w.mu.Unlock()
-		w.ulwRelease() // DIB-секция попапа (popupulw_windows.go)
+		w.ulwRelease()       // DIB-секция попапа (popupulw_windows.go)
+		w.destroyShadowWnd() // окно-тень (shadowwnd_windows.go)
 		// Вторичные окна модалок (noQuit) не завершают цикл сообщений — иначе
 		// закрытие диалога уронило бы всё приложение. Главное окно — завершает.
 		if !w.noQuit {
@@ -1634,6 +1729,12 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		if monitorsChangedBySetting(wparam) {
 			w.noteMonitorsChanged() // SPI_SETWORKAREA: сдвинули панель задач
 		}
+		if wparam == spiSetDropShadow {
+			w.applyCorners() // тени окон включили или выключили: DWM или своя
+		}
+
+	case wmDwmCompositionChgd:
+		w.applyCorners() // композиция DWM сменилась: DWM или своя тень
 
 	case wmDpichanged:
 		w.noteMonitorsChanged() // масштаб монитора мог измениться
@@ -1759,6 +1860,10 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		// прямоугольник ему не годится.
 		if w.fs.on.Load() && !w.fs.refitting {
 			w.refitFullscreen()
+		}
+		// Своя тень следует за окном: место, размер, порядок, показ.
+		if !w.isPopup {
+			w.updateShadowWnd()
 		}
 
 	case wmGetminmaxinfo:
