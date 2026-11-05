@@ -180,7 +180,7 @@ func (ent *popupEntry) transition() *PopupTransition {
 
 // sig — сигнатура попапа с шагом перехода.
 func (ent *popupEntry) sig(id uintptr) popupSig {
-	s := popupSig{id: id, rect: ent.rect, hash: ent.hash}
+	s := popupSig{id: id, rect: ent.rect, hash: ent.hash, system: ent.system, corner: ent.corner}
 	if t := ent.transition(); t != nil {
 		s.trans, s.closing, s.off = true, t.Closing, t.Offset
 		s.op = int(math.Round(t.Opacity * 1000))
@@ -190,7 +190,8 @@ func (ent *popupEntry) sig(id uintptr) popupSig {
 
 // frame — кадр попапа для хоста.
 func (ent *popupEntry) frame(id uintptr) PopupFrame {
-	return PopupFrame{ID: id, Rect: ent.rect, Img: ent.img, Transition: ent.transition()}
+	return PopupFrame{ID: id, Rect: ent.rect, Img: ent.img, Transition: ent.transition(),
+		Pad: ent.pad, System: ent.system, Corner: ent.corner}
 }
 
 // isSelfAnimated — анимирует ли оверлей себя сам.

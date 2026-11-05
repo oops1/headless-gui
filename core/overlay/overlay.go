@@ -93,6 +93,10 @@ type Manager struct {
 	popupFade      atomic.Bool
 	popupTicked    atomic.Bool
 	popupClosingBu []uintptr
+	popupPartsBu   []popupPart
+	// popupShadow — кто рисует тень и скругление окон-попапов
+	// (SetPopupShadowMode, PopupShadowMode).
+	popupShadow atomic.Uint32
 
 	// ── Tooltip ─────────────────────────────────────────────────────────────
 	ttMu       sync.Mutex

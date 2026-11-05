@@ -681,6 +681,13 @@ func (t *RichText) OverlayBounds() image.Rectangle {
 	return t.menu.OverlayBounds()
 }
 
+// OverlayParts отдаёт уровни открытого меню (widget.OverlayPartsProvider).
+func (t *RichText) OverlayParts() []base.OverlayPart {
+	t.menuMu.Lock()
+	defer t.menuMu.Unlock()
+	return t.menu.OverlayParts()
+}
+
 // Dismiss закрывает меню. Реализует Dismissable.
 func (t *RichText) Dismiss() {
 	t.menuMu.Lock()

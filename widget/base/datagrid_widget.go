@@ -172,6 +172,9 @@ func (w *DataGridWidget) DrawOverlay(ctx DrawContext) { w.rowMenu.DrawOverlay(ct
 // OverlayBounds отдаёт прямоугольник открытого меню (для выноса в окно ОС).
 func (w *DataGridWidget) OverlayBounds() image.Rectangle { return w.rowMenu.OverlayBounds() }
 
+// OverlayParts отдаёт уровни открытого меню (widget.OverlayPartsProvider).
+func (w *DataGridWidget) OverlayParts() []OverlayPart { return w.rowMenu.OverlayParts() }
+
 // Dismiss закрывает контекстное меню строки. Реализует Dismissable.
 func (w *DataGridWidget) Dismiss() { w.rowMenu.Dismiss() }
 

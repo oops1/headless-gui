@@ -987,6 +987,20 @@ type OverlayBoundsProvider = base.OverlayBoundsProvider
 // срез — оверлей закрыт. Вызывать можно из любой горутины.
 type OverlayRectsProvider = base.OverlayRectsProvider
 
+// OverlayPart — самостоятельная часть оверлея: тело (без тени, координаты
+// те же, что у OverlayBounds) и радиус скругления его углов (0 — прямые).
+type OverlayPart = base.OverlayPart
+
+// OverlayPartsProvider — оверлей, который умеет назвать свои части: у меню
+// — каждый открытый уровень каскада, у остальных — одна часть.
+//
+// Нужен движку для окон-попапов, которым тень и скругление даёт ОС (DWM
+// Windows 11, engine.PopupShadowSystem): каждая часть получает своё окно,
+// иначе ОС оттенила бы охватывающий прямоугольник с пустым местом между
+// меню и подменю. Без интерфейса (или с прямыми углами) тень оверлея рисует
+// движок. Пустой срез — оверлей закрыт. Вызывать можно из любой горутины.
+type OverlayPartsProvider = base.OverlayPartsProvider
+
 // BackdropDrawer — см. draw.BackdropDrawer (core/draw); алиас: тот же тип.
 type BackdropDrawer = base.BackdropDrawer
 

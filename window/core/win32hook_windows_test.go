@@ -16,16 +16,15 @@ import (
 )
 
 var (
-	testUser32                     = windows.NewLazySystemDLL("user32.dll")
-	testGdi32                      = windows.NewLazySystemDLL("gdi32.dll")
-	procTestDestroyWindow          = testUser32.NewProc("DestroyWindow")
-	procTestPeekMessageW           = testUser32.NewProc("PeekMessageW")
-	procTestDispatchMessageW       = testUser32.NewProc("DispatchMessageW")
-	procTestGetWindowLongPtrW      = testUser32.NewProc("GetWindowLongPtrW")
-	procGetLayeredWindowAttributes = testUser32.NewProc("GetLayeredWindowAttributes")
-	procScreenGetDC                = testUser32.NewProc("GetDC")
-	procScreenReleaseDC            = testUser32.NewProc("ReleaseDC")
-	procScreenGetPixel             = testGdi32.NewProc("GetPixel")
+	testUser32                = windows.NewLazySystemDLL("user32.dll")
+	testGdi32                 = windows.NewLazySystemDLL("gdi32.dll")
+	procTestDestroyWindow     = testUser32.NewProc("DestroyWindow")
+	procTestPeekMessageW      = testUser32.NewProc("PeekMessageW")
+	procTestDispatchMessageW  = testUser32.NewProc("DispatchMessageW")
+	procTestGetWindowLongPtrW = testUser32.NewProc("GetWindowLongPtrW")
+	procScreenGetDC           = testUser32.NewProc("GetDC")
+	procScreenReleaseDC       = testUser32.NewProc("ReleaseDC")
+	procScreenGetPixel        = testGdi32.NewProc("GetPixel")
 )
 
 // Коды Win32, нужные тестам ядра.

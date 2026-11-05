@@ -265,6 +265,9 @@ func (p *DockPane) DrawOverlay(ctx base.DrawContext) { p.menu.DrawOverlay(ctx) }
 // OverlayBounds отдаёт прямоугольник открытого меню (для выноса в окно ОС).
 func (p *DockPane) OverlayBounds() image.Rectangle { return p.menu.OverlayBounds() }
 
+// OverlayParts отдаёт уровни открытого меню (widget.OverlayPartsProvider).
+func (p *DockPane) OverlayParts() []base.OverlayPart { return p.menu.OverlayParts() }
+
 // ToolTipAt — подсказка кнопки приложения под точкой.
 func (p *DockPane) ToolTipAt(x, y int) string {
 	if i := p.titleButtonAt(image.Pt(x, y)); i >= 0 {
