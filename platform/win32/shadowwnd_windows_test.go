@@ -52,6 +52,12 @@ func TestWin32OwnShadow_Engine(t *testing.T) {
 	w := newFsWindow(t)
 	w.SetPosition(200, 160)
 	w.SetCornerRadius(8)
+	// Потемнение сверяется по живому экрану, а окно теста — окно фонового
+	// процесса: оно может оказаться под чужим окном (редактор, терминал, окно
+	// на машине CI), и тогда под ним читается чужой пиксель. Поднимаем его
+	// поверх всех — окно-тень идёт следом (shadowwnd_windows.go); если Windows
+	// не дала, пиксели не сверяются, остальное проверяется как прежде.
+	onTop := w.SetAlwaysOnTop(true)
 	shadowPump()
 	wr := w.windowRect()
 	below, ok := shadowScreenPixel(wr.Min.X+wr.Dx()/2, wr.Max.Y+8)
@@ -72,9 +78,27 @@ func TestWin32OwnShadow_Engine(t *testing.T) {
 	if want := wr.Inset(-m); sr != want {
 		t.Errorf("окно-тень %v, ждали %v", sr, want)
 	}
-	c, _ := shadowScreenPixel(wr.Min.X+wr.Dx()/2, wr.Max.Y+8)
-	if lum(c) >= lum(below) {
-		t.Errorf("под окном не темнее: %06x, было %06x", c, below)
+	// Тень на экран кладёт компоновщик ОС — не в тот же миг, что показано
+	// окно-тень: на занятой машине кадр с ней приходит позже. Ждём его, а не
+	// читаем один раз. На чёрном экране темнее стать нечему.
+	switch {
+	case !onTop:
+		t.Log("окно теста не поднялось поверх остальных: потемнение экрана не сверяется")
+	case lum(below) < 8:
+		t.Logf("экран под окном чёрный (%06x): потемнение не сверяется", below)
+	default:
+		var c uint32
+		darker := false
+		for try := 0; try < 5 && !darker; try++ {
+			if try > 0 {
+				shadowPump()
+			}
+			c, _ = shadowScreenPixel(wr.Min.X+wr.Dx()/2, wr.Max.Y+8)
+			darker = lum(c) < lum(below)
+		}
+		if !darker {
+			t.Errorf("под окном не темнее: %06x, было %06x", c, below)
+		}
 	}
 	// Развёрнутое окно тени не имеет; восстановленное — снова имеет.
 	w.Maximize()
