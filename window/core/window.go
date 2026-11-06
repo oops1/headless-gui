@@ -192,6 +192,9 @@ func (win *Window) installPopupHost() {
 		if pf, ok := win.eng.(interface{ SetPopupFade(bool) }); ok {
 			pf.SetPopupFade(true)
 		}
+		// Буфер xdg_popup — ARGB: тень и скруглённые углы компоновщик
+		// смешивает сам, кадр берёт запас под тень.
+		declarePopupShadow(win.eng, win.ShadowSource(), win.native)
 		win.setPopupCursor(win.childPopups.syncCursorOverride)
 		return
 	}
@@ -210,6 +213,7 @@ func (win *Window) installPopupHost() {
 	if pf, ok := win.eng.(interface{ SetPopupFade(bool) }); ok {
 		pf.SetPopupFade(true)
 	}
+	declarePopupShadow(win.eng, win.ShadowSource(), win.native)
 	win.setPopupCursor(win.popupHost.syncCursorOverride)
 }
 
@@ -402,6 +406,8 @@ type Window struct {
 	maxFPS       int
 	resizable    bool
 	cornerRadius int // скругление углов окна (0 = прямые); применяется после Create
+	// shadowSrc — кто даёт тень окну и попапам (ShadowSource, shadow.go).
+	shadowSrc atomic.Int32
 
 	// hitTest — что лежит под точкой окна (см. SetHitTest): полоса
 	// заголовка, кнопки управления или содержимое.
@@ -841,6 +847,9 @@ func (win *Window) bringUp() error {
 	if win.cornerRadius > 0 {
 		win.native.SetCornerRadius(win.cornerRadius)
 	}
+	// Тень окна: DWM или своя (shadow.go) — до сверки углов: своя тень
+	// снимает скругление DWM.
+	applyShadowSource(win.native, win.ShadowSource(), win.scale, false)
 	win.syncSquareCorners()
 
 	// Подключаем виджет-окно (drag, close, minimize, maximize)

@@ -111,6 +111,22 @@ func OpenFile(path string) error { return core.OpenFile(path) }
 // ErrOpenUnsupported.
 func RevealFile(path string) error { return core.RevealFile(path) }
 
+// ── shadow.go ──
+
+// ShadowSource — кто даёт тень окну и его попапам.
+type ShadowSource = core.ShadowSource
+
+const (
+	// ShadowAuto — ОС (DWM), где она даёт тень; где не даёт — движок.
+	ShadowAuto = core.ShadowAuto
+	// ShadowSystem — только ОС: где она тени не даёт, тени нет. Попапы,
+	// которым ОС тени не даёт (прямоугольные, Windows 10, Linux), — без тени.
+	ShadowSystem = core.ShadowSystem
+	// ShadowEngine — всегда движок: тень DWM у окна снимается (углы окна
+	// тогда прямые), попапы оттеняет и скругляет движок.
+	ShadowEngine = core.ShadowEngine
+)
+
 // ── syslang.go ──
 
 // SystemLanguages возвращает языки интерфейса ОС в порядке предпочтения, в

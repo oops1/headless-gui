@@ -10014,7 +10014,7 @@ exchange with a compositor was **not** run. Verified on the wire against a fake 
 Not verified: wlroots-based compositors, the WinLine compositor, and whether a given
 compositor applies a virtual keyboard's `modifiers` to the whole seat.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): engine statistics and the draw contract check
+## v4.0: engine statistics and the draw contract check
 
 Stage 0 of the 4.0 plan. Additive only: nothing existing changed behaviour. The
 numbers this work is measured against are in `docs/BENCHMARKS.md`.
@@ -10053,7 +10053,7 @@ eng.DrawContractCheck()        // bool
   `child.Draw(ctx)`, and `widget.DrawOverlayTraced` for overlays. Without it the
   path in the message stops at the container. `DrawChildren` does this already.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): failure policy
+## v4.0: failure policy
 
 Decision record: `docs/adr/0001-failure-policy.md`. A panic in widget or consumer code no
 longer kills the process by default; the engine catches it at its own boundary.
@@ -10090,7 +10090,7 @@ widget.ClearAllBroken()                       // tests only
   closed by the engine; state changed before the panic is not rolled back; the OS event
   pump in `window` is not protected until stage 9.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): scene and external surfaces
+## v4.0: scene and external surfaces
 
 Decision record: `docs/adr/0002-scene.md`. The scene is the widget tree itself: a foreign
 window is a `widget.ExternalSurface` node, and its Z order is the child order.
@@ -10163,7 +10163,7 @@ widget.VideoCandidates() int        // surfaces currently tracked (update recent
   `core/scene` package (stage 7). The WinLine session runs on the scene behind a switch. RAIL is
   outside the scene.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): UI scale at a fixed frame size
+## v4.0: UI scale at a fixed frame size
 
 ```go
 eng.SetScaleWithin(k float64)              // keep physical W×H, logical = ⌈W/k⌉×⌈H/k⌉
@@ -10177,7 +10177,7 @@ eng.ScaleWithin() bool                     // the mode is on
 - k ≤ 0 means 1. The canvas is recreated: `SetSurface`/`SetSurfaces` buffers must be set again,
   sized to `PhysicalSize()`.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): engine motion profile
+## v4.0: engine motion profile
 
 ```go
 type MotionProfile = theme.MotionProfile  // MotionFull, MotionReduced, MotionOff, MotionRemote
@@ -10200,7 +10200,7 @@ const RemoteMotionSteps = 3               // states per transition under MotionR
   quantized or finished early. Scroll wheel under `MotionOff`/`MotionRemote` scrolls at once.
 - `window` modal and dock hosts copy the parent engine's profile on creation.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): overlay and popup transitions
+## v4.0: overlay and popup transitions
 
 ```go
 eng.SetOverlayTransitions(on bool)        // off by default; OverlayTransitions()
@@ -10248,7 +10248,7 @@ type PopupTransition struct {
 - **Not implemented yet.** Popup window transitions on Wayland (single popup buffer); a separate
   engine-level transition for submenus; tooltips and modals by the same mechanism.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): package layout and the shared glyph cache
+## v4.0: package layout and the shared glyph cache
 
 Stages 4.1 and 4.2 of the 4.0 plan. Behaviour is unchanged: frames are byte-identical and
 consumer code does not change.
@@ -10302,7 +10302,7 @@ This document covers the essential API for AI code generation with headless-gui.
 - `tests/` directory — unit tests with usage patterns
 - GUIDE.md and GUIDE_EN.md — user documentation
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): command path, tiled raster, hash diff and one frame buffer
+## v4.0: command path, tiled raster, hash diff and one frame buffer
 
 Frames record drawing commands (`core/draw`), rasterise changed 64×64 tiles in a
 worker pool and send only the changed tiles to the consumer. All four parts are
@@ -10357,7 +10357,7 @@ widget.InvalidateRect(r)          // unclaimed area: every widget under it is re
   (`nil` — the whole cache) or `widget.InvalidateImageCache(ctx, img)` from `Draw`.
   A `BlitPixels` buffer is re-read in every frame where it is drawn.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): tree owner, measuring services, popup arena
+## v4.0: tree owner, measuring services, popup arena
 
 Each widget tree belongs to the engine it was handed to (`SetRoot`, and
 `ShowModal` for a modal dialog inside the canvas). A widget change wakes only that
@@ -10394,7 +10394,7 @@ Rules that follow from the design:
   canvas of the engine. `Stats().PopupBytes` is the arena buffers plus the images of
   open and fading popups; zero when no popup is open.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): live tiles of the Start menu
+## v4.0: live tiles of the Start menu
 
 - `desktop.TileSource` (`Subscribe(fn func(TileContent)) (unsubscribe func())`),
   `desktop.TileSourceFunc`, `desktop.LiveTile{Source, Queue, Period}`, the field
@@ -10416,7 +10416,7 @@ Rules that follow from the design:
   draws into a separate picture outside the frame. `Canvas.RenderOffscreen` implements
   it.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): input, frame loop and overlays as packages
+## v4.0: input, frame loop and overlays as packages
 
 Where the engine's parts live now (ADR-0011):
 
@@ -10448,7 +10448,7 @@ Where the engine's parts live now (ADR-0011):
   (`input.DismissOutside`, `input.ContentShift`, `input.OverlayHitRect`, `overlay.WidgetID`,
   `overlay.Translating`, `overlay.CollectPopups`), not through the old file names.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): widget packages
+## v4.0: widget packages
 
 Where widget code lives now (ADR-0012):
 
@@ -10490,7 +10490,7 @@ Where widget code lives now (ADR-0012):
   `*chrome.Window`; facade variables are copies; application types embedding a widget pass
   the capability-interface branches.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): window platform packages
+## v4.0: window platform packages
 
 Where window code lives now (ADR-0013):
 
@@ -10525,7 +10525,7 @@ Where window code lives now (ADR-0013):
   `DISPLAY`/`WAYLAND_DISPLAY` is set, `TestCocoaContract` builds). The capability
   matrix of the backends is in `window/README.md`.
 
-## v4.1 (unreleased, branch `develop`): Save As browses folders (RDP client Tandem)
+## v4.1: Save As browses folders (RDP client Tandem)
 
 - `ShowSaveFile` builds the same browser as `ShowOpenFile` (places, path bar, up/refresh,
   list filtered by the selected filter), Save button, Name + filter row; the overwrite
@@ -10547,7 +10547,7 @@ Where window code lives now (ADR-0013):
 - New strings (EN, RU): `dlg.file.replace.title`, `dlg.file.replace` (`%s` — file name),
   `dlg.file.badpath`.
 
-## v4.1.1 (unreleased, branch `develop`): Save As changes the extension with the filter
+## v4.1.1: Save As changes the extension with the filter
 
 - Changing the filter in Save (`matchNameToFilter` in `widget/dialog/dialog_file_path.go`,
   browser and compact form) swaps the name's extension for the new filter's first one
@@ -10556,3 +10556,108 @@ Where window code lives now (ADR-0013):
   already accepts and the "all files" filter keep the name; case doesn't matter; a path
   in the field is kept. Open keeps the name. The overwrite warning follows the new name.
   No API change.
+
+## v4.2: shadows — DWM where it gives them, the engine otherwise
+
+- `window.Window.SetShadowSource(window.ShadowAuto|ShadowSystem|ShadowEngine)` /
+  `ShadowSource()` (`window/core/shadow.go`): who gives the shadow to the window, its
+  popups, and the dialogs/floating panels it hosts (`shadowSourceOf(h.parent)` in
+  `modal_host.go`/`dock_host.go`). `applyShadowSource` passes the source
+  (`SetShadowSource(int)`) and the look (`SetEngineShadow`, physical, from
+  `widget.WindowShadow`/`DialogShadow` or `defaultWindowShadow`) to the backend, BEFORE
+  `syncSquareCorners` (the engine shadow drops DWM rounding).
+- Popups: `engine.SetPopupShadowMode(mode)` with flags `PopupShadowEngine` (frame with a
+  shadow margin `PopupFrame.Pad`, the engine draws shadow and antialiased corners) and
+  `PopupShadowSystem` (an overlay implementing `widget.OverlayPartsProvider` whose parts
+  are all rounded is split into one frame per part — keys `ID+i`, i < 8 — with
+  `PopupFrame.System`/`Corner`, rendered by `RenderOverlayFlat`: `Translating.Flat` drops
+  soft shadows and squares round shapes covering a frame corner). Square overlays fall
+  back to the Engine flag. `popupShadowMode(src, carrier)`: Auto → System|Engine when
+  `SystemPopupShadow()` (Win32: Windows 11 + `dwmShadowsOn`), else Engine; System → System
+  or None; Engine → Engine. Closing transitions find the owner via `popupEntry.owner`.
+  `OverlayParts` is delegated by MenuBar, MenuButton, ToolBar, TabControl,
+  TreeViewWidget, DataGridWidget, RowMenuHost, DockPane, TextBox, TextInput, RichText.
+- Win32 popups: `SetPopupSystem(corner)` before `CreatePopup` — corner > 0: the old output
+  path (StretchDIBits, `SetLayeredWindowAttributes` fades) plus
+  `DWMWA_WINDOW_CORNER_PREFERENCE` ROUND (corner >= 6) / ROUNDSMALL in `applyCorners`
+  (popups never touch their region there); 0: `UpdateLayeredWindow` per-pixel alpha
+  (`popupulw_windows.go`: frame, position and alpha are recorded and put by one ULW call
+  on the window thread; never `SetLayeredWindowAttributes` on such a window; fallback
+  `ulwFallback` → StretchDIBits + `SolidBands` region). `positionPopup` fits the BODY into
+  the work area (`pad`).
+- Win32 own window shadow (`shadowwnd_windows.go`): `dwmShadowsOn` (composition +
+  `SPI_GETDROPSHADOW`; a var for tests); `wantsOwnShadow`; a layered
+  `WS_EX_TRANSPARENT|TOOLWINDOW|NOACTIVATE` window of class `HeadlessGUI_Shadow`
+  (DefWindowProc) put right below the window (`SetWindowPos(shadow, hwnd)`, topmost
+  mirrored) on `WM_WINDOWPOSCHANGED`, re-evaluated on `WM_SETTINGCHANGE(SPI_SETDROPSHADOW)`
+  and `WM_DWMCOMPOSITIONCHANGED`, destroyed on `WM_DESTROY`. ShadowEngine disables DWM NC
+  rendering (`setNCRendering`, `ncOff`); `RoundsCorners` → false. Picture: `shadowImage`
+  nine-slices a `shadowSample` (raster `DrawShadow`); the interior stays empty.
+- X11 popups with a compositor set a SHAPE input shape (`x11InputShape`).
+- Tests: `engine/popupshadow_test.go`, `window/core/{shadow,popup_pad}_test.go`,
+  `window/core/popup_ulw_windows_test.go` (live: ULW corners and alpha, DWM popup rounding
+  and shadow), `platform/win32/shadowwnd_windows_test.go` (live own shadow, Auto vs DWM,
+  sample vs full), `TestX11Popup_CompositorInputShape`.
+
+## v4.3: scene debts — whole frame, frame-needed call, opaque blit, ring shadow, move reuse
+
+Five items the WinLine scene pilot left with the engine (`ENGINE_ISSUES.md`, "Found by the
+scene pilot"). New public API, no behaviour change for existing programs.
+
+- `Engine.RequestFullFrame()` (`engine/loop.go`): sets `fullNext`; the next frame carries
+  every tile with no comparison. Retained command lists are replayed, widgets' `Draw` is
+  not called for it. External pacing: also requests the frame (`lp.RequestFrame`); ticker
+  pacing: wakes the loop, the frame is drawn even with no UI change. Several calls before
+  a frame give one whole frame.
+- `Engine.SetOnFrameNeeded(fn)` (`core/loop/pacing.go`, `noteFrameNeeded`): under
+  `PacingExternal` the loop's ticker calls `fn` on the engine goroutine (guard
+  "FrameNeeded"), once per frame interval, while the invalidation generation differs from
+  the last drawn frame's (or a whole frame is pending, or `AnimationNeeded`) and no frame
+  is requested. The consumer answers with `RequestFrame`. The external branch of the loop
+  now records `lastGen` before rendering. Never called under ticker pacing; `nil` removes.
+- `ExternalSurface.SetOpaqueRegion` reaches the blit (`widget/base/externalsurface.go`,
+  `drawBuffer`; `surfaceContent.splitFor`, `subtractRect`): for a buffer with
+  `opaque=false` the visible part is split into the declared rectangles (blitted with
+  `opaque=true`, row copy) and the rest (blended). Cached per (region pointer, visible
+  rect) under the surface's content lock. More than `maxOpaqueSplit` (16) rectangles: the
+  whole buffer is blended as before. `OpaqueRegion()` semantics unchanged.
+- Shadow without its middle: `draw.ShadowAroundDrawer{DrawShadowAround(r, corner, blur,
+  offX, offY, col, covered)}` implemented by `raster.Canvas`, `draw.Recorder` (`OpShadow`
+  with `Ext.Rect = covered`; the replayer falls back to `DrawShadow` for a context without
+  it) and `overlay.Translating`. `widget.DrawShadowSpecAround(ctx, r, corner, sp, covered)`
+  and `widget.ShadowCovered(r, corner)` (the band without the corner rows, one row of
+  slack). `core/raster/shadowcache.go`: the template path blits up to four strips of
+  `area` minus the hole (`blitShadowTemplate`); a tile wholly inside the hole costs
+  nothing (not even the template is built). The template is blended straight into back,
+  with no scratch image (`overSliceRow`): corners and ends through `overRow`, the middle of
+  a side — one template pixel repeated — through `overFill`, two pixels a step on 16-bit
+  lanes of a 64-bit word, division by 255 as `(x+1+x>>8)>>8` (`core/raster/overrow.go`;
+  bytes equal to the per-channel loop, `overrow_test.go`). `drawColorGlyph` (emoji, colour
+  glyphs, the direct shadow path) uses `overRow` too. On a fractional scale the hole shrinks by one physical pixel. The direct (small
+  shadow) path ignores the hole. `widget.Window` passes `shadowCovered()` — empty when it
+  has a backdrop material or a translucent `Background`.
+- Move reuse (`engine/movekeep.go`, `hashdiff.go`): `planFrame` no longer forces every
+  selected tile on a frame with moves (`forceAll` is `all` only). A tile touched by an
+  applied move's destination (`raster.Canvas.AppliedMoves()`, physical pairs) is drawn
+  unless `moveKeeps` proves it: the tile lies wholly in the destination and in the visible
+  opaque part of an `ExternalSurface` whose `OpDirect` command is the last one touching the
+  tile (`curTop`), outside the corners of a round clip; the source lay wholly in the
+  surface's visible part of that frame (`surfSeen.area`: clip ∩ buffer place) outside the
+  corners of that frame's round clip, the tiles under it are valid and had the same surface
+  on top (`prevTop`); the surface's `Stamp()` (`Rev`, `Buf`, `Opaque`) is unchanged and its
+  physical origin moved by exactly the move's offset. The round clip may move with the
+  surface or stay put (content scrolled inside a rounded frame). Forced tiles (orphan `InvalidateRect`, blur layer misses),
+  tiles under post-raster layers and surfaces under a context offset are never kept. Kept
+  tiles count in `Stats.TilesSkipped` and `Stats.TilesMoved`; their hash becomes valid.
+  Destination tiles the frame did not select lose their valid hash
+  (`dropMovedUnselected`). `ExternalSurface.Stamp() widget.SurfaceStamp` — `Rev` grows on
+  `Swap`, `Update`/`InvalidateRects`, `SetBGRA`, `SetBackground`, `SetOpaqueRegion`.
+  `Engine.SetMoveReuse(false)` / `MoveReuse()` restore the old behaviour; the picture is
+  the same.
+- Consumer guidance: declare a moved window's place with `SetBounds`/`InvalidateArea`
+  (owned damage); orphan `widget.InvalidateRect` over the window forces its tiles.
+- Tests: `engine/framerequest_test.go`, `engine/externalsurface_opaqueblit_test.go`,
+  `widget/base/externalsurface_split_test.go`, `core/raster/shadowaround_test.go`,
+  `engine/shadowaround_test.go`, `engine/movekeep_test.go` (two engines, reuse on and off,
+  frames compared byte for byte after every step; a random session; consumer buffers; two
+  buffers; round and rectangular clips).

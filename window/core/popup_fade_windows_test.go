@@ -6,9 +6,9 @@ import (
 	"image"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testhook"
 )
 
 // Настоящее окно-попап Win32 на переходе (popup_fade.go): слоистое окно,
@@ -34,16 +34,14 @@ func settleScreen() {
 	}
 }
 
-// layeredAlpha — текущая прозрачность слоистого окна (0…255).
+// layeredAlpha — прозрачность целиком окна-попапа (0…255), положенная
+// UpdateLayeredWindow. GetLayeredWindowAttributes такое окно не читает: оба
+// пути слоистого окна взаимоисключающие.
 func layeredAlpha(t *testing.T, w *Win32Window) int {
 	t.Helper()
-	var key uint32
-	var alpha byte
-	var flags uint32
-	r, _, _ := procGetLayeredWindowAttributes.Call(w.HWND(),
-		uintptr(unsafe.Pointer(&key)), uintptr(unsafe.Pointer(&alpha)), uintptr(unsafe.Pointer(&flags)))
-	if r == 0 {
-		t.Fatal("GetLayeredWindowAttributes не прочитал окно — оно не слоистое?")
+	alpha, shown := testhook.Win32PopupAlpha(w)
+	if !shown {
+		t.Fatal("UpdateLayeredWindow не положил кадр в окно-попап")
 	}
 	return int(alpha)
 }
@@ -107,7 +105,7 @@ func TestWin32PopupFade_Live(t *testing.T) {
 }
 
 // На экране: слоистое окно с прозрачностью 0 попапа не показывает, в покое —
-// показывает его картинку как прежде (StretchDIBits в слоистом окне).
+// показывает его картинку (UpdateLayeredWindow).
 func TestWin32PopupFade_LivePixels(t *testing.T) {
 	carrier := newWin32TestWindow(t)
 	h := newPopupHost(carrier, carrier, &pcEngine{}, 1, nil)

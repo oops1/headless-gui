@@ -37,6 +37,9 @@ func (l *Loop) run() {
 				if !l.takeFrameRequest() {
 					continue
 				}
+				// Поколение снимается ДО рендера: инвалидация во время кадра
+				// останется «нерисованной» и дойдёт до SetOnFrameNeeded.
+				lastGen = l.invGen.Load()
 				frame := l.host.RenderFrame()
 				lastFrameAt = time.Now()
 				if len(frame.Tiles) == 0 && len(frame.Moves) == 0 {
@@ -84,6 +87,9 @@ func (l *Loop) run() {
 			// продвигаем — иначе начатая приложением анимация замерла бы до
 			// следующего запроса и шла бы рывками.
 			if l.pacingIsExternal() {
+				// Интерфейс изменился сам (часы, наведение, шаг анимации), а
+				// потребитель об этом не знает: ему говорят, что кадр нужен.
+				l.noteFrameNeeded(lastGen, interval)
 				continue
 			}
 			if l.onDemand.Load() {

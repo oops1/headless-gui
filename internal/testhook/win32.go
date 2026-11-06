@@ -16,6 +16,11 @@ var Win32NewWindow func(title string, width, height int) (nw any, err error)
 // Win32SetNoQuit — закрытие окна nw не завершает цикл сообщений потока.
 var Win32SetNoQuit func(nw any)
 
+// Win32PopupAlpha — прозрачность целиком окна-попапа nw, выводимого
+// UpdateLayeredWindow (0…255), и положен ли уже кадр; ok=false — окно не
+// такой попап.
+var Win32PopupAlpha func(nw any) (alpha byte, shown bool)
+
 // Win32WndProc — оконная процедура бэкенда: тест подаёт сообщение напрямую.
 var Win32WndProc func(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr
 

@@ -26,7 +26,13 @@ import (
 func (w *X11Window) x11InitPopupShape() {
 	if w.argb && w.x11AlphaComposited() {
 		w.composited = true
-		return // альфу смешает композитор — окно остаётся прямоугольным
+		// Альфу смешает композитор — окно остаётся прямоугольным, а клики
+		// ловит только закрашенное: прозрачный запас под тень вокруг меню
+		// (PopupFrame.Pad) не должен перехватывать их у окон под ним.
+		if major, ok := w.x11ExtensionMajor("SHAPE"); ok {
+			w.inputMajor = major
+		}
+		return
 	}
 	if major, ok := w.x11ExtensionMajor("SHAPE"); ok {
 		w.shapeMajor = major
@@ -58,9 +64,11 @@ func (w *X11Window) x11AlphaComposited() bool {
 }
 
 // BlitPopupRegion выкраивает попап по сплошным точкам кадра и кладёт кадр.
-// Реализует popupRegionSetter. bands (закрашенное с тенью) здесь не годятся:
-// форма из них оставила бы тень, которую некому смешать.
-func (w *X11Window) BlitPopupRegion(img *image.RGBA, _ []image.Rectangle) {
+// Реализует popupRegionSetter. bands (закрашенное с тенью) для видимой формы
+// не годятся: она оставила бы тень, которую некому смешать. Зато у попапа с
+// композитором ими задаётся форма ввода (x11InputShape).
+func (w *X11Window) BlitPopupRegion(img *image.RGBA, bands []image.Rectangle) {
+	w.x11InputShape(img, bands)
 	if w.shapeMajor != 0 && img != nil {
 		solid := raster.SolidBands(img)
 		if o := img.Rect.Min; o != (image.Point{}) {
@@ -74,4 +82,27 @@ func (w *X11Window) BlitPopupRegion(img *image.RGBA, _ []image.Rectangle) {
 		}
 	}
 	w.BlitRGBA(img)
+}
+
+// x11InputShape задаёт попапу с композитором форму ввода — закрашенные точки
+// кадра (bands, raster.OpaqueBands). Пустые bands означают «выкраивать
+// нечего»: кадр закрашен весь (или прозрачен лишь по скруглённым краям), и
+// ввод ловит окно целиком.
+func (w *X11Window) x11InputShape(img *image.RGBA, bands []image.Rectangle) {
+	if w.inputMajor == 0 || img == nil {
+		return
+	}
+	o := img.Rect.Min
+	in := make([]image.Rectangle, 0, max(len(bands), 1))
+	for _, b := range bands {
+		in = append(in, b.Sub(o))
+	}
+	if len(in) == 0 {
+		in = append(in, img.Rect.Sub(o))
+	}
+	if w.inputSent && native.SameRects(in, w.inputLast) {
+		return
+	}
+	w.x11Send(x11ShapeRequestKind(w.inputMajor, x11ShapeKindInput, w.wid, in))
+	w.inputLast, w.inputSent = in, true
 }

@@ -21,6 +21,7 @@ func init() {
 		return w, nil
 	}
 	testhook.Win32SetNoQuit = func(nw any) { nw.(*Win32Window).noQuit = true }
+	testhook.Win32PopupAlpha = func(nw any) (byte, bool) { return nw.(*Win32Window).popupAlphaByte() }
 	testhook.Win32WndProc = wndProc
 	testhook.Win32WindowRect = func(nw any) image.Rectangle { return nw.(*Win32Window).windowRect() }
 	testhook.Win32Cursor = func(nw any) (uintptr, bool, int) {

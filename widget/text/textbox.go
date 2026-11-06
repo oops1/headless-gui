@@ -1934,6 +1934,14 @@ func (t *TextBox) OverlayBounds() image.Rectangle {
 	return image.Rectangle{}
 }
 
+// OverlayParts отдаёт уровни открытого меню (widget.OverlayPartsProvider).
+func (t *TextBox) OverlayParts() []base.OverlayPart {
+	if t.contextMenu != nil && t.contextMenu.IsOpen() {
+		return t.contextMenu.OverlayParts()
+	}
+	return nil
+}
+
 // Dismiss закрывает контекстное меню (Dismissable).
 func (t *TextBox) Dismiss() {
 	if t.contextMenu != nil && t.contextMenu.IsOpen() {

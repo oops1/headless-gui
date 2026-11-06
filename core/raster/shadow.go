@@ -20,6 +20,8 @@ import (
 	"image"
 	"image/color"
 	"math"
+
+	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
 )
 
 // DrawSoftShadow рисует мягкую тень под прямоугольником r со скруглением
@@ -54,6 +56,23 @@ func (c *Canvas) DrawSoftShadow(r image.Rectangle, corner int, elevation float64
 //
 // Остальное — как у DrawSoftShadow, который теперь лишь вызывает эту функцию.
 func (c *Canvas) DrawShadow(r image.Rectangle, corner int, blur, offsetX, offsetY float64, col color.RGBA) {
+	c.DrawShadowAround(r, corner, blur, offsetX, offsetY, col, image.Rectangle{})
+}
+
+var _ hgdraw.ShadowAroundDrawer = (*Canvas)(nil)
+
+// DrawShadowAround — DrawShadow без области covered (логические координаты):
+// её слой, отбрасывающий тень, закрасит следом сам и непрозрачно
+// (hgdraw.ShadowAroundDrawer). Тень под ней не собирается и не смешивается:
+// у окна это почти вся площадь тени, а видно от неё только кольцо вокруг.
+// Картинка та же, что у DrawShadow, пока обещание верно; пустой covered —
+// обычная тень.
+//
+// Вырез действует на пути шаблона (shadowcache.go); маленькая тень прямого
+// пути рисуется целиком. На дробном масштабе вырез ужимается на физический
+// пиксель с каждой стороны: край заливки слоя и край выреза округляются
+// порознь и могут разойтись на пиксель.
+func (c *Canvas) DrawShadowAround(r image.Rectangle, corner int, blur, offsetX, offsetY float64, col color.RGBA, covered image.Rectangle) {
 	if blur <= 0 || col.A == 0 || r.Dx() <= 0 || r.Dy() <= 0 {
 		return
 	}
@@ -115,7 +134,14 @@ func (c *Canvas) DrawShadow(r image.Rectangle, corner int, blur, offsetX, offset
 	}
 	// Сборка из размытого шаблона (shadowcache.go): без размытия на кадре и
 	// без шва на краю частичной перерисовки.
-	if c.drawShadowFromTemplate(full, area, pw, ph, pCorner, pRadius, margin, col) {
+	var hole image.Rectangle
+	if !covered.Empty() {
+		hole = c.PhysRect(covered)
+		if c.scale != 1 {
+			hole = hole.Inset(1)
+		}
+	}
+	if c.drawShadowFromTemplate(full, area, hole, pw, ph, pCorner, pRadius, margin, col) {
 		return
 	}
 	// Буфер — видимая область с запасом 2·R в каждую сторону (в пределах

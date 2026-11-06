@@ -80,14 +80,24 @@ func (w *Win32Window) applyOpaqueRegion(bands []image.Rectangle, full image.Rect
 
 // native.SameRects — в x11shape.go (общая для всех платформ).
 
-// BlitPopupRegion выкраивает окно по закрашенной части кадра и кладёт кадр.
+// BlitPopupRegion кладёт кадр окна-попапа.
 //
-// Порядок важен: сперва форма, потом пиксели. Наоборот окно на мгновение
-// показало бы кадр в старой форме.
-func (w *Win32Window) BlitPopupRegion(img *image.RGBA, bands []image.Rectangle) {
+// Попап с UpdateLayeredWindow (popupulw_windows.go) выкройки не требует: дыры
+// в кадре прозрачны и так, а тень и сглаженные углы смешиваются с тем, что
+// под окном. bands тогда не нужны.
+//
+// На прежнем пути (UpdateLayeredWindow отказал, окно не попап) окно кроится
+// по СПЛОШНЫМ точкам кадра, а не по bands: в bands входит и полупрозрачная
+// тень, а смешать её некому — она вышла бы чёрной рамкой. Порядок важен:
+// сперва форма, потом пиксели — наоборот окно на мгновение показало бы кадр
+// в старой форме.
+func (w *Win32Window) BlitPopupRegion(img *image.RGBA, _ []image.Rectangle) {
 	if img == nil {
 		return
 	}
-	w.applyOpaqueRegion(bands, img.Bounds())
-	w.BlitRGBA(img)
+	if w.ulwActive() {
+		w.ulwSetImage(img)
+		return
+	}
+	w.blitSolidRegion(img)
 }

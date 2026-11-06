@@ -201,5 +201,8 @@ func (tc *TabControl) DrawOverlay(ctx DrawContext) { tc.menu.DrawOverlay(ctx) }
 // OverlayBounds отдаёт прямоугольник открытого меню (для выноса в окно ОС).
 func (tc *TabControl) OverlayBounds() image.Rectangle { return tc.menu.OverlayBounds() }
 
+// OverlayParts отдаёт уровни открытого меню (widget.OverlayPartsProvider).
+func (tc *TabControl) OverlayParts() []OverlayPart { return tc.menu.OverlayParts() }
+
 // Dismiss закрывает меню переполнения. Реализует Dismissable.
 func (tc *TabControl) Dismiss() { tc.menu.Dismiss() }

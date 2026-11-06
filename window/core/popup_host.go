@@ -78,6 +78,11 @@ type hostedPopup struct {
 	rect   image.Rectangle // логический прямоугольник оверлея (в координатах носителя)
 	img    *image.RGBA     // последний контент (физические пиксели)
 	w, h   int             // физический размер контента
+	pad    int             // запас под тень вокруг тела в rect (логический, PopupFrame.Pad)
+	// system — тень и скругление окна даёт ОС (PopupFrame.System) с радиусом
+	// corner (логический). Решается при создании окна.
+	system bool
+	corner int
 	closed bool
 
 	// Переход появления и исчезновения (engine.PopupTransition, задача 3.4).
@@ -206,7 +211,8 @@ func (h *popupHost) apply(frames []engine.PopupFrame) {
 				continue // исчезающий оверлей, которого здесь не показывали
 			}
 			// Новый оверлей — окно создаётся на UI-потоке.
-			hp = &hostedPopup{rect: f.Rect, img: f.Img, w: pw, h: ph,
+			hp = &hostedPopup{rect: f.Rect, img: f.Img, w: pw, h: ph, pad: f.Pad,
+				system: f.System, corner: f.Corner,
 				alpha: alpha, offset: offset, fade: h.fadeHint()}
 			hp.setOrigin(f.Rect, h.scale)
 			h.windows[f.ID] = hp
@@ -219,7 +225,7 @@ func (h *popupHost) apply(frames []engine.PopupFrame) {
 
 		prev := hp.rect.Add(hp.effOffset())
 		resized := hp.w != pw || hp.h != ph
-		hp.rect, hp.img, hp.w, hp.h = f.Rect, f.Img, pw, ph
+		hp.rect, hp.img, hp.w, hp.h, hp.pad = f.Rect, f.Img, pw, ph, f.Pad
 		hp.alpha, hp.offset = alpha, offset
 		if f.Transition == nil {
 			hp.forceBlit = true
@@ -300,7 +306,7 @@ func (h *popupHost) reconcile(hp *hostedPopup, place bool) {
 		return
 	}
 	rest, off := hp.rect, hp.effOffset()
-	pw, ph := hp.w, hp.h
+	pw, ph, pad := hp.w, hp.h, hp.pad
 	alpha, src, fade := hp.alpha, hp.img, hp.fade
 	force := hp.forceBlit
 	hp.forceBlit = false
@@ -310,7 +316,7 @@ func (h *popupHost) reconcile(hp *hostedPopup, place bool) {
 	o := &hp.out
 	at := rest.Add(off)
 	if place && (!o.placed || o.rect != at || o.w != pw || o.h != ph) {
-		h.positionPopup(nw, carrier, rest, off, pw, ph, !o.placed || o.w != pw || o.h != ph)
+		h.positionPopup(nw, carrier, rest, off, pw, ph, pad, !o.placed || o.w != pw || o.h != ph)
 		o.placed, o.rect, o.w, o.h = true, at, pw, ph
 	}
 	if fade == popupFadeWindow && o.alpha != alpha {
@@ -344,12 +350,22 @@ func (h *popupHost) createPopup(id uintptr) {
 	pw, ph := hp.w, hp.h
 	alpha := hp.alpha
 	carrier := h.carrier
+	system, corner := hp.system, hp.corner
 	h.mu.Unlock()
 
 	nw := newNativeWindow() // хук: тесты подставляют окно ОС
 	pop, ok := nw.(popupWindow)
 	if !ok {
 		return // бэкенд без поддержки окон-попапов (host не должен был ставиться)
+	}
+	// Кто оформляет окно — до создания: окну с тенью и скруглением ОС
+	// (PopupFrame.System) нужен другой вывод, чем окну с альфой точек.
+	if sd, ok := nw.(popupSystemDecor); ok {
+		r := 0
+		if system {
+			r = max(corner, 1)
+		}
+		sd.SetPopupSystem(r)
 	}
 	// Прозрачность окна — до создания: окно, рождённое непрозрачным и
 	// погашенное следом, мигнуло бы целиком.
@@ -367,9 +383,10 @@ func (h *popupHost) createPopup(id uintptr) {
 	hp.fade = fade
 	rest, off := hp.rect, hp.effOffset()
 	pw, ph = hp.w, hp.h
+	pad := hp.pad
 	h.mu.Unlock()
 	hp.outMu.Lock()
-	h.positionPopup(nw, carrier, rest, off, pw, ph, true)
+	h.positionPopup(nw, carrier, rest, off, pw, ph, pad, true)
 	hp.out = popupOut{placed: true, rect: rest.Add(off), w: pw, h: ph, alpha: 1}
 	if fade == popupFadeWindow {
 		hp.out.alpha = alpha
@@ -501,24 +518,33 @@ type workAreaProvider interface {
 // и лишь потом прибавляется сдвиг перехода off — выезд у края монитора не
 // перебрасывает окно на соседний. resize — размер сменился (SetSize на
 // каждом шаге перехода у X11 пересоздавал бы сегмент SHM).
-func (h *popupHost) positionPopup(nw, carrier native.NativeWindow, rest image.Rectangle, off image.Point, pw, ph int, resize bool) {
+//
+// pad — запас под тень вокруг тела (логический, PopupFrame.Pad). Вписывается
+// в рабочую область ТЕЛО оверлея: прозрачный запас с тенью может выйти за
+// край экрана или лечь на таскбар, а меню у края не отодвигается от него на
+// ширину тени.
+func (h *popupHost) positionPopup(nw, carrier native.NativeWindow, rest image.Rectangle, off image.Point, pw, ph, pad int, resize bool) {
 	cx, cy := carrier.GetPosition()
 	sx := int(float64(rest.Min.X)*h.scale + 0.5)
 	sy := int(float64(rest.Min.Y)*h.scale + 0.5)
 	x, y := cx+sx, cy+sy
+	p := int(float64(pad)*h.scale + 0.5)
+	if 2*p >= pw || 2*p >= ph {
+		p = 0 // тела нет — вписываем окно целиком
+	}
 	if wp, ok := nw.(workAreaProvider); ok {
-		if wa := wp.WorkAreaAt(x, y); !wa.Empty() {
-			if x+pw > wa.Max.X {
-				x = wa.Max.X - pw
+		if wa := wp.WorkAreaAt(x+p, y+p); !wa.Empty() {
+			if x+pw-p > wa.Max.X {
+				x = wa.Max.X - pw + p
 			}
-			if y+ph > wa.Max.Y {
-				y = wa.Max.Y - ph
+			if y+ph-p > wa.Max.Y {
+				y = wa.Max.Y - ph + p
 			}
-			if x < wa.Min.X {
-				x = wa.Min.X
+			if x+p < wa.Min.X {
+				x = wa.Min.X - p
 			}
-			if y < wa.Min.Y {
-				y = wa.Min.Y
+			if y+p < wa.Min.Y {
+				y = wa.Min.Y - p
 			}
 		}
 	}

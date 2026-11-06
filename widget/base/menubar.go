@@ -248,6 +248,14 @@ func (mb *MenuBar) OverlayBounds() image.Rectangle {
 	return mb.popup.OverlayBounds()
 }
 
+// OverlayParts отдаёт уровни открытого меню (widget.OverlayPartsProvider).
+func (mb *MenuBar) OverlayParts() []OverlayPart {
+	if !mb.popup.IsOpen() {
+		return nil
+	}
+	return mb.popup.OverlayParts()
+}
+
 // DrawOverlay рисует подменю поверх всего UI.
 func (mb *MenuBar) DrawOverlay(ctx DrawContext) {
 	if mb.popup.IsOpen() {

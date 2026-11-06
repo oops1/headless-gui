@@ -432,6 +432,7 @@ func DrawOverlayTraced
 func DrawRadialGradient
 func DrawSVG
 func DrawShadowSpec
+func DrawShadowSpecAround
 func DrawTracePath
 func DrawTraceUsers
 func DrawTraced
@@ -623,6 +624,7 @@ func SetScreenBounds
 func SetTextMeasurer
 func SetUIChangeNotifier
 func SetUIRectChangeNotifier
+func ShadowCovered
 func ShiftWidget
 func SkipSubtree
 func StepAnimations
@@ -823,6 +825,8 @@ type OverlayAnchorer
 type OverlayBoundsProvider
 type OverlayDrawer
 type OverlayMarginer
+type OverlayPart
+type OverlayPartsProvider
 type OverlayRectsProvider
 type Owner
 type OwnerAnimationLoop
@@ -863,6 +867,7 @@ type ScrollbarStyle
 type SelfAnimatedOverlay
 type Separator
 type SeparatorOrientation
+type ShadowAroundDrawer
 type ShadowDrawer
 type ShadowParamDrawer
 type Slider
@@ -876,6 +881,7 @@ type Stretch
 type Style
 type Styler
 type SurfaceInput
+type SurfaceStamp
 type Swatch
 type Swipe
 type SwipeDir

@@ -159,6 +159,17 @@ type tileRaster struct {
 	valid     []bool
 	forced    []bool
 	skipMask  []bool
+	// Переносы (movekeep.go): кто рисует в тайле последним — номер
+	// поверхности окна программы или 0 (prevTop — когда тайл рисовали, curTop
+	// — в этом кадре); kept — тайл оставлен переносом; surfs — поверхности,
+	// как их видел последний кадр, задевший их; now, nowAt — поверхности
+	// этого кадра; moved — сколько тайлов кадр оставил переносу.
+	prevTop, curTop []uint32
+	kept            []bool
+	surfs           map[uint32]surfSeen
+	now             []surfSeen
+	nowAt           map[uint32]int
+	moved           int
 
 	// На кадр.
 	canvas   *Canvas
@@ -194,7 +205,8 @@ var tiledExitList = &hgdraw.List{}
 func (e *Engine) tileRaster() *tileRaster {
 	if e.tr == nil {
 		n := runtime.GOMAXPROCS(0) + 1
-		e.tr = &tileRaster{e: e, workers: make(chan *tileWorker, n), cache: map[uint64]*blurEntry{}}
+		e.tr = &tileRaster{e: e, workers: make(chan *tileWorker, n), cache: map[uint64]*blurEntry{},
+			surfs: map[uint32]surfSeen{}, nowAt: map[uint32]int{}}
 	}
 	return e.tr
 }
@@ -237,6 +249,7 @@ func (e *Engine) rasterTree(canvas *Canvas, list *hgdraw.List, exit hgdraw.ClipS
 	} else {
 		tr.unskip()
 		clear(tr.valid)
+		clear(tr.surfs)
 	}
 	own := canvas.UsingOwnBack()
 	single := own && canvas.SingleBuffer()
@@ -275,6 +288,7 @@ func (e *Engine) rasterTree(canvas *Canvas, list *hgdraw.List, exit hgdraw.ClipS
 		whole = true
 	}
 	e.stats.tilesSkipped.Add(uint64(len(tr.skipped)))
+	e.stats.tilesMoved.Add(uint64(tr.moved))
 	switch {
 	case len(tr.tiles) == 0:
 		// Ничего не изменилось: ни фона, ни растра — и диффу нечего делать.
@@ -317,6 +331,7 @@ func (tr *tileRaster) checkEnv(canvas *Canvas) {
 		clear(tr.cache)
 		tr.bytes = 0
 		clear(tr.valid)
+		clear(tr.surfs)
 	}
 }
 
@@ -336,6 +351,8 @@ func (tr *tileRaster) begin(canvas *Canvas, root *hgdraw.List, partial bool, dam
 	if len(tr.prev) != n {
 		tr.prev, tr.cur = make([]uint64, n), make([]uint64, n)
 		tr.valid, tr.forced, tr.skipMask = make([]bool, n), make([]bool, n), make([]bool, n)
+		tr.prevTop, tr.curTop, tr.kept = make([]uint32, n), make([]uint32, n), make([]bool, n)
+		clear(tr.surfs)
 	}
 	tr.selected = tr.selected[:0]
 	ts := output.TileSize

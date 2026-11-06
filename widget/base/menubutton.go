@@ -331,6 +331,9 @@ func (mb *MenuButton) DrawOverlay(ctx DrawContext) { mb.menu.DrawOverlay(ctx) }
 // OverlayBounds отдаёт прямоугольник открытого меню (для выноса в окно ОС).
 func (mb *MenuButton) OverlayBounds() image.Rectangle { return mb.menu.OverlayBounds() }
 
+// OverlayParts отдаёт уровни открытого меню (widget.OverlayPartsProvider).
+func (mb *MenuButton) OverlayParts() []OverlayPart { return mb.menu.OverlayParts() }
+
 // Dismiss закрывает меню. Реализует Dismissable.
 func (mb *MenuButton) Dismiss() {
 	if mb.menu.Open() {

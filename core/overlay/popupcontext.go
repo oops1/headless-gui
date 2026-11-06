@@ -19,6 +19,29 @@ import (
 type Translating struct {
 	Inner  *raster.Canvas
 	DX, DY int
+	// Flat — окно попапа скругляет и оттеняет ОС (PopupShadowSystem):
+	// мягких теней обёртка не рисует, а скруглённые фигуры, накрывающие угол
+	// кадра Frame (абсолютные логические координаты), рисует с прямыми
+	// углами. Скругление внутри кадра (плашка наведения) остаётся.
+	Flat  bool
+	Frame image.Rectangle
+}
+
+// flatRadius — радиус скругления фигуры (x, y, w, h) с учётом Flat.
+func (t *Translating) flatRadius(x, y, w, h, r int) int {
+	if !t.Flat || r <= 0 {
+		return r
+	}
+	fig := image.Rect(x, y, x+w, y+h)
+	f := t.Frame
+	for _, c := range [...]image.Point{
+		f.Min, {f.Max.X - 1, f.Min.Y}, {f.Min.X, f.Max.Y - 1}, {f.Max.X - 1, f.Max.Y - 1},
+	} {
+		if c.In(fig) {
+			return 0
+		}
+	}
+	return r
 }
 
 var (
@@ -38,7 +61,7 @@ func (t *Translating) FillRectAlpha(x, y, w, h int, col color.RGBA) {
 }
 
 func (t *Translating) FillRoundRect(x, y, w, h, r int, col color.RGBA) {
-	t.Inner.FillRoundRect(x-t.DX, y-t.DY, w, h, r, col)
+	t.Inner.FillRoundRect(x-t.DX, y-t.DY, w, h, t.flatRadius(x, y, w, h, r), col)
 }
 
 func (t *Translating) DrawBorder(x, y, w, h int, col color.RGBA) {
@@ -46,7 +69,7 @@ func (t *Translating) DrawBorder(x, y, w, h int, col color.RGBA) {
 }
 
 func (t *Translating) DrawRoundBorder(x, y, w, h, r int, col color.RGBA) {
-	t.Inner.DrawRoundBorder(x-t.DX, y-t.DY, w, h, r, col)
+	t.Inner.DrawRoundBorder(x-t.DX, y-t.DY, w, h, t.flatRadius(x, y, w, h, r), col)
 }
 
 func (t *Translating) SetPixel(x, y int, col color.RGBA) {
@@ -150,12 +173,13 @@ func (t *Translating) DrawLineAA(x1, y1, x2, y2 int, thickness float64, col colo
 // переводом координат, что и остальное рисование.
 
 var (
-	_ widget.BackdropDrawer    = (*Translating)(nil)
-	_ widget.ShadowDrawer      = (*Translating)(nil)
-	_ widget.ShadowParamDrawer = (*Translating)(nil)
-	_ widget.MicaDrawer        = (*Translating)(nil)
-	_ widget.RoundClipper      = (*Translating)(nil)
-	_ widget.OpacityDrawer     = (*Translating)(nil)
+	_ widget.BackdropDrawer     = (*Translating)(nil)
+	_ widget.ShadowDrawer       = (*Translating)(nil)
+	_ widget.ShadowParamDrawer  = (*Translating)(nil)
+	_ widget.ShadowAroundDrawer = (*Translating)(nil)
+	_ widget.MicaDrawer         = (*Translating)(nil)
+	_ widget.RoundClipper       = (*Translating)(nil)
+	_ widget.OpacityDrawer      = (*Translating)(nil)
 
 	_ widget.RotatedTextDrawer = (*Translating)(nil)
 
@@ -200,16 +224,36 @@ func (t *Translating) MicaBehind(r image.Rectangle, radius int, tint color.RGBA)
 
 // DrawShadow рисует мягкую тень с явными размытием и смещением.
 func (t *Translating) DrawShadow(r image.Rectangle, corner int, blur, offsetX, offsetY float64, col color.RGBA) {
+	if t.Flat {
+		return // тень даёт окно ОС
+	}
 	t.Inner.DrawShadow(r.Sub(image.Pt(t.DX, t.DY)), corner, blur, offsetX, offsetY, col)
+}
+
+// DrawShadowAround рисует тень без области covered, которую слой закрасит сам
+// (widget.ShadowAroundDrawer).
+func (t *Translating) DrawShadowAround(r image.Rectangle, corner int, blur, offsetX, offsetY float64, col color.RGBA, covered image.Rectangle) {
+	if t.Flat {
+		return // тень даёт окно ОС
+	}
+	d := image.Pt(t.DX, t.DY)
+	if !covered.Empty() {
+		covered = covered.Sub(d)
+	}
+	t.Inner.DrawShadowAround(r.Sub(d), corner, blur, offsetX, offsetY, col, covered)
 }
 
 // DrawSoftShadow рисует мягкую тень под r.
 func (t *Translating) DrawSoftShadow(r image.Rectangle, corner int, elevation float64, col color.RGBA) {
+	if t.Flat {
+		return // тень даёт окно ОС
+	}
 	t.Inner.DrawSoftShadow(r.Sub(image.Pt(t.DX, t.DY)), corner, elevation, col)
 }
 
 // SetRoundClip включает отсечение по скруглённому контуру r.
 func (t *Translating) SetRoundClip(r image.Rectangle, radius int) {
+	radius = t.flatRadius(r.Min.X, r.Min.Y, r.Dx(), r.Dy(), radius)
 	t.Inner.SetRoundClip(r.Sub(image.Pt(t.DX, t.DY)), radius)
 }
 
@@ -237,7 +281,7 @@ func (t *Translating) RenderOffscreen(r image.Rectangle, draw func(ctx widget.Dr
 		if !ok {
 			return
 		}
-		draw(&Translating{Inner: inner, DX: t.DX, DY: t.DY})
+		draw(&Translating{Inner: inner, DX: t.DX, DY: t.DY, Flat: t.Flat, Frame: t.Frame})
 	})
 }
 
