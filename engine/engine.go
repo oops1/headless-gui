@@ -160,6 +160,7 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// экрана: его одиночные кадры не окупают набора воркеров.
 	e.cmdPath.Store(true)
 	e.hashDiff.Store(true)
+	e.moveReuse.Store(true)
 	e.tiled.Store(!offscreen)
 	e.single.Store(true)
 	// Запасная цепочка шрифтов (BUG-2; файлы читаются лениво) и встроенные
@@ -1583,9 +1584,13 @@ func (e *Engine) renderFrame() output.Frame {
 	// отбрасываются: потребитель и так получает всё заново, а оставшись, они
 	// достались бы следующему кадру.
 	var moves []output.MoveRegion
+	var applied []hgraster.AppliedMove
 	declared := e.takeMoves()
 	if partial && len(declared) > 0 {
 		moves = canvas.ApplyMovesToFront(declared)
+		if len(moves) > 0 {
+			applied = canvas.AppliedMoves()
+		}
 	}
 
 	// Путь команд (ADR-0004, cmdpath.go): дерево, а за ним оверлеи, модальные
@@ -1618,7 +1623,7 @@ func (e *Engine) renderFrame() output.Frame {
 	// заново» и переносы принуждают тайлы к растру.
 	var plan *framePlan
 	if cmdPath && rootList != nil {
-		plan = e.planFrame(full || damageAll, force, len(moves) > 0)
+		plan = e.planFrame(full || damageAll, force, applied)
 	}
 	if partial {
 		canvas.SetBaseClip(damage)

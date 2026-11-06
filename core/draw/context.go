@@ -244,6 +244,16 @@ type ShadowParamDrawer interface {
 	DrawShadow(r image.Rectangle, corner int, blur, offsetX, offsetY float64, col color.RGBA)
 }
 
+// ShadowAroundDrawer — опциональная возможность контекста рисовать тень
+// ShadowParamDrawer без области covered: её слой, отбрасывающий тень, сразу
+// следом закрасит сам и непрозрачно, так что тень под ней не видна, а
+// смешивать её по пикселю — работа впустую (под окном, которое тащат, это была
+// почти вся цена кадра). Картинка — та же, что у DrawShadow, пока обещание
+// верно. Пустой covered — обычная тень. Реализуется engine.Canvas.
+type ShadowAroundDrawer interface {
+	DrawShadowAround(r image.Rectangle, corner int, blur, offsetX, offsetY float64, col color.RGBA, covered image.Rectangle)
+}
+
 // MicaDrawer — опциональная возможность контекста положить в область
 // размытые обои (материал Mica). Реализуется engine.Canvas методом MicaBehind.
 // Вернул false — обоев нет (фон движка не задан); слой тогда рисуют сплошным

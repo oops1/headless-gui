@@ -47,6 +47,11 @@ const rateRing = 64
 type surfaceContent struct {
 	hint atomic.Uint32
 
+	// rev — версия содержимого и его трактовки: растёт с каждым заявленным
+	// изменением буфера, сменой буфера, порядка байт, фона и непрозрачной
+	// области (Stamp).
+	rev atomic.Uint64
+
 	// opaque — непрозрачные прямоугольники от клиента, в координатах буфера;
 	// nil — не задано (поверхность непрозрачна целиком при opaque у буфера).
 	opaque atomic.Pointer[[]image.Rectangle]
@@ -55,6 +60,15 @@ type surfaceContent struct {
 	opMu    sync.Mutex
 	opCache []image.Rectangle
 	opKey   opaqueKey
+
+	// split* — разложение видимой части буфера на непрозрачные части и
+	// остаток для блита (splitFor) и ключ, при котором оно посчитано. Под
+	// замком содержимого поверхности (ExternalSurface.mu), как сам блит.
+	splitSrc   *[]image.Rectangle
+	splitRect  image.Rectangle
+	splitSolid []image.Rectangle
+	splitRest  []image.Rectangle
+	splitOK    bool
 
 	mu         sync.Mutex
 	stamps     [rateRing]int64 // UnixNano обновлений, кольцо
@@ -96,8 +110,14 @@ func (s *ExternalSurface) ContentHint() ContentHint {
 // set_opaque_region), в координатах буфера. Уточняет OpaqueRegion: под
 // поверхностью движок не рисует только то, что лежит в этих прямоугольниках.
 // nil снимает уточнение — непрозрачна вся поверхность, если буфер opaque.
-// Сам блит не меняется: признак opaque буфера по-прежнему решает, смешивать
-// ли пиксели.
+//
+// Область доходит и до вывода: у буфера с альфой (opaque=false) объявленные
+// части копируются строками, как непрозрачный буфер, а смешивается только
+// остальное. Окно со скруглёнными углами или своей тенью больше не обязано
+// ни смешиваться целиком, ни выдавать себя за непрозрачное. Это обещание,
+// как opaque у буфера: пиксель с альфой меньше 255 внутри объявленной части
+// затрёт то, что под ним. Область из более чем 16 прямоугольников на вывод
+// не влияет — буфер смешивается целиком, как без неё.
 func (s *ExternalSurface) SetOpaqueRegion(rects []image.Rectangle) {
 	var p *[]image.Rectangle
 	if rects != nil {
@@ -105,8 +125,106 @@ func (s *ExternalSurface) SetOpaqueRegion(rects []image.Rectangle) {
 		p = &cp
 	}
 	s.content.opaque.Store(p)
+	s.content.rev.Add(1)
 	// То, что под поверхностью, могло открыться или закрыться.
 	s.Invalidate()
+}
+
+// SurfaceStamp — снимок поверхности для движка: по нему кадр узнаёт, что окно
+// программы переехало, не изменившись, и не перерисовывает его после
+// объявленного переноса (NotifyMove). Срез Solid читать, не изменяя.
+type SurfaceStamp struct {
+	// ID — номер поверхности (SurfaceID).
+	ID uint32
+	// Rev — версия содержимого: растёт с каждым заявленным изменением буфера
+	// (Swap, Update, InvalidateRects), сменой буфера, порядка байт, фона и
+	// непрозрачной области.
+	Rev uint64
+	// Buf — границы буфера; пустые — буфера нет.
+	Buf image.Rectangle
+	// Opaque — буфер непрозрачен целиком; иначе непрозрачны только части
+	// Solid (SetOpaqueRegion, координаты буфера), а без них — ничего.
+	Opaque bool
+	Solid  []image.Rectangle
+}
+
+// Stamp возвращает снимок поверхности (см. SurfaceStamp). Безопасно из любой
+// горутины.
+func (s *ExternalSurface) Stamp() SurfaceStamp {
+	// Версия — первой: изменение, заставшее снимок на полпути, даст новую
+	// версию следующему снимку, и два снимка не сойдутся.
+	st := SurfaceStamp{Rev: s.content.rev.Load(), ID: s.SurfaceID()}
+	m := s.loadMeta()
+	st.Buf, st.Opaque = m.rect, m.opaque
+	if p := s.content.opaque.Load(); p != nil && !m.opaque {
+		st.Solid = *p
+	}
+	return st
+}
+
+// maxOpaqueSplit — до скольких прямоугольников непрозрачной области блит
+// делится на копируемые части и остаток. Окно — один-два прямоугольника
+// (тело без углов); область из десятков кусков дешевле смешать целиком, чем
+// обходить её на каждом тайле.
+const maxOpaqueSplit = 16
+
+// splitFor раскладывает видимую часть буфера sr по непрозрачной области src:
+// solid — её части внутри sr (могут перекрываться: копирование это терпит),
+// rest — sr без них, непересекающимися прямоугольниками. ok=false — делить
+// нечего или слишком дробно: блит идёт целиком. Результат кэшируется до смены
+// области или sr; срезы действительны до следующего вызова. Под замком
+// содержимого поверхности.
+func (c *surfaceContent) splitFor(src *[]image.Rectangle, sr image.Rectangle) (solid, rest []image.Rectangle, ok bool) {
+	if c.splitSrc == src && c.splitRect == sr {
+		return c.splitSolid, c.splitRest, c.splitOK
+	}
+	c.splitSrc, c.splitRect = src, sr
+	c.splitSolid, c.splitRest, c.splitOK = c.splitSolid[:0], c.splitRest[:0], false
+	if len(*src) > maxOpaqueSplit {
+		return nil, nil, false
+	}
+	c.splitRest = append(c.splitRest, sr)
+	for _, r := range *src {
+		r = r.Intersect(sr)
+		if r.Empty() {
+			continue
+		}
+		c.splitSolid = append(c.splitSolid, r)
+		c.splitRest = subtractRect(c.splitRest, r)
+	}
+	c.splitOK = len(c.splitSolid) > 0
+	return c.splitSolid, c.splitRest, c.splitOK
+}
+
+// subtractRect вычитает cut из каждого прямоугольника списка на месте:
+// задетый заменяется своими частями вне cut (до четырёх полос).
+func subtractRect(list []image.Rectangle, cut image.Rectangle) []image.Rectangle {
+	n := len(list)
+	for i := 0; i < n; i++ {
+		r := list[i]
+		in := r.Intersect(cut)
+		if in.Empty() {
+			continue
+		}
+		// Убираем r, дописываем его части в хвост: хвост этим проходом не
+		// обходится (i < n), а части с cut уже не пересекаются.
+		list[i] = list[n-1]
+		list[n-1] = list[len(list)-1]
+		list = list[:len(list)-1]
+		n--
+		i--
+		for _, q := range [...]image.Rectangle{
+			image.Rect(r.Min.X, r.Min.Y, r.Max.X, in.Min.Y),
+			image.Rect(r.Min.X, in.Max.Y, r.Max.X, r.Max.Y),
+			image.Rect(r.Min.X, in.Min.Y, in.Min.X, in.Max.Y),
+			image.Rect(in.Max.X, in.Min.Y, r.Max.X, in.Max.Y),
+		} {
+			if !q.Empty() {
+				list = append(list, q)
+			}
+		}
+	}
+	return list
 }
 
 // SurfaceID — стабильный номер поверхности для потребителя кадров
@@ -125,6 +243,7 @@ func (s *ExternalSurface) SurfaceID() uint32 {
 // noteUpdate — содержимое обновилось (Swap, Update, InvalidateRects).
 func (s *ExternalSurface) noteUpdate() {
 	c := &s.content
+	c.rev.Add(1)
 	now := time.Now().UnixNano()
 	c.mu.Lock()
 	c.stamps[c.head] = now

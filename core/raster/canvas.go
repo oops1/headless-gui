@@ -88,8 +88,9 @@ type Canvas struct {
 	// Шаблоны теней и рабочий буфер их сборки (shadowcache.go).
 	shadowCache    map[shadowKey]*shadowTemplate
 	shadowClock    uint64
-	shadowBuf      []byte
 	shadowCacheOff bool
+	// applied — переносы последнего ApplyMovesToFront (canvas_frame.go).
+	applied []AppliedMove
 	// shaper — шейпинг сложного текста (RTL, лигатуры; см. core/text/shaper.go).
 	// Один на холст и его клоны (CloneForSize, растр повёрнутого текста):
 	// личные typesetting-face шрифтов холста читаются только под его замком.
@@ -1067,28 +1068,10 @@ func (c *Canvas) drawColorGlyph(img *image.RGBA, gx, gy int) {
 		if !ok {
 			continue
 		}
+		n := (rx - lx) * 4
 		sRow := (yy-gy)*sStride + (lx-gx)*4
 		dOff := c.back.PixOffset(lx, yy)
-		for xx := lx; xx < rx; xx++ {
-			sa := uint32(src[sRow+3])
-			if sa == 0 { // полностью прозрачный пиксель
-				sRow += 4
-				dOff += 4
-				continue
-			}
-			sr, sg, sb := src[sRow+0], src[sRow+1], src[sRow+2]
-			if swap {
-				sr, sb = sb, sr
-			}
-			inv := 255 - sa
-			p := dst[dOff : dOff+4 : dOff+4]
-			p[0] = uint8(uint32(sr) + uint32(p[0])*inv/255)
-			p[1] = uint8(uint32(sg) + uint32(p[1])*inv/255)
-			p[2] = uint8(uint32(sb) + uint32(p[2])*inv/255)
-			p[3] = uint8(sa + uint32(p[3])*inv/255)
-			sRow += 4
-			dOff += 4
-		}
+		overRow(dst[dOff:dOff+n], src[sRow:sRow+n], swap) // overrow.go
 	}
 }
 

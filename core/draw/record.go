@@ -94,6 +94,7 @@ var (
 	_ PathShapes            = (*Recorder)(nil)
 	_ ShadowDrawer          = (*Recorder)(nil)
 	_ ShadowParamDrawer     = (*Recorder)(nil)
+	_ ShadowAroundDrawer    = (*Recorder)(nil)
 	_ BackdropDrawer        = (*Recorder)(nil)
 	_ MicaDrawer            = (*Recorder)(nil)
 	_ NoiseDrawer           = (*Recorder)(nil)
@@ -787,9 +788,15 @@ func (r *Recorder) DrawSoftShadow(rc image.Rectangle, corner int, elevation floa
 }
 
 func (r *Recorder) DrawShadow(rc image.Rectangle, corner int, blur, offsetX, offsetY float64, col color.RGBA) {
+	r.DrawShadowAround(rc, corner, blur, offsetX, offsetY, col, image.Rectangle{})
+}
+
+// DrawShadowAround: тень без области covered (ShadowAroundDrawer) — она в
+// Ext.Rect команды, пустая у обычной тени.
+func (r *Recorder) DrawShadowAround(rc image.Rectangle, corner int, blur, offsetX, offsetY float64, col color.RGBA, covered image.Rectangle) {
 	c := rectCmd(OpShadow, rc, col)
 	c.R = int32(corner)
-	c.Ext = &CmdExt{F: [9]float64{blur, offsetX, offsetY}}
+	c.Ext = &CmdExt{F: [9]float64{blur, offsetX, offsetY}, Rect: covered.Canon()}
 	moved := rc.Add(image.Pt(int(math.Round(offsetX)), int(math.Round(offsetY))))
 	r.add(c, rc.Union(moved).Inset(-(int(math.Ceil(blur))*2 + 4)))
 }

@@ -95,6 +95,9 @@ type Loop struct {
 	loopGID     atomic.Uint64 // горутина цикла кадров; 0 — цикл не идёт (см. Flush)
 	sinkMu      sync.RWMutex
 	sink        FrameSink
+	// onFrameNeeded — потребителю с внешним темпом: есть что рисовать, а кадр
+	// не запрошен (SetOnFrameNeeded, pacing.go). nil — не задан.
+	onFrameNeeded atomic.Pointer[func()]
 
 	frames chan output.Frame
 	// lostFrame — кадр выброшен из переполненного канала, потребитель отстал:

@@ -94,6 +94,39 @@ func (l *Loop) RequestFrame() {
 	}
 }
 
+// SetOnFrameNeeded задаёт вызов «есть что рисовать» для внешнего темпа (nil —
+// снять).
+//
+// При PacingExternal кадр готовится только по RequestFrame, а потребитель
+// знает лишь о своих изменениях: что интерфейс сам заявил повреждение — часы,
+// наведение, шаг анимации, — ему неоткуда узнать, и такие изменения не
+// рисовались бы до его следующего запроса. fn зовётся на горутине цикла, без
+// замков цикла, не чаще раза за интервал кадров, пока повреждение есть, а
+// кадр не запрошен; потребитель отвечает RequestFrame, когда готов принять
+// кадр (сразу или позже — напоминание повторится). При тикерном темпе fn не
+// зовётся: кадры идут сами.
+func (l *Loop) SetOnFrameNeeded(fn func()) {
+	if fn == nil {
+		l.onFrameNeeded.Store(nil)
+		return
+	}
+	l.onFrameNeeded.Store(&fn)
+}
+
+// noteFrameNeeded зовёт вызов «есть что рисовать», если кадр нужен и не
+// запрошен. lastGen — поколение инвалидации последнего нарисованного кадра.
+// Только горутина цикла, внешний темп.
+func (l *Loop) noteFrameNeeded(lastGen uint64, interval time.Duration) {
+	fn := l.onFrameNeeded.Load()
+	if fn == nil || l.frameWanted.Load() {
+		return
+	}
+	if l.invGen.Load() == lastGen && !l.host.FullFramePending() && !l.host.AnimationNeeded(interval) {
+		return
+	}
+	l.host.GuardCall("FrameNeeded", *fn)
+}
+
 // takeFrameRequest забирает запрос кадра, если он был.
 func (l *Loop) takeFrameRequest() bool {
 	return l.frameWanted.Swap(false)

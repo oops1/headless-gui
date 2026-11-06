@@ -173,12 +173,13 @@ func (t *Translating) DrawLineAA(x1, y1, x2, y2 int, thickness float64, col colo
 // переводом координат, что и остальное рисование.
 
 var (
-	_ widget.BackdropDrawer    = (*Translating)(nil)
-	_ widget.ShadowDrawer      = (*Translating)(nil)
-	_ widget.ShadowParamDrawer = (*Translating)(nil)
-	_ widget.MicaDrawer        = (*Translating)(nil)
-	_ widget.RoundClipper      = (*Translating)(nil)
-	_ widget.OpacityDrawer     = (*Translating)(nil)
+	_ widget.BackdropDrawer     = (*Translating)(nil)
+	_ widget.ShadowDrawer       = (*Translating)(nil)
+	_ widget.ShadowParamDrawer  = (*Translating)(nil)
+	_ widget.ShadowAroundDrawer = (*Translating)(nil)
+	_ widget.MicaDrawer         = (*Translating)(nil)
+	_ widget.RoundClipper       = (*Translating)(nil)
+	_ widget.OpacityDrawer      = (*Translating)(nil)
 
 	_ widget.RotatedTextDrawer = (*Translating)(nil)
 
@@ -227,6 +228,19 @@ func (t *Translating) DrawShadow(r image.Rectangle, corner int, blur, offsetX, o
 		return // тень даёт окно ОС
 	}
 	t.Inner.DrawShadow(r.Sub(image.Pt(t.DX, t.DY)), corner, blur, offsetX, offsetY, col)
+}
+
+// DrawShadowAround рисует тень без области covered, которую слой закрасит сам
+// (widget.ShadowAroundDrawer).
+func (t *Translating) DrawShadowAround(r image.Rectangle, corner int, blur, offsetX, offsetY float64, col color.RGBA, covered image.Rectangle) {
+	if t.Flat {
+		return // тень даёт окно ОС
+	}
+	d := image.Pt(t.DX, t.DY)
+	if !covered.Empty() {
+		covered = covered.Sub(d)
+	}
+	t.Inner.DrawShadowAround(r.Sub(d), corner, blur, offsetX, offsetY, col, covered)
 }
 
 // DrawSoftShadow рисует мягкую тень под r.
