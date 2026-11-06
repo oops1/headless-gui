@@ -42,8 +42,10 @@ type shadowTemplate struct {
 
 // drawShadowFromTemplate рисует тень силуэта pw×ph с углом pCorner, размытого
 // радиусом pRadius в два прохода, в области area (часть full — полной тени с
-// полями margin). false — силуэт меньше шаблона, нужен прямой путь.
-func (c *Canvas) drawShadowFromTemplate(full, area image.Rectangle, pw, ph, pCorner, pRadius, margin int, col color.RGBA) bool {
+// полями margin). hole — физическая область, которую тень пропускает: слой
+// закрасит её сам (DrawShadowAround); пустая — тень целиком. false — силуэт
+// меньше шаблона, нужен прямой путь.
+func (c *Canvas) drawShadowFromTemplate(full, area, hole image.Rectangle, pw, ph, pCorner, pRadius, margin int, col color.RGBA) bool {
 	if c.shadowCacheOff {
 		return false
 	}
@@ -53,8 +55,32 @@ func (c *Canvas) drawShadowFromTemplate(full, area image.Rectangle, pw, ph, pCor
 		return false
 	}
 	t := c.shadowTemplateFor(shadowKey{corner: pCorner, radius: pRadius, col: col}, side, margin)
+	cut := area.Intersect(hole)
+	if cut.Empty() {
+		c.blitShadowTemplate(t, full, area, margin+mid)
+		return true
+	}
+	// Кольцо вокруг выреза: полосы сверху и снизу на всю ширину области,
+	// слева и справа — в строках выреза. Области, целиком лежащей в вырезе
+	// (тайл под окном), не достаётся ничего.
+	for _, part := range [...]image.Rectangle{
+		image.Rect(area.Min.X, area.Min.Y, area.Max.X, cut.Min.Y),
+		image.Rect(area.Min.X, cut.Max.Y, area.Max.X, area.Max.Y),
+		image.Rect(area.Min.X, cut.Min.Y, cut.Min.X, cut.Max.Y),
+		image.Rect(cut.Max.X, cut.Min.Y, area.Max.X, cut.Max.Y),
+	} {
+		if !part.Empty() {
+			c.blitShadowTemplate(t, full, part, margin+mid)
+		}
+	}
+	return true
+}
+
+// blitShadowTemplate собирает часть area полной тени full из шаблона t и
+// смешивает её с холстом. split — индекс повторяемого столбца (и строки)
+// шаблона.
+func (c *Canvas) blitShadowTemplate(t *image.RGBA, full, area image.Rectangle, split int) {
 	tw := t.Rect.Dx()
-	split := margin + mid  // индекс повторяемого столбца (и строки) шаблона
 	tail := tw - split - 1 // ширина правой (нижней) части шаблона
 	fw, fh := full.Dx(), full.Dy()
 
@@ -70,7 +96,6 @@ func (c *Canvas) drawShadowFromTemplate(full, area image.Rectangle, pw, ph, pCor
 		sliceRow(dst, src, ax0, ax1, split, tail, fw, tw)
 	}
 	c.drawColorGlyph(tmp, area.Min.X, area.Min.Y)
-	return true
 }
 
 // sliceIndex переводит координату l полной тени длины f в координату шаблона

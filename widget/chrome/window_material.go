@@ -67,11 +67,23 @@ func (w *Window) shadowExtent() int {
 // поддеревьев по повреждённой области не должен её отбрасывать.
 func (w *Window) DrawMargin() int { return w.shadowExtent() }
 
-// drawShadow рисует тень под окном (до фона).
+// drawShadow рисует тень под окном (до фона). Окно с непрозрачной заливкой
+// закрывает свою середину само — тень под ней не рисуется
+// (base.DrawShadowSpecAround): видно от тени только кольцо вокруг окна.
 func (w *Window) drawShadow(ctx base.DrawContext) {
 	if sp, ok := w.shadowSpec(); ok {
-		base.DrawShadowSpec(ctx, w.Bounds(), w.CornerRadius, sp)
+		base.DrawShadowSpecAround(ctx, w.Bounds(), w.CornerRadius, sp, w.shadowCovered())
 	}
+}
+
+// shadowCovered — что окно закрасит непрозрачно сразу после тени: полоса
+// заливки Background без строк скругления. Пусто у окна с материалом фона
+// (стекло читает то, что под ним, тень в том числе) и с полупрозрачным фоном.
+func (w *Window) shadowCovered() image.Rectangle {
+	if w.Backdrop.Material != theme.MaterialDefault || w.Background.A != 255 {
+		return image.Rectangle{}
+	}
+	return base.ShadowCovered(w.Bounds(), max(w.CornerRadius, w.corner()))
 }
 
 // drawBackdrop рисует материал фона вместо заливки Background. false —

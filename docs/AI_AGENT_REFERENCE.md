@@ -10598,3 +10598,59 @@ Where window code lives now (ADR-0013):
   `window/core/popup_ulw_windows_test.go` (live: ULW corners and alpha, DWM popup rounding
   and shadow), `platform/win32/shadowwnd_windows_test.go` (live own shadow, Auto vs DWM,
   sample vs full), `TestX11Popup_CompositorInputShape`.
+
+## v4.3: scene debts — whole frame, frame-needed call, opaque blit, ring shadow, move reuse
+
+Five items the WinLine scene pilot left with the engine (`ENGINE_ISSUES.md`, "Found by the
+scene pilot"). New public API, no behaviour change for existing programs.
+
+- `Engine.RequestFullFrame()` (`engine/loop.go`): sets `fullNext`; the next frame carries
+  every tile with no comparison. Retained command lists are replayed, widgets' `Draw` is
+  not called for it. External pacing: also requests the frame (`lp.RequestFrame`); ticker
+  pacing: wakes the loop, the frame is drawn even with no UI change. Several calls before
+  a frame give one whole frame.
+- `Engine.SetOnFrameNeeded(fn)` (`core/loop/pacing.go`, `noteFrameNeeded`): under
+  `PacingExternal` the loop's ticker calls `fn` on the engine goroutine (guard
+  "FrameNeeded"), once per frame interval, while the invalidation generation differs from
+  the last drawn frame's (or a whole frame is pending, or `AnimationNeeded`) and no frame
+  is requested. The consumer answers with `RequestFrame`. The external branch of the loop
+  now records `lastGen` before rendering. Never called under ticker pacing; `nil` removes.
+- `ExternalSurface.SetOpaqueRegion` reaches the blit (`widget/base/externalsurface.go`,
+  `drawBuffer`; `surfaceContent.splitFor`, `subtractRect`): for a buffer with
+  `opaque=false` the visible part is split into the declared rectangles (blitted with
+  `opaque=true`, row copy) and the rest (blended). Cached per (region pointer, visible
+  rect) under the surface's content lock. More than `maxOpaqueSplit` (16) rectangles: the
+  whole buffer is blended as before. `OpaqueRegion()` semantics unchanged.
+- Shadow without its middle: `draw.ShadowAroundDrawer{DrawShadowAround(r, corner, blur,
+  offX, offY, col, covered)}` implemented by `raster.Canvas`, `draw.Recorder` (`OpShadow`
+  with `Ext.Rect = covered`; the replayer falls back to `DrawShadow` for a context without
+  it) and `overlay.Translating`. `widget.DrawShadowSpecAround(ctx, r, corner, sp, covered)`
+  and `widget.ShadowCovered(r, corner)` (the band without the corner rows, one row of
+  slack). `core/raster/shadowcache.go`: the template path blits up to four strips of
+  `area` minus the hole (`blitShadowTemplate`); a tile wholly inside the hole costs
+  nothing. On a fractional scale the hole shrinks by one physical pixel. The direct (small
+  shadow) path ignores the hole. `widget.Window` passes `shadowCovered()` — empty when it
+  has a backdrop material or a translucent `Background`.
+- Move reuse (`engine/movekeep.go`, `hashdiff.go`): `planFrame` no longer forces every
+  selected tile on a frame with moves (`forceAll` is `all` only). A tile touched by an
+  applied move's destination (`raster.Canvas.AppliedMoves()`, physical pairs) is drawn
+  unless `moveKeeps` proves it: the tile lies wholly in the destination and in the visible
+  opaque part of an `ExternalSurface` whose `OpDirect` command is the last one touching the
+  tile (`curTop`), outside the corners of a round clip; the tiles under the source are
+  valid and had the same surface on top (`prevTop`); the surface's `Stamp()` (`Rev`, `Buf`,
+  `Opaque`) is unchanged and its physical origin moved by exactly the move's offset, with
+  the round clip moving along. Forced tiles (orphan `InvalidateRect`, blur layer misses),
+  tiles under post-raster layers and surfaces under a context offset are never kept. Kept
+  tiles count in `Stats.TilesSkipped` and `Stats.TilesMoved`; their hash becomes valid.
+  Destination tiles the frame did not select lose their valid hash
+  (`dropMovedUnselected`). `ExternalSurface.Stamp() widget.SurfaceStamp` — `Rev` grows on
+  `Swap`, `Update`/`InvalidateRects`, `SetBGRA`, `SetBackground`, `SetOpaqueRegion`.
+  `Engine.SetMoveReuse(false)` / `MoveReuse()` restore the old behaviour; the picture is
+  the same.
+- Consumer guidance: declare a moved window's place with `SetBounds`/`InvalidateArea`
+  (owned damage); orphan `widget.InvalidateRect` over the window forces its tiles.
+- Tests: `engine/framerequest_test.go`, `engine/externalsurface_opaqueblit_test.go`,
+  `widget/base/externalsurface_split_test.go`, `core/raster/shadowaround_test.go`,
+  `engine/shadowaround_test.go`, `engine/movekeep_test.go` (two engines, reuse on and off,
+  frames compared byte for byte after every step; a random session; consumer buffers; two
+  buffers; round and rectangular clips).

@@ -5508,6 +5508,36 @@ lets a consumer mutate the scene and produce the frame on one goroutine,
 removing that race by construction. `Frames()` keeps working: the sink is an
 alternative, not a replacement.
 
+The UI also changes without the consumer: a clock, a hover, an animation step,
+an open menu. Under external pacing such changes would stay undrawn until the
+next request, and the consumer has no way to learn about them (v4.3):
+
+```go
+eng.SetOnFrameNeeded(func() {   // there is something to draw and no frame is requested
+    if haveFreeBuffer() {
+        eng.RequestFrame()
+    }
+})
+```
+
+The call comes on the engine's goroutine, at most once per frame interval, and
+repeats while the damage is undrawn and no frame is requested: answer at once
+or later, when a buffer frees up. Under ticker pacing there is no call.
+
+#### A whole frame on request (v4.3)
+
+```go
+eng.RequestFullFrame()          // the next frame carries every tile, with no comparison
+```
+
+For a consumer that lost part of the picture through no fault of the engine: a
+remote client asked for a repaint, a suspended client came back. `RequestFrame`
+draws only what changed, and a consumer with the frame in its own buffers
+cannot get pixels the engine did not mark. The tree is not re-recorded for it —
+the frame replays the retained command lists. Under external pacing the call
+also requests the frame; under ticker pacing the frame comes on the next tick
+even if the UI did not change.
+
 #### When a channel consumer falls behind
 
 The `Frames()` channel is shallow (8 frames) and drops a frame on overflow.
@@ -5714,6 +5744,29 @@ panel.RaiseChild(surf)                       // raise above the siblings; LowerC
   returns to the direct blur, for comparison.
 - **Window move.** A move is announced together with the shadow margin, so the shadow of a
   dragged window moves as a copy, not as tiles.
+- **Shadow without its middle (v4.3).** A window with an opaque background covers its own
+  middle, so the shadow under it is not drawn at all — only the ring around it (0.3 ms
+  instead of 2 ms a frame under a 1200×720 window). Your own layer gets the same with
+  `widget.DrawShadowSpecAround(ctx, r, corner, sp, widget.ShadowCovered(r, corner))`: the
+  last argument is what the layer paints opaquely right after. A layer with a translucent
+  background, or glass that reads what is under it, has nothing to promise — it uses
+  `DrawShadowSpec`.
+- **The opaque region reaches the blit (v4.3).** For a buffer with alpha, the parts named by
+  `SetOpaqueRegion` are copied row by row like an opaque buffer; only the rest is blended.
+  A window with round corners or its own shadow no longer has to be blended whole or to
+  pass for opaque. It is a promise, like a buffer's `opaque`. A region of more than 16
+  rectangles does not affect the blit.
+- **A move does not redraw a program's window (v4.3).** After a declared move
+  (`widget.NotifyWidgetMove`) the frame does not draw the tiles of an external surface that
+  the move already put in place: it draws the rim, what the window uncovered and what lies
+  over it. The engine does not trust the declaration and keeps a tile only when it is
+  proven: the surface is opaque there (an `opaque` buffer or a `SetOpaqueRegion` part),
+  nothing lies over it, its content has not changed since the last frame, and it moved by
+  exactly the move's offset. For this to work, declare the window's place as owned damage
+  (`SetBounds`, `InvalidateArea`), not as orphan `widget.InvalidateRect`, which redraws
+  everything under it. Under a round clip that stays put nothing is kept.
+  `Stats().TilesMoved` counts the kept tiles; `Engine.SetMoveReuse(false)` restores the old
+  behaviour, and the picture is the same on both paths.
 
 - **Your own output buffers.** `Engine.SetSurfaces(bufs, stride, format)` takes two to
   four consumer buffers of one size: the engine draws the frame straight into a free one

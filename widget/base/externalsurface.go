@@ -128,6 +128,7 @@ func (s *ExternalSurface) SetBackground(c color.RGBA) {
 	n.bg = c
 	s.meta.Store(&n)
 	s.metaMu.Unlock()
+	s.content.rev.Add(1)
 	s.Invalidate()
 }
 
@@ -151,6 +152,7 @@ func (s *ExternalSurface) SetBGRA(on bool) {
 	n.bgra = on
 	s.meta.Store(&n)
 	s.metaMu.Unlock()
+	s.content.rev.Add(1)
 	s.Invalidate()
 }
 
@@ -191,6 +193,9 @@ func (s *ExternalSurface) Swap(next *image.RGBA, opaque bool, damage []image.Rec
 	s.meta.Store(m)
 	s.metaMu.Unlock()
 	s.mu.Unlock()
+	// Другой буфер — другая версия, даже если приложение обещает, что на
+	// экране ничего не изменилось: движок сверяет то, что видел сам.
+	s.content.rev.Add(1)
 
 	// Области годятся только при том же устройстве буфера: другой размер или
 	// порядок смешивания меняет всю картинку.
@@ -388,10 +393,27 @@ func (s *ExternalSurface) drawBuffer(ctx DrawContext, b image.Rectangle, k float
 		}
 	}
 	if sw > 0 && sh > 0 {
+		blit := BlitPixels
 		if m.bgra {
-			BlitPixelsBGRA(ctx, buf, sr, b.Min.X, b.Min.Y, m.opaque)
-		} else {
-			BlitPixels(ctx, buf, sr, b.Min.X, b.Min.Y, m.opaque)
+			blit = BlitPixelsBGRA
 		}
+		if !m.opaque {
+			// Буфер с альфой, но клиент назвал непрозрачные части
+			// (SetOpaqueRegion): они копируются строками, смешивается только
+			// остальное — углы, кромка, тень.
+			if op := s.content.opaque.Load(); op != nil {
+				solid, rest, ok := s.content.splitFor(op, sr)
+				if ok {
+					for _, r := range solid {
+						blit(ctx, buf, r, b.Min.X, b.Min.Y, true)
+					}
+					for _, r := range rest {
+						blit(ctx, buf, r, b.Min.X, b.Min.Y, false)
+					}
+					return
+				}
+			}
+		}
+		blit(ctx, buf, sr, b.Min.X, b.Min.Y, m.opaque)
 	}
 }

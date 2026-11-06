@@ -40,6 +40,7 @@ type Replayer struct {
 	paths    PathShapes
 	shadow   ShadowDrawer
 	shadowP  ShadowParamDrawer
+	shadowA  ShadowAroundDrawer
 	backdrop BackdropDrawer
 	mica     MicaDrawer
 	noise    NoiseDrawer
@@ -67,6 +68,7 @@ func (p *Replayer) Replay(ctx DrawContext, root *List, o ReplayOpts) {
 	p.paths, _ = ctx.(PathShapes)
 	p.shadow, _ = ctx.(ShadowDrawer)
 	p.shadowP, _ = ctx.(ShadowParamDrawer)
+	p.shadowA, _ = ctx.(ShadowAroundDrawer)
 	p.backdrop, _ = ctx.(BackdropDrawer)
 	p.mica, _ = ctx.(MicaDrawer)
 	p.noise, _ = ctx.(NoiseDrawer)
@@ -241,8 +243,12 @@ func (p *Replayer) cmd(c *Cmd) {
 			p.shadow.DrawSoftShadow(c.rect(), rad, c.F[0], c.Col)
 		}
 	case OpShadow:
-		if p.shadowP != nil {
-			f := &c.Ext.F
+		f := &c.Ext.F
+		switch {
+		case p.shadowA != nil && !c.Ext.Rect.Empty():
+			p.shadowA.DrawShadowAround(c.rect(), rad, f[0], f[1], f[2], c.Col, c.Ext.Rect)
+		case p.shadowP != nil:
+			// Контекст без выреза рисует тень целиком: слой закроет лишнее.
 			p.shadowP.DrawShadow(c.rect(), rad, f[0], f[1], f[2], c.Col)
 		}
 	case OpBlurBehind:

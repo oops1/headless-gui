@@ -280,6 +280,9 @@ func StopAllAnimations() { base.StopAllAnimations() }
 // ShadowParamDrawer — см. draw.ShadowParamDrawer (core/draw); алиас: тот же тип.
 type ShadowParamDrawer = base.ShadowParamDrawer
 
+// ShadowAroundDrawer — см. draw.ShadowAroundDrawer (core/draw); алиас: тот же тип.
+type ShadowAroundDrawer = base.ShadowAroundDrawer
+
 // MicaDrawer — см. draw.MicaDrawer (core/draw); алиас: тот же тип.
 type MicaDrawer = base.MicaDrawer
 
@@ -288,6 +291,30 @@ type MicaDrawer = base.MicaDrawer
 // PaintStyle, окно, диалог, меню. Пустая тень или контекст без тени — ничего.
 func DrawShadowSpec(ctx DrawContext, r image.Rectangle, corner int, sp theme.ShadowSpec) {
 	base.DrawShadowSpec(ctx, r, corner, sp)
+}
+
+// DrawShadowSpecAround — DrawShadowSpec для слоя, который сразу следом сам
+// закрасит область covered непрозрачно: тень под ней не рисуется вовсе. Под
+// окном это почти вся площадь тени — её сборка и смешивание по пикселю были
+// главной ценой кадра, пока окно тащат, а видно от тени только кольцо вокруг.
+//
+// covered — обещание, как opaque у буфера: всё, что в ней, слой перекроет
+// пикселями с альфой 255 в том же кадре и под тем же клипом. У слоя со
+// скруглением corner это его прямоугольник без верхних и нижних corner строк
+// (ShadowCovered); слой с полупрозрачным фоном или материалом, читающим то,
+// что под ним (Acrylic), обещать нечего — ему пустой covered или
+// DrawShadowSpec. Картинка при верном обещании та же, что у DrawShadowSpec;
+// контекст без выреза рисует тень целиком.
+func DrawShadowSpecAround(ctx DrawContext, r image.Rectangle, corner int, sp theme.ShadowSpec, covered image.Rectangle) {
+	base.DrawShadowSpecAround(ctx, r, corner, sp, covered)
+}
+
+// ShadowCovered — область слоя r со скруглением corner, которую его
+// непрозрачная заливка закрывает наверняка: полоса на всю ширину без строк
+// скругления сверху и снизу (и ещё одной строки запаса). Для
+// DrawShadowSpecAround. Пустая — слой ниже двух скруглений.
+func ShadowCovered(r image.Rectangle, corner int) image.Rectangle {
+	return base.ShadowCovered(r, corner)
 }
 
 // MenuShadow — тень всплывающего меню по токенам активной темы (стиль "menu":
@@ -1843,6 +1870,11 @@ const (
 	// ContentVideo — видео, как бы редко окно ни обновлялось.
 	ContentVideo = base.ContentVideo
 )
+
+// SurfaceStamp — снимок поверхности для движка: по нему кадр узнаёт, что окно
+// программы переехало, не изменившись, и не перерисовывает его после
+// объявленного переноса (NotifyMove). Срез Solid читать, не изменяя.
+type SurfaceStamp = base.SurfaceStamp
 
 // VideoSurface — окно программы, показывающее видео, как его видит движок:
 // где оно на экране и что лежит над ним. Координаты логические экранные.

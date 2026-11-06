@@ -98,6 +98,9 @@ type sceneState struct {
 	// (переиспользуется, без аллокаций на кадр).
 	hashDiff atomic.Bool
 	plan     framePlan
+	// moveReuse — кадр с переносом не рисует тайлы окна программы, которые
+	// перенос положил на место (movekeep.go).
+	moveReuse atomic.Bool
 	// single — один буфер кадра (ADR-0007, toplayers.go, singlebuf.go холста).
 	single atomic.Bool
 

@@ -90,6 +90,8 @@ type Canvas struct {
 	shadowClock    uint64
 	shadowBuf      []byte
 	shadowCacheOff bool
+	// applied — переносы последнего ApplyMovesToFront (canvas_frame.go).
+	applied []AppliedMove
 	// shaper — шейпинг сложного текста (RTL, лигатуры; см. core/text/shaper.go).
 	// Один на холст и его клоны (CloneForSize, растр повёрнутого текста):
 	// личные typesetting-face шрифтов холста читаются только под его замком.

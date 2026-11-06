@@ -20,6 +20,9 @@ import (
 // ShadowParamDrawer — см. draw.ShadowParamDrawer (core/draw); алиас: тот же тип.
 type ShadowParamDrawer = hgdraw.ShadowParamDrawer
 
+// ShadowAroundDrawer — см. draw.ShadowAroundDrawer (core/draw); алиас: тот же тип.
+type ShadowAroundDrawer = hgdraw.ShadowAroundDrawer
+
 // MicaDrawer — см. draw.MicaDrawer (core/draw); алиас: тот же тип.
 type MicaDrawer = hgdraw.MicaDrawer
 
@@ -41,6 +44,46 @@ func DrawShadowSpec(ctx DrawContext, r image.Rectangle, corner int, sp theme.Sha
 		dy := int(math.Round(sp.OffsetY - sp.Blur/2))
 		sd.DrawSoftShadow(r.Add(image.Pt(dx, dy)), corner, sp.Blur, sp.Color)
 	}
+}
+
+// DrawShadowSpecAround — DrawShadowSpec для слоя, который сразу следом сам
+// закрасит область covered непрозрачно: тень под ней не рисуется вовсе. Под
+// окном это почти вся площадь тени — её сборка и смешивание по пикселю были
+// главной ценой кадра, пока окно тащат, а видно от тени только кольцо вокруг.
+//
+// covered — обещание, как opaque у буфера: всё, что в ней, слой перекроет
+// пикселями с альфой 255 в том же кадре и под тем же клипом. У слоя со
+// скруглением corner это его прямоугольник без верхних и нижних corner строк
+// (ShadowCovered); слой с полупрозрачным фоном или материалом, читающим то,
+// что под ним (Acrylic), обещать нечего — ему пустой covered или
+// DrawShadowSpec. Картинка при верном обещании та же, что у DrawShadowSpec;
+// контекст без выреза рисует тень целиком.
+func DrawShadowSpecAround(ctx DrawContext, r image.Rectangle, corner int, sp theme.ShadowSpec, covered image.Rectangle) {
+	if sp.IsZero() || r.Empty() {
+		return
+	}
+	if !covered.Empty() {
+		if ad, ok := ctx.(ShadowAroundDrawer); ok {
+			ad.DrawShadowAround(r, corner, sp.Blur, sp.OffsetX, sp.OffsetY, sp.Color, covered)
+			return
+		}
+	}
+	DrawShadowSpec(ctx, r, corner, sp)
+}
+
+// ShadowCovered — область слоя r со скруглением corner, которую его
+// непрозрачная заливка закрывает наверняка: полоса на всю ширину без строк
+// скругления сверху и снизу (и ещё одной строки запаса). Для
+// DrawShadowSpecAround. Пустая — слой ниже двух скруглений.
+func ShadowCovered(r image.Rectangle, corner int) image.Rectangle {
+	if corner < 0 {
+		corner = 0
+	}
+	c := image.Rect(r.Min.X, r.Min.Y+corner+1, r.Max.X, r.Max.Y-corner-1)
+	if c.Empty() {
+		return image.Rectangle{}
+	}
+	return c
 }
 
 // MenuShadow — тень всплывающего меню по токенам активной темы (стиль "menu":

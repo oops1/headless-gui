@@ -95,6 +95,7 @@ func (c *Canvas) allTilesNoData() []output.DirtyTile {
 // только они. Отброшенное объявление в кадре было бы ложью: потребитель
 // скопировал бы то, чего движок у себя не копировал.
 func (c *Canvas) ApplyMovesToFront(moves []output.MoveRegion) []output.MoveRegion {
+	c.applied = c.applied[:0]
 	if len(moves) == 0 || c.front == nil {
 		return nil
 	}
@@ -141,6 +142,7 @@ func (c *Canvas) ApplyMovesToFront(moves []output.MoveRegion) []output.MoveRegio
 		}
 		blitWithin(c.front, src, dst.Min)
 		c.mirrorMove(src, dst.Min)
+		c.applied = append(c.applied, AppliedMove{Src: src, Dst: dst})
 		taken = append(taken, src, dst)
 		out = append(out, output.MoveRegion{From: m.From, Rect: m.Rect})
 	}
@@ -149,6 +151,16 @@ func (c *Canvas) ApplyMovesToFront(moves []output.MoveRegion) []output.MoveRegio
 	}
 	return out
 }
+
+// AppliedMove — перенос, выполненный в переднем буфере, в физических
+// пикселях: пиксели Dst — прежние пиксели Src.
+type AppliedMove struct {
+	Src, Dst image.Rectangle
+}
+
+// AppliedMoves — переносы, которые выполнил последний ApplyMovesToFront
+// (пусто — ни одного). Срез живёт до следующего вызова.
+func (c *Canvas) AppliedMoves() []AppliedMove { return c.applied }
 
 // mirrorMove повторяет перенос в собственном окне back (ADR-0007): окно
 // размером с кадр переносит те же области и остаётся равным front; окно

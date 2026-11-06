@@ -75,6 +75,9 @@ type Stats struct {
 	// TilesSkipped — тайлы, которые хэш-дифф (hashdiff.go) не рисовал и не
 	// сравнивал: их команды не менялись с кадра, когда их рисовали.
 	TilesSkipped uint64
+	// TilesMoved — из них тайлы окон программ, которые кадр не рисовал после
+	// объявленного переноса: перенос положил их на место (movekeep.go).
+	TilesMoved uint64
 	// BufferBytes — байт в собственных буферах кадра холста после последнего
 	// кадра: front и окно back (ADR-0007). Не накопительный: текущее
 	// значение. Окна воркеров, кэш размытия и буферы потребителя сюда не
@@ -100,6 +103,7 @@ type engineStats struct {
 	tiledFrames          atomic.Uint64
 	blurHits, blurMisses atomic.Uint64
 	tilesSkipped         atomic.Uint64
+	tilesMoved           atomic.Uint64
 	bufferBytes          atomic.Uint64
 }
 
@@ -133,6 +137,7 @@ func (e *Engine) Stats() Stats {
 		BlurHits:      s.blurHits.Load(),
 		BlurMisses:    s.blurMisses.Load(),
 		TilesSkipped:  s.tilesSkipped.Load(),
+		TilesMoved:    s.tilesMoved.Load(),
 		BufferBytes:   s.bufferBytes.Load(),
 		PopupBytes:    e.ov.PopupBytes(),
 	}

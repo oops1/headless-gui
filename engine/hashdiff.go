@@ -19,6 +19,7 @@ import (
 	"image"
 
 	hgdraw "github.com/oops1/headless-gui/v4/core/draw"
+	hgraster "github.com/oops1/headless-gui/v4/core/raster"
 	"github.com/oops1/headless-gui/v4/output"
 )
 
@@ -45,16 +46,22 @@ type framePlan struct {
 	// force — ничейное повреждение кадра (логическое): приложение заявило
 	// изменение, о котором команды не знают.
 	force []image.Rectangle
-	// forceAll — все выбранные тайлы рисуются: Invalidate(), полный кадр,
-	// переносы (они меняют front до растра).
+	// forceAll — все выбранные тайлы рисуются: Invalidate(), полный кадр.
 	forceAll bool
+	// moves — переносы, применённые к переднему буферу в этом кадре
+	// (физические). Тайл, задетый назначением переноса, рисуется: его пиксели
+	// сменились мимо команд — кроме тайлов окна программы, для которых
+	// доказано, что перенос положил их на место (movekeep.go). reuse —
+	// доказывать разрешено (SetMoveReuse).
+	moves []hgraster.AppliedMove
+	reuse bool
 }
 
-// planFrame собирает план кадра. all — Invalidate() или полный кадр; moved —
-// в этом кадре применены переносы.
-func (e *Engine) planFrame(all bool, force []image.Rectangle, moved bool) *framePlan {
+// planFrame собирает план кадра. all — Invalidate() или полный кадр; moves —
+// переносы, применённые в этом кадре к переднему буферу.
+func (e *Engine) planFrame(all bool, force []image.Rectangle, moves []hgraster.AppliedMove) *framePlan {
 	p := &e.plan
-	*p = framePlan{force: force, forceAll: all || moved}
+	*p = framePlan{force: force, forceAll: all, moves: moves, reuse: e.moveReuse.Load()}
 	return p
 }
 
@@ -68,14 +75,19 @@ func (tr *tileRaster) hashTiles() {
 	canvas := tr.canvas
 	cols, rows := canvas.TileGrid()
 	ts := output.TileSize
-	cur := tr.cur
+	cur, top := tr.cur, tr.curTop
 	for _, i := range tr.selected {
 		cur[i] = hgdraw.HashSeed
+		top[i] = 0
 	}
+	tr.beginSurfaces()
 	sel, selL := tr.selRect, tr.selL
 	nonce := tr.frameNo
 	inv := tr.e.imgInv
-	fold := func(pr image.Rectangle, v uint64) {
+	// fold подмешивает команду в тайлы её охвата и запоминает, кто рисует в
+	// них последним: owner — номер поверхности окна программы (movekeep.go), 0
+	// — всё остальное.
+	fold := func(pr image.Rectangle, v uint64, owner uint32) {
 		pr = pr.Intersect(sel)
 		if pr.Empty() {
 			return
@@ -92,6 +104,7 @@ func (tr *tileRaster) hashTiles() {
 			row := ty * cols
 			for tx := tx0; tx <= tx1; tx++ {
 				cur[row+tx] = hgdraw.Mix(cur[row+tx], v)
+				top[row+tx] = owner
 			}
 		}
 	}
@@ -104,9 +117,15 @@ func (tr *tileRaster) hashTiles() {
 	}
 	hgdraw.VisitOverlapping(tr.root, selL, func(c *hgdraw.Cmd) bool {
 		v := c.Sum()
+		owner := uint32(0)
 		switch c.Op {
-		case hgdraw.OpDirect, hgdraw.OpBlitPixels, hgdraw.OpBlitBGRA:
-			// Прямой виджет и блит буфера без версии: тайл рисуется всегда.
+		case hgdraw.OpDirect:
+			// Прямой виджет без версии: тайл рисуется всегда. Окно программы
+			// запоминается — после переноса его тайлы можно не рисовать.
+			v = hgdraw.Mix(v, nonce)
+			owner = tr.noteSurface(c)
+		case hgdraw.OpBlitPixels, hgdraw.OpBlitBGRA:
+			// Блит буфера без версии: тайл рисуется всегда.
 			v = hgdraw.Mix(v, nonce)
 		case hgdraw.OpBlurBehind:
 			// Слой читает содержимое под собой с запасом радиуса: правка под
@@ -129,7 +148,7 @@ func (tr *tileRaster) hashTiles() {
 		if x := c.Ext; x != nil && x.Img != nil {
 			v = mixImage(v, x.Img)
 		}
-		fold(canvas.PhysRect(c.BBox), v)
+		fold(canvas.PhysRect(c.BBox), v, owner)
 		return true
 	})
 }
@@ -166,14 +185,34 @@ func (tr *tileRaster) decide(plan *framePlan) {
 		}
 	}
 	tr.tiles, tr.skipped = tr.tiles[:0], tr.skipped[:0]
+	clear(tr.kept)
+	moved := 0
 	for _, i := range tr.selected {
-		if plan.forceAll || !tr.valid[i] || tr.forced[i] || tr.cur[i] != tr.prev[i] {
+		draw := plan.forceAll || !tr.valid[i] || tr.forced[i] || tr.cur[i] != tr.prev[i]
+		if len(plan.moves) > 0 {
+			tile := canvas.TileRect(i)
+			if m, hit := moveFor(plan.moves, tile); hit {
+				// Перенос сменил пиксели тайла мимо команд: рисуется, если не
+				// доказано, что на месте уже то, что нарисовал бы кадр.
+				draw = true
+				if m != nil && plan.reuse && !plan.forceAll && !tr.forced[i] && tr.moveKeeps(i, tile, m) {
+					draw = false
+					tr.kept[i] = true
+					moved++
+				}
+			}
+		}
+		if draw {
 			tr.tiles = append(tr.tiles, i)
 			continue
 		}
 		tr.skipped = append(tr.skipped, i)
 		tr.skipMask[i] = true
 	}
+	if len(plan.moves) > 0 {
+		tr.dropMovedUnselected(plan.moves)
+	}
+	tr.moved = moved
 }
 
 // layersTouchRendered — какой-то из рисуемых тайлов задевает слой размытия
@@ -198,6 +237,8 @@ func (tr *tileRaster) unskip() {
 	tr.tiles = append(tr.tiles[:0], tr.selected...)
 	tr.skipped = tr.skipped[:0]
 	clear(tr.skipMask)
+	clear(tr.kept)
+	tr.moved = 0
 }
 
 // setTiles ставит v тайлам, задевающим физический прямоугольник r.
@@ -281,8 +322,19 @@ func (tr *tileRaster) finishHash(plan *framePlan) {
 	canvas := tr.canvas
 	for _, i := range tr.tiles {
 		tr.prev[i] = tr.cur[i]
+		tr.prevTop[i] = tr.curTop[i]
 		tr.valid[i] = !tr.partial || canvas.TileRect(i).In(tr.damage)
 	}
+	if tr.moved > 0 {
+		// Тайл, оставленный переносом (movekeep.go), целиком равен тому, что
+		// нарисовал бы кадр, — где бы ни проходила кромка повреждения.
+		for _, i := range tr.skipped {
+			if tr.kept[i] {
+				tr.prev[i], tr.prevTop[i], tr.valid[i] = tr.cur[i], tr.curTop[i], true
+			}
+		}
+	}
+	tr.keepSurfaces()
 	if tr.partial {
 		// Слой, выполненный в частичном кадре с областью чтения шире
 		// повреждения, читал за его краем прошлый back — как на прямом пути,
