@@ -601,19 +601,65 @@ func TestMoveKeep_RoundCornersOnTileGrid(t *testing.T) {
 	}
 }
 
-// Содержимое едет под неподвижным скруглённым клипом: тайл, приехавший из
-// срезанного угла, несёт стол, а не окно, — рисуется.
+// Содержимое едет под неподвижным скруглённым клипом (прокрутка внутри рамки):
+// тайл, приехавший из срезанного угла, несёт стол, а не окно, — рисуется;
+// тайл, приехавший из середины в середину, остаётся переносу. Рамка стоит на
+// сетке тайлов, сдвиги — на целый тайл и нет: углы задевают и источник, и
+// назначение.
 func TestMoveKeep_ContentSlidesUnderFixedRoundClip(t *testing.T) {
 	testreset.Globals(t)
-	frame := image.Rect(64, 64, 64+512, 64+384)
-	p := newPair(t, 1, func(s *mkScene) { inFrame(s, frame, 24, 150) })
-	for k, d := range []image.Point{{0, -64}, {0, 64}, {0, -64}, {0, 64}} {
-		d := d
-		// Клип не едет вместе с содержимым: где у источника был срезанный
-		// угол, движок не разбирает — не оставляет переносу ничего.
-		if kept := p.step(t, fmt.Sprintf("шаг %d", k), func(s *mkScene) { s.slide(d) }); kept != 0 {
-			t.Errorf("шаг %d: под неподвижным скруглённым клипом оставлено %d тайлов", k, kept)
+	for _, scale := range []float64{1, 1.5} {
+		frame := image.Rect(64, 64, 64+512, 64+384)
+		p := newPair(t, scale, func(s *mkScene) {
+			inFrame(s, frame, 24, 150)
+			if scale != 1 { // буфер inFrame — в логических точках; здесь нужен физический
+				s.buf = image.NewRGBA(image.Rect(0, 0, int(float64(s.at.Dx())*scale+0.5), int(float64(s.at.Dy())*scale+0.5)))
+				mkPicture(s.buf, 3)
+				s.surf.SetBuffer(s.buf, true)
+			}
+		})
+		total := uint64(0)
+		for k, d := range []image.Point{{0, -64}, {0, 64}, {0, -64}, {0, -17}, {0, 30}, {0, 51}} {
+			d := d
+			total += p.step(t, fmt.Sprintf("scale=%v шаг %d", scale, k), func(s *mkScene) { s.slide(d) })
 		}
+		if total == 0 {
+			t.Errorf("scale=%v: под неподвижным скруглённым клипом переносу не осталось ни тайла", scale)
+		}
+	}
+}
+
+// Под неподвижным скруглённым клипом на сетке тайлов: угловые тайлы целиком
+// лежат в рамке, и после сдвига на тайл в них приезжает середина окна — но под
+// срезанным углом виден стол, они рисуются. И обратно: из углового тайла в
+// середину приезжает срезанный угол.
+func TestMoveKeep_FixedRoundClipCornersAreRedrawn(t *testing.T) {
+	testreset.Globals(t)
+	frame := image.Rect(64, 64, 64+512, 64+384)
+	p := newPair(t, 1, func(s *mkScene) {
+		f := inFrame(s, frame, 40, 0)
+		// Содержимое шире и выше рамки и едет во все стороны.
+		s.at = frame.Inset(-128)
+		s.buf = image.NewRGBA(image.Rect(0, 0, s.at.Dx(), s.at.Dy()))
+		mkPicture(s.buf, 9)
+		s.surf.SetBuffer(s.buf, true)
+		s.surf.SetBounds(s.at)
+		_ = f
+	})
+	// Прокрутка: переезжает то, что видно в рамке и остаётся в ней.
+	scroll := func(s *mkScene, d image.Point) {
+		dst := frame.Intersect(frame.Add(d))
+		s.at = s.at.Add(d)
+		widget.NotifyMove(dst.Sub(d), dst)
+		s.surf.SetBounds(s.at)
+	}
+	total := uint64(0)
+	for k, d := range []image.Point{{64, 0}, {0, 64}, {-64, -64}, {64, 64}, {-64, 0}, {0, -64}} {
+		d := d
+		total += p.step(t, fmt.Sprintf("шаг %d", k), func(s *mkScene) { scroll(s, d) })
+	}
+	if total == 0 {
+		t.Error("содержимое под скруглённой рамкой не оставило переносу ни тайла")
 	}
 }
 
@@ -753,3 +799,21 @@ func benchSurfaceDrag(b *testing.B, reuse bool) {
 
 func BenchmarkMoveKeep_SurfaceDrag(b *testing.B)        { benchSurfaceDrag(b, true) }
 func BenchmarkMoveKeep_SurfaceDragRedrawn(b *testing.B) { benchSurfaceDrag(b, false) }
+
+// Окно выросло и переехало разом, а буфер прежний: перенос объявлен на новый
+// размер, но в источнике окно занимало только часть — рядом был стол. Тайл,
+// приехавший с этой границы, несёт стол и рисуется.
+func TestMoveKeep_SourceWiderThanWindowWasIsRedrawn(t *testing.T) {
+	testreset.Globals(t)
+	for _, d := range []image.Point{{64, 0}, {0, 64}, {37, 21}} {
+		p := newPair(t, 1, func(s *mkScene) {
+			s.surf.SetBounds(image.Rect(s.at.Min.X, s.at.Min.Y, s.at.Min.X+300, s.at.Min.Y+230))
+		})
+		p.step(t, fmt.Sprintf("сдвиг %v", d), func(s *mkScene) {
+			old := s.at
+			s.at = s.at.Add(d)
+			widget.NotifyWidgetMove(s.surf, old, s.at)
+			s.surf.SetBounds(s.at)
+		})
+	}
+}

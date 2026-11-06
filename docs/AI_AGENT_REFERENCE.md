@@ -10628,7 +10628,12 @@ scene pilot"). New public API, no behaviour change for existing programs.
   and `widget.ShadowCovered(r, corner)` (the band without the corner rows, one row of
   slack). `core/raster/shadowcache.go`: the template path blits up to four strips of
   `area` minus the hole (`blitShadowTemplate`); a tile wholly inside the hole costs
-  nothing. On a fractional scale the hole shrinks by one physical pixel. The direct (small
+  nothing (not even the template is built). The template is blended straight into back,
+  with no scratch image (`overSliceRow`): corners and ends through `overRow`, the middle of
+  a side — one template pixel repeated — through `overFill`, two pixels a step on 16-bit
+  lanes of a 64-bit word, division by 255 as `(x+1+x>>8)>>8` (`core/raster/overrow.go`;
+  bytes equal to the per-channel loop, `overrow_test.go`). `drawColorGlyph` (emoji, colour
+  glyphs, the direct shadow path) uses `overRow` too. On a fractional scale the hole shrinks by one physical pixel. The direct (small
   shadow) path ignores the hole. `widget.Window` passes `shadowCovered()` — empty when it
   has a backdrop material or a translucent `Background`.
 - Move reuse (`engine/movekeep.go`, `hashdiff.go`): `planFrame` no longer forces every
@@ -10636,10 +10641,12 @@ scene pilot"). New public API, no behaviour change for existing programs.
   applied move's destination (`raster.Canvas.AppliedMoves()`, physical pairs) is drawn
   unless `moveKeeps` proves it: the tile lies wholly in the destination and in the visible
   opaque part of an `ExternalSurface` whose `OpDirect` command is the last one touching the
-  tile (`curTop`), outside the corners of a round clip; the tiles under the source are
-  valid and had the same surface on top (`prevTop`); the surface's `Stamp()` (`Rev`, `Buf`,
-  `Opaque`) is unchanged and its physical origin moved by exactly the move's offset, with
-  the round clip moving along. Forced tiles (orphan `InvalidateRect`, blur layer misses),
+  tile (`curTop`), outside the corners of a round clip; the source lay wholly in the
+  surface's visible part of that frame (`surfSeen.area`: clip ∩ buffer place) outside the
+  corners of that frame's round clip, the tiles under it are valid and had the same surface
+  on top (`prevTop`); the surface's `Stamp()` (`Rev`, `Buf`, `Opaque`) is unchanged and its
+  physical origin moved by exactly the move's offset. The round clip may move with the
+  surface or stay put (content scrolled inside a rounded frame). Forced tiles (orphan `InvalidateRect`, blur layer misses),
   tiles under post-raster layers and surfaces under a context offset are never kept. Kept
   tiles count in `Stats.TilesSkipped` and `Stats.TilesMoved`; their hash becomes valid.
   Destination tiles the frame did not select lose their valid hash

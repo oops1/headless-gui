@@ -5745,8 +5745,10 @@ panel.RaiseChild(surf)                       // raise above the siblings; LowerC
 - **Window move.** A move is announced together with the shadow margin, so the shadow of a
   dragged window moves as a copy, not as tiles.
 - **Shadow without its middle (v4.3).** A window with an opaque background covers its own
-  middle, so the shadow under it is not drawn at all — only the ring around it (0.3 ms
-  instead of 2 ms a frame under a 1200×720 window). Your own layer gets the same with
+  middle, so the shadow under it is not drawn at all — only the ring around it, and the
+  ring is blended straight from the shadow template, the middles of its sides two pixels at
+  a time (0.15 ms instead of 2 ms a frame under a 1200×720 window; a whole shadow, with no
+  hole, takes 0.8 ms). Your own layer gets the same with
   `widget.DrawShadowSpecAround(ctx, r, corner, sp, widget.ShadowCovered(r, corner))`: the
   last argument is what the layer paints opaquely right after. A layer with a translucent
   background, or glass that reads what is under it, has nothing to promise — it uses
@@ -5764,8 +5766,9 @@ panel.RaiseChild(surf)                       // raise above the siblings; LowerC
   nothing lies over it, its content has not changed since the last frame, and it moved by
   exactly the move's offset. For this to work, declare the window's place as owned damage
   (`SetBounds`, `InvalidateArea`), not as orphan `widget.InvalidateRect`, which redraws
-  everything under it. Under a round clip that stays put nothing is kept.
-  `Stats().TilesMoved` counts the kept tiles; `Engine.SetMoveReuse(false)` restores the old
+  everything under it. A round clip may move with the window (a program window's frame) or
+  stay put (content scrolled inside a frame): tiles under the cut corners are drawn, the
+  rest are kept. `Stats().TilesMoved` counts the kept tiles; `Engine.SetMoveReuse(false)` restores the old
   behaviour, and the picture is the same on both paths.
 
 - **Your own output buffers.** `Engine.SetSurfaces(bufs, stride, format)` takes two to

@@ -122,20 +122,26 @@ func TestShadowAround_EmptyCoveredIsWholeShadow(t *testing.T) {
 }
 
 // Отрисовка тени окна, которое целиком закрывает клип (тайл под окном), не
-// собирает ничего: рабочий буфер тени не растёт.
+// стоит ничего: даже шаблон тени не строится и холст не тронут.
 func TestShadowAround_TileUnderWindowCostsNothing(t *testing.T) {
 	testreset.Globals(t)
 	r := image.Rect(20, 20, 620, 420)
 	c := engineCanvas(640, 440)
+	bg := color.RGBA{R: 200, G: 210, B: 220, A: 255}
+	c.FillRect(0, 0, 640, 440, bg)
+	before := append([]byte(nil), c.Back().Pix...)
 	c.SetClip(image.Rect(256, 192, 320, 256)) // тайл в середине окна
 	c.DrawShadowAround(r, 8, 16, 0, 8, color.RGBA{A: 110}, base.ShadowCovered(r, 8))
-	if n := cap(c.shadowBuf); n != 0 {
-		t.Errorf("тайл под окном собрал тень: рабочий буфер %d байт", n)
+	if n := len(c.shadowCache); n != 0 {
+		t.Errorf("тайл под окном построил шаблон тени (%d в кэше)", n)
 	}
-	// Без выреза тот же тайл собирается и смешивается.
+	if !bytes.Equal(before, c.Back().Pix) {
+		t.Error("тайл под окном тронул холст")
+	}
+	// Без выреза тот же тайл строит шаблон и смешивается.
 	c.DrawShadow(r, 8, 16, 0, 8, color.RGBA{A: 110})
-	if cap(c.shadowBuf) == 0 {
-		t.Fatal("тайл без выреза тень не собрал — проверка выше ничего не доказывает")
+	if len(c.shadowCache) == 0 || bytes.Equal(before, c.Back().Pix) {
+		t.Fatal("тайл без выреза тень не нарисовал — проверка выше ничего не доказывает")
 	}
 }
 
