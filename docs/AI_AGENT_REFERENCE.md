@@ -10014,7 +10014,7 @@ exchange with a compositor was **not** run. Verified on the wire against a fake 
 Not verified: wlroots-based compositors, the WinLine compositor, and whether a given
 compositor applies a virtual keyboard's `modifiers` to the whole seat.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): engine statistics and the draw contract check
+## v4.0: engine statistics and the draw contract check
 
 Stage 0 of the 4.0 plan. Additive only: nothing existing changed behaviour. The
 numbers this work is measured against are in `docs/BENCHMARKS.md`.
@@ -10053,7 +10053,7 @@ eng.DrawContractCheck()        // bool
   `child.Draw(ctx)`, and `widget.DrawOverlayTraced` for overlays. Without it the
   path in the message stops at the container. `DrawChildren` does this already.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): failure policy
+## v4.0: failure policy
 
 Decision record: `docs/adr/0001-failure-policy.md`. A panic in widget or consumer code no
 longer kills the process by default; the engine catches it at its own boundary.
@@ -10090,7 +10090,7 @@ widget.ClearAllBroken()                       // tests only
   closed by the engine; state changed before the panic is not rolled back; the OS event
   pump in `window` is not protected until stage 9.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): scene and external surfaces
+## v4.0: scene and external surfaces
 
 Decision record: `docs/adr/0002-scene.md`. The scene is the widget tree itself: a foreign
 window is a `widget.ExternalSurface` node, and its Z order is the child order.
@@ -10163,7 +10163,7 @@ widget.VideoCandidates() int        // surfaces currently tracked (update recent
   `core/scene` package (stage 7). The WinLine session runs on the scene behind a switch. RAIL is
   outside the scene.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): UI scale at a fixed frame size
+## v4.0: UI scale at a fixed frame size
 
 ```go
 eng.SetScaleWithin(k float64)              // keep physical W×H, logical = ⌈W/k⌉×⌈H/k⌉
@@ -10177,7 +10177,7 @@ eng.ScaleWithin() bool                     // the mode is on
 - k ≤ 0 means 1. The canvas is recreated: `SetSurface`/`SetSurfaces` buffers must be set again,
   sized to `PhysicalSize()`.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): engine motion profile
+## v4.0: engine motion profile
 
 ```go
 type MotionProfile = theme.MotionProfile  // MotionFull, MotionReduced, MotionOff, MotionRemote
@@ -10200,7 +10200,7 @@ const RemoteMotionSteps = 3               // states per transition under MotionR
   quantized or finished early. Scroll wheel under `MotionOff`/`MotionRemote` scrolls at once.
 - `window` modal and dock hosts copy the parent engine's profile on creation.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): overlay and popup transitions
+## v4.0: overlay and popup transitions
 
 ```go
 eng.SetOverlayTransitions(on bool)        // off by default; OverlayTransitions()
@@ -10248,7 +10248,7 @@ type PopupTransition struct {
 - **Not implemented yet.** Popup window transitions on Wayland (single popup buffer); a separate
   engine-level transition for submenus; tooltips and modals by the same mechanism.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): package layout and the shared glyph cache
+## v4.0: package layout and the shared glyph cache
 
 Stages 4.1 and 4.2 of the 4.0 plan. Behaviour is unchanged: frames are byte-identical and
 consumer code does not change.
@@ -10302,7 +10302,7 @@ This document covers the essential API for AI code generation with headless-gui.
 - `tests/` directory — unit tests with usage patterns
 - GUIDE.md and GUIDE_EN.md — user documentation
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): command path, tiled raster, hash diff and one frame buffer
+## v4.0: command path, tiled raster, hash diff and one frame buffer
 
 Frames record drawing commands (`core/draw`), rasterise changed 64×64 tiles in a
 worker pool and send only the changed tiles to the consumer. All four parts are
@@ -10357,7 +10357,7 @@ widget.InvalidateRect(r)          // unclaimed area: every widget under it is re
   (`nil` — the whole cache) or `widget.InvalidateImageCache(ctx, img)` from `Draw`.
   A `BlitPixels` buffer is re-read in every frame where it is drawn.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): tree owner, measuring services, popup arena
+## v4.0: tree owner, measuring services, popup arena
 
 Each widget tree belongs to the engine it was handed to (`SetRoot`, and
 `ShowModal` for a modal dialog inside the canvas). A widget change wakes only that
@@ -10394,7 +10394,7 @@ Rules that follow from the design:
   canvas of the engine. `Stats().PopupBytes` is the arena buffers plus the images of
   open and fading popups; zero when no popup is open.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): live tiles of the Start menu
+## v4.0: live tiles of the Start menu
 
 - `desktop.TileSource` (`Subscribe(fn func(TileContent)) (unsubscribe func())`),
   `desktop.TileSourceFunc`, `desktop.LiveTile{Source, Queue, Period}`, the field
@@ -10416,7 +10416,7 @@ Rules that follow from the design:
   draws into a separate picture outside the frame. `Canvas.RenderOffscreen` implements
   it.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): input, frame loop and overlays as packages
+## v4.0: input, frame loop and overlays as packages
 
 Where the engine's parts live now (ADR-0011):
 
@@ -10448,7 +10448,7 @@ Where the engine's parts live now (ADR-0011):
   (`input.DismissOutside`, `input.ContentShift`, `input.OverlayHitRect`, `overlay.WidgetID`,
   `overlay.Translating`, `overlay.CollectPopups`), not through the old file names.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): widget packages
+## v4.0: widget packages
 
 Where widget code lives now (ADR-0012):
 
@@ -10490,7 +10490,7 @@ Where widget code lives now (ADR-0012):
   `*chrome.Window`; facade variables are copies; application types embedding a widget pass
   the capability-interface branches.
 
-## v4.0 (unreleased, branch `feature/engine-architecture`): window platform packages
+## v4.0: window platform packages
 
 Where window code lives now (ADR-0013):
 
@@ -10525,7 +10525,7 @@ Where window code lives now (ADR-0013):
   `DISPLAY`/`WAYLAND_DISPLAY` is set, `TestCocoaContract` builds). The capability
   matrix of the backends is in `window/README.md`.
 
-## v4.1 (unreleased, branch `develop`): Save As browses folders (RDP client Tandem)
+## v4.1: Save As browses folders (RDP client Tandem)
 
 - `ShowSaveFile` builds the same browser as `ShowOpenFile` (places, path bar, up/refresh,
   list filtered by the selected filter), Save button, Name + filter row; the overwrite
@@ -10547,7 +10547,7 @@ Where window code lives now (ADR-0013):
 - New strings (EN, RU): `dlg.file.replace.title`, `dlg.file.replace` (`%s` — file name),
   `dlg.file.badpath`.
 
-## v4.1.1 (unreleased, branch `develop`): Save As changes the extension with the filter
+## v4.1.1: Save As changes the extension with the filter
 
 - Changing the filter in Save (`matchNameToFilter` in `widget/dialog/dialog_file_path.go`,
   browser and compact form) swaps the name's extension for the new filter's first one
@@ -10557,7 +10557,7 @@ Where window code lives now (ADR-0013):
   in the field is kept. Open keeps the name. The overwrite warning follows the new name.
   No API change.
 
-## v4.2.0 (unreleased, branch `develop`): shadows — DWM where it gives them, the engine otherwise
+## v4.2: shadows — DWM where it gives them, the engine otherwise
 
 - `window.Window.SetShadowSource(window.ShadowAuto|ShadowSystem|ShadowEngine)` /
   `ShadowSource()` (`window/core/shadow.go`): who gives the shadow to the window, its

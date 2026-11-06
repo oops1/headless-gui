@@ -4781,9 +4781,10 @@ _ = mgr.RestoreLayout(data)
 **Floating panels.** By default `Float()` turns on a widget-drawn floating
 panel right inside the canvas (drag/resize with the mouse, headless-testable).
 The hook `DockPane.OnFloatNative func(p *DockPane)`, if set, hands the detach
-off to a native OS window (`window/**`) instead of the widget floating — as
-of this writing no platform backend assigns it (work in progress); with the
-hook unset, the in-canvas fallback is what runs.
+off to a native OS window (`window/**`) instead of the widget floating.
+`window.Window.EnableDockFloating(dm)` (or `NativeFloating="True"` in XAML, see
+below) assigns it on Win32 and X11; on Wayland, macOS and headless the hook
+is not assigned and the in-canvas fallback is what runs.
 
 XAML:
 
@@ -5588,7 +5589,7 @@ narrow interface — when the API changes, only that package needs editing.
 
 ---
 
-### Engine counters and the draw-contract check (v4.0, in progress)
+### Engine counters and the draw-contract check (v4.0)
 
 Two tools for those who tune the frame and look for the reason it is slow or why the
 window keeps holes in it.
@@ -5619,7 +5620,7 @@ eng.SetDrawContractCheck(true) // debugging: logs the widget that changes itself
   `widget.DrawOverlayTraced` for overlays. Without it the path in the log stops at the
   container.
 
-### Failure policy (v4.0, in progress)
+### Failure policy (v4.0)
 
 A panic in a widget's or a consumer's code no longer kills the process. The engine
 catches it at its own boundary, marks the culprit and carries on. The decision and its
@@ -5666,7 +5667,7 @@ place, and the program closes the window itself (`CloseModal`). It does not undo
 a widget made before the panic. The operating-system window (the event pump in `window`)
 is not protected yet: that is stage 9 of the plan.
 
-### Scene and external surfaces (v4.0, in progress)
+### Scene and external surfaces (v4.0)
 
 A window of another program can be shown on the engine's screen next to the engine's own
 windows: in the same widget tree, in one Z order, with the same input. The decision is in
@@ -5731,7 +5732,7 @@ panel.RaiseChild(surf)                       // raise above the siblings; LowerC
 the `core/scene` package (stage 7). The WinLine session runs on the scene behind a switch;
 the old path is not removed yet. RemoteApp windows (RAIL) are not part of the scene.
 
-### UI scale at a fixed frame size (v4.0, in progress)
+### UI scale at a fixed frame size (v4.0)
 
 `SetScale(k)` keeps the logical canvas size and grows the physical one: a 1280×800
 window at 1.5 is drawn at 1920×1200 — that is how HiDPI works for an OS window. A
@@ -5755,7 +5756,7 @@ eng.ScaleWithin()                // true: "scale within the frame" mode
   1:1. `SetSurfaces` buffers are sized to the physical size and must be set again after a
   scale change.
 
-### Engine motion profile (v4.0, in progress)
+### Engine motion profile (v4.0)
 
 "Reduced motion" (`theme.FlagMotionReduce`) is a theme setting, which means it applies to
 the whole process. The motion profile belongs to one engine: a remote session and the
@@ -5790,7 +5791,7 @@ eng.MotionProfile()
 For WinLine: the remote session is `MotionRemote`, a client without menu animations is
 `MotionOff`, the local screen is `MotionFull`.
 
-### Menu and popup transitions (v4.0, in progress)
+### Menu and popup transitions (v4.0)
 
 Menus, dropdown lists, colour pickers and date-picker calendars appear and disappear with a
 fade and a slide from their anchor. One call turns it on; duration and curve come from the
@@ -5922,7 +5923,7 @@ eng.SetPopupShadowMode(engine.PopupShadowSystem | engine.PopupShadowEngine)
 engine learns an overlay's parts from `widget.OverlayPartsProvider` (`PopupMenu` and the
 widgets with a menu inside report the cascade levels and the radius).
 
-### Shared glyph cache of the process (v4.0, in progress)
+### Shared glyph cache of the process (v4.0)
 
 When several engines run in one process — one per monitor, hosted dialogs, a second
 desktop — each glyph is rasterised once per process, not once per engine. Nothing has to be
@@ -5952,7 +5953,7 @@ engine.SetGlyphCacheBudget(128 << 20) // bytes; 0 or less means the default, 64 
   the accounting keep working, but the memory limit no longer applies to them.
 
 
-### Command path, tiled raster and one frame buffer (v4.0, in progress)
+### Command path, tiled raster and one frame buffer (v4.0)
 
 A frame is built in three steps: the tree records drawing commands, the commands
 are rasterised by 64×64 tiles in a worker pool, and only the changed tiles go to
@@ -5993,7 +5994,7 @@ eng.SetSingleBuffer(false) // two copies of the frame instead of one
   bytes of the frame buffers (about W·H·4 with one buffer).
 
 
-### Tree owner, measuring services and the popup arena (v4.0, in progress)
+### Tree owner, measuring services and the popup arena (v4.0)
 
 A widget tree belongs to the engine it was handed to: `SetRoot`, and
 `ShowModal` (a modal dialog inside the canvas). A widget change wakes only that
@@ -6041,7 +6042,7 @@ popup memory is the largest open popup plus the images of all open ones.
 `Stats().PopupBytes` reports it; with no popups open it is zero.
 
 
-## Live tiles of the Start menu (v4.0, in progress)
+## Live tiles of the Start menu (v4.0)
 
 A Windows 10 tile can show live content: a clock, mail, weather. A source
 implements `desktop.TileSource`, and the tile receives it in the `Live` field:
@@ -6101,7 +6102,7 @@ For local development use `replace`:
 replace github.com/oops1/headless-gui/v4 => ../headless-gui
 ```
 
-### Engine packages `core/` (v4.0, in progress)
+### Engine packages `core/` (v4.0)
 
 Raster, text, the drawing context, input, the frame loop and overlays moved out of `engine`
 into separate packages. An application does not need to import them: the old names are kept.
@@ -6141,7 +6142,7 @@ takes a lock or passes the call on. Calls through interfaces and function litera
 by the check; for them the rule rests on review. New code in these packages must keep the rule:
 a short leaf section with no calls out.
 
-### Widget packages `widget/*` (v4.0, in progress)
+### Widget packages `widget/*` (v4.0)
 
 `widget` is split into packages (ADR-0012). Programs need no changes: `widget` keeps the
 same API, but it is now a facade: for every name of the packages below it holds a type
