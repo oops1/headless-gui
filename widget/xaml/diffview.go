@@ -15,6 +15,7 @@ import (
 //	          HideUnchanged="True" ContextLines="3" IgnoreWhitespace="False"
 //	          SyntaxHighlight="True" ReadOnlyLeft="True" WatchFiles="True"
 //	          FontFamily="Consolas" FontSize="10"
+//	          CollapsedSide="None" ShowCollapseButtons="True" Split="0.5"
 //	          SaveCommand="{Binding Save}" DiffChangedCommand="{Binding Count}"/>
 //
 // Пути файлов — относительно каталога разметки и не выходят за него, как у
@@ -42,8 +43,22 @@ func buildXAMLDiffView(el Element, baseDir string) base.Widget {
 	flag("ShowReadOnlyMark", d.SetShowReadOnlyMark)
 	flag("ReadOnlyLeft", func(v bool) { d.SetReadOnly(base.DiffLeft, v) })
 	flag("ReadOnlyRight", func(v bool) { d.SetReadOnly(base.DiffRight, v) })
+	flag("ShowCollapseButtons", d.SetShowCollapseButtons)
 	if v := el.Attr("ContextLines"); v != "" {
 		d.SetContextLines(ParseInt(v))
+	}
+	// Свёрнутая сторона и доля ширины (GG-95): CollapsedSide="None|Left|Right",
+	// Split="0.6" — доля левой стороны.
+	switch strings.ToLower(strings.TrimSpace(el.Attr("CollapsedSide"))) {
+	case "left":
+		d.SetCollapsed(base.DiffLeft, true)
+	case "right":
+		d.SetCollapsed(base.DiffRight, true)
+	}
+	if v := el.Attr("Split"); v != "" {
+		if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			d.SetSplit(f)
+		}
 	}
 	for side, attr := range map[base.DiffSide]string{base.DiffLeft: "LeftFile", base.DiffRight: "RightFile"} {
 		if src := el.Attr(attr); src != "" {

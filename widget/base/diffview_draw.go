@@ -33,14 +33,30 @@ func (d *DiffView) Draw(ctx DrawContext) {
 	lt, rt := d.offsets(viewH)
 
 	if d.headers {
-		d.drawHeader(ctx, g, DiffLeft)
-		d.drawHeader(ctx, g, DiffRight)
+		for _, side := range []DiffSide{DiffLeft, DiffRight} {
+			if !g.fold[side] {
+				d.drawHeader(ctx, g, side)
+				d.drawFoldButton(ctx, g, side)
+			}
+		}
 	}
 
 	content := image.Rect(b.Min.X, g.cy0, b.Max.X, g.cy1).Intersect(outer)
-	d.drawPane(ctx, g, DiffLeft, lt, content)
-	d.drawPane(ctx, g, DiffRight, rt, content)
-	d.drawConnectors(ctx, g, lt, rt, content)
+	for _, side := range []DiffSide{DiffLeft, DiffRight} {
+		top := lt
+		if side == DiffRight {
+			top = rt
+		}
+		if g.fold[side] {
+			ctx.SetClip(b.Intersect(outer))
+			d.drawStrip(ctx, g, side)
+			continue
+		}
+		d.drawPane(ctx, g, side, top, content)
+	}
+	if !g.fold[DiffLeft] && !g.fold[DiffRight] {
+		d.drawConnectors(ctx, g, lt, rt, content)
+	}
 	// Линейка и горизонтальная полоса — у краёв ВИДЖЕТА, а не внутри
 	// панелей кода: возвращаем область рисования к его границам, иначе
 	// обрезок последней панели съел бы их.
@@ -115,6 +131,9 @@ func (d *DiffView) drawHeader(ctx DrawContext, g dvGeom, side DiffSide) {
 	}
 	bw := ctx.MeasureText(badge, d.fontSize) + 16
 	bx := x1 - bw - 10
+	if fb := d.foldBtnRect(g, side); !fb.Empty() {
+		bx = fb.Min.X - bw - 6 // счётчик — левее кнопки «свернуть»
+	}
 	ctx.FillRoundRect(bx, y+7, bw, h-14, 10, band)
 	ctx.DrawText(badge, bx+8, ty, dot)
 

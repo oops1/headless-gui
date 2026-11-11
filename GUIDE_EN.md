@@ -2369,6 +2369,29 @@ file; the application saves it with `SaveAs`. Commands: `SaveCommand`
 `DiffChangedCommand` (number of changes), `FileChangedCommand`
 (`DiffFileChange`); from code — `SetCommand`. Full example — `cmd/diffdemo`.
 
+**Collapse a side and move the boundary (v4.4).** With long lines half the
+width is not enough: a side collapses into a narrow strip and the other one
+takes the whole width — with change highlighting, navigation, editing and
+saving.
+
+```go
+dv.SetCollapsed(widget.DiffLeft, true) // collapse "HEAD"; collapsing the other one expands this
+dv.Collapsed(widget.DiffLeft)          // true
+dv.SetSplit(0.6)                       // share of the left side when both are expanded (0.15…0.85)
+dv.OnCollapsedChanged = func(side widget.DiffSide, collapsed bool) { saveLayout() }
+dv.OnSplitChanged = func(ratio float64) { saveLayout() }
+// dv.SetShowCollapseButtons(false) — no header buttons when the app has its own
+```
+
+Each side header has a "collapse" chevron; a click on the strip of a collapsed
+side expands it. Only one side can be collapsed; collapsing the active side
+makes the visible one active, and `SetActiveSide`/`SetCaret` on a collapsed
+side expand it. With a collapsed side the connectors and transfer buttons are
+not drawn; `CopyBlock`/`CopyAll` work from code. The boundary between expanded
+sides is dragged by the connector gap (`OnSplitChanged` comes once, on
+release), a double click on it restores 50/50. Markup:
+`CollapsedSide="None|Left|Right"`, `ShowCollapseButtons`, `Split="0.6"`.
+
 #### MergeView — three-way merge
 
 The counterpart to `DiffView`: three sides of the conflict on top (ours ·
@@ -2430,6 +2453,29 @@ With the mouse: the arrow button at a conflict chunk (at the right edge of
 menu offers every resolution, and the boundary between the top panes and the
 result is draggable. `SetShowBase(false)` hides the base pane — ours, theirs
 and the result remain.
+
+**Layout (v4.4).** The top panes collapse into narrow strips — with the
+chevron in the header or from code; a click on the strip expands it. The
+result can take the whole height (only the top headers remain) and the other
+way round — with the buttons in the result header.
+
+```go
+mv.SetPaneCollapsed(widget.MergeBase, true) // ours, base, theirs; the last expanded one cannot collapse
+mv.SetResultMaximized(true)                 // result full height; SetSourcesMaximized — the top
+mv.SetSplit(0.5)                            // share of height for the top (0.2…0.85), clears maximizing
+mv.OnLayoutChanged = func() {               // one event for any layout change
+    saveLayout(mv.PaneCollapsed(widget.MergeOurs), mv.Split(), mv.ResultMaximized())
+}
+// mv.SetShowCollapseButtons(false) — no chevrons and full-height buttons
+```
+
+A collapsed pane draws no resolve buttons; `Resolve`, `ResolveCurrent` and
+`ResolveAll` work from code. Collapsing the active pane moves input to the
+result; `SetActiveSide` on a collapsed pane expands it. `SetShowBase(false)`
+keeps its meaning — no base at all. A double click on the splitter restores
+the default 0.58. `OnLayoutChanged` also comes for showing the base and when
+the splitter is released (once per drag). Markup: `CollapsedPanes="Ours,Theirs"`,
+`Split="0.58"`, `ResultMaximized`, `SourcesMaximized`, `ShowCollapseButtons`.
 
 From code — `Resolve`, `ResolveCurrent`, `ResolveAll`, `Resolution`,
 `Unresolved`, `ConflictCount`, `NextConflict`, `PrevConflict`, `GoToConflict`,

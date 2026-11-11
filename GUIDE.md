@@ -2353,6 +2353,28 @@ dv.OnFileChangedOnDisk = func(side widget.DiffSide, path string, deleted bool) {
 изменений), `FileChangedCommand` (`DiffFileChange`); из кода — `SetCommand`.
 Полный пример — `cmd/diffdemo`.
 
+**Свернуть сторону и сдвинуть границу (v4.4).** При длинных строках половины
+ширины не хватает: сторону можно свернуть в узкую полосу, и вторая займёт всю
+ширину — с подсветкой изменений, переходом по ним, правкой и сохранением.
+
+```go
+dv.SetCollapsed(widget.DiffLeft, true) // свернуть «HEAD»; вторую — разворачивает первую
+dv.Collapsed(widget.DiffLeft)          // true
+dv.SetSplit(0.6)                       // доля левой стороны, когда развёрнуты обе (0.15…0.85)
+dv.OnCollapsedChanged = func(side widget.DiffSide, collapsed bool) { saveLayout() }
+dv.OnSplitChanged = func(ratio float64) { saveLayout() }
+// dv.SetShowCollapseButtons(false) — без кнопок в шапках, если у приложения свои
+```
+
+В шапке каждой стороны — шеврон «свернуть», полоса свёрнутой стороны
+разворачивается щелчком. Свёрнутой может быть только одна сторона; свернули
+активную — активной становится видимая, а `SetActiveSide`/`SetCaret` на
+свёрнутую её разворачивают. Коннекторы и кнопки переноса при свёрнутой стороне
+не рисуются, `CopyBlock`/`CopyAll` из кода работают. Граница между развёрнутыми
+сторонами тянется мышью за промежуток с коннекторами (`OnSplitChanged` — один
+раз, когда её отпустят), двойной щелчок по нему возвращает 50/50. В разметке:
+`CollapsedSide="None|Left|Right"`, `ShowCollapseButtons`, `Split="0.6"`.
+
 #### MergeView — трёхстороннее слияние
 
 Пара к `DiffView`: три стороны конфликта сверху (наше · база · их) и
@@ -2413,6 +2435,29 @@ git — стиль `MergeStyleMerge` или `MergeStyleDiff3` (с базой з�
 края «их») закрывает его этой стороной, контекстное меню даёт все решения,
 граница между верхом и итогом двигается перетаскиванием. `SetShowBase(false)`
 убирает панель базы — остаются наше, их и итог.
+
+**Раскладка (v4.4).** Верхние панели сворачиваются в узкие полосы — шевроном
+в шапке или из кода; полоса разворачивается щелчком. Итог можно развернуть на
+всю высоту (от верха остаются шапки) и наоборот — кнопками в шапке итога.
+
+```go
+mv.SetPaneCollapsed(widget.MergeBase, true) // «наше», «база», «их»; последнюю развёрнутую свернуть нельзя
+mv.SetResultMaximized(true)                 // итог на всю высоту; SetSourcesMaximized — верх
+mv.SetSplit(0.5)                            // доля высоты верха (0.2…0.85), снимает развёртывание
+mv.OnLayoutChanged = func() {               // одно событие на любое изменение раскладки
+    saveLayout(mv.PaneCollapsed(widget.MergeOurs), mv.Split(), mv.ResultMaximized())
+}
+// mv.SetShowCollapseButtons(false) — без шевронов и кнопок «на всю высоту»
+```
+
+У свёрнутой панели кнопки решения не рисуются; `Resolve`, `ResolveCurrent`,
+`ResolveAll` из кода работают. Свернули активную панель — ввод уходит в итог;
+`SetActiveSide` на свёрнутую её разворачивает. `SetShowBase(false)` сохраняет
+прежний смысл — базы нет совсем. Двойной щелчок по разделителю возвращает долю
+по умолчанию 0.58. `OnLayoutChanged` приходит и на показ базы, и на
+отпускание разделителя (один раз за перетаскивание). В разметке:
+`CollapsedPanes="Ours,Theirs"`, `Split="0.58"`, `ResultMaximized`,
+`SourcesMaximized`, `ShowCollapseButtons`.
 
 Программно — `Resolve`, `ResolveCurrent`, `ResolveAll`, `Resolution`,
 `Unresolved`, `ConflictCount`, `NextConflict`, `PrevConflict`, `GoToConflict`,

@@ -129,6 +129,15 @@ type MergeView struct {
 	resultDrives bool    // ведущая часть — итог (её прокрутили или правили последней)
 	split        float64 // доля высоты под верхние панели
 
+	// Свёрнутые панели и развёртывание на всю высоту (GG-96,
+	// mergeview_collapse.go).
+	coll         [3]bool // свёрнутые верхние панели
+	foldBtns     bool
+	maxMode      int // mvMaxNone, mvMaxResult, mvMaxSources
+	hoverFold    int // элемент сворачивания под мышью (hitFoldLocked); -1 — нет
+	layoutEvent  bool
+	splitClickAt time.Time
+
 	active                    MergeSide
 	current, hoverBtn         int
 	hoverChunk                int
@@ -158,6 +167,11 @@ type MergeView struct {
 	OnActiveSideChange func(side MergeSide)
 	OnSaveRequest      func() // Ctrl+S
 	OnError            func(err error)
+	// OnLayoutChanged — изменилась раскладка: свёрнута или развёрнута панель,
+	// показана или спрятана база, итог или верх развёрнуты на всю высоту,
+	// отпущена граница между верхом и итогом. Приложение запоминает раскладку
+	// между открытиями окна (PaneCollapsed, ShowBase, Split, …Maximized).
+	OnLayoutChanged func()
 }
 
 // NewMergeView создаёт контрол слияния. monoFont — шрифт кода (пусто —
@@ -182,11 +196,13 @@ func NewMergeView(monoFont, boldFont string) *MergeView {
 		boldFont:   boldFont,
 		fontSize:   10,
 		charW:      8,
-		split:      0.58,
+		split:      mvSplitDefault,
 		syncScroll: true,
 		current:    -1,
 		hoverChunk: -1,
 		hoverBtn:   -1,
+		hoverFold:  -1,
+		foldBtns:   true,
 		active:     MergeResult,
 		menu:       NewPopupMenu(),
 	}
@@ -247,6 +263,12 @@ func (m *MergeView) queueEventsLocked(a mvStamp) {
 	if a.caret != b.caret {
 		if f, c := m.OnCaretMoved, b.caret; f != nil {
 			m.emit(func() { f(c.line, c.col) })
+		}
+	}
+	if m.layoutEvent && !m.splitDrag {
+		m.layoutEvent = false
+		if f := m.OnLayoutChanged; f != nil {
+			m.emit(f)
 		}
 	}
 }
@@ -792,7 +814,12 @@ func (m *MergeView) SetShowBase(v bool) {
 			return
 		}
 		m.showBase = v
+		if !v && m.active == MergeBase {
+			m.setActiveLocked(MergeResult)
+		}
+		m.ensureOpenTopLocked()
 		m.rebuildLocked()
+		m.layoutChangedLocked()
 	})
 }
 
@@ -854,10 +881,11 @@ func (m *MergeView) SetActiveSide(side MergeSide) {
 		if side < MergeOurs || side > MergeResult || m.active == side {
 			return
 		}
-		m.active = side
-		if f := m.OnActiveSideChange; f != nil {
-			m.emit(func() { f(side) })
+		// Свёрнутая панель разворачивается: ввод в невидимую панель не идёт.
+		if side <= MergeTheirs && m.coll[side] {
+			m.setPaneCollapsedLocked(side, false)
 		}
+		m.setActiveLocked(side)
 	})
 }
 
@@ -984,6 +1012,7 @@ type mvGeom struct {
 	splitY     int       // разделитель между верхом и итогом
 	rulerX     int
 	panes      int
+	fold       [3]bool // свёрнутые верхние панели (GG-96)
 	headerTopY int
 	headerResY int
 	headerTopH int // высота шапок верхних панелей (с пояснением выше)
@@ -1022,39 +1051,26 @@ func (m *MergeView) topHeaderH() int {
 func (m *MergeView) geom() mvGeom {
 	b := m.Bounds()
 	g := mvGeom{b: b}
-	g.panes = 3
-	if !m.showBase {
-		g.panes = 2
-	}
 	g.rulerX = b.Max.X - dvOuterPad - dvRulerW
 
 	inner := image.Rect(b.Min.X+dvOuterPad, b.Min.Y+dvOuterPad, g.rulerX-6, b.Max.Y-dvOuterPad)
-	splitY := inner.Min.Y + int(float64(inner.Dy())*m.split)
-	g.splitY = splitY
-
-	w := (inner.Dx() - mvGutter*(g.panes-1)) / g.panes
-	x := inner.Min.X
-	for i := 0; i < 3; i++ {
-		if i == int(MergeBase) && !m.showBase {
-			g.px[i] = [2]int{0, 0}
-			continue
-		}
-		g.px[i] = [2]int{x, x + w}
-		x += w + mvGutter
-	}
+	m.layoutPanes(&g, inner)
 	g.headerTopY = inner.Min.Y + 4
 	g.headerTopH = m.topHeaderH()
-	g.ty0 = g.headerTopY + g.headerTopH + 6
-	g.ty1 = splitY - mvSplitH/2
-	g.headerResY = splitY + mvSplitH/2 + 4
 	g.headerResH = mvHeaderHeight(m.result.Hint != "")
-	g.ry0 = g.headerResY + g.headerResH + 6
-	g.ry1 = inner.Max.Y
 	// Полоса прокрутки отнимает высоту у итога — но только когда самая
-	// длинная строка не помещается по ширине.
+	// длинная строка не помещается по ширине (ширины уже разложены).
+	hbar := 0
 	if m.needHBarLocked(g) {
-		g.ry1 -= HBarHeight
+		hbar = HBarHeight
 	}
+	splitY := m.splitYFor(&g, inner, hbar)
+	g.splitY = splitY
+	g.ty0 = g.headerTopY + g.headerTopH + 6
+	g.ty1 = max(splitY-mvSplitH/2, g.ty0)
+	g.headerResY = splitY + mvSplitH/2 + 4
+	g.ry0 = g.headerResY + g.headerResH + 6
+	g.ry1 = max(inner.Max.Y-hbar, g.ry0)
 	return g
 }
 
@@ -1080,8 +1096,8 @@ func (m *MergeView) codeViewWLocked(g mvGeom) float64 {
 	w := math.MaxFloat64
 	for i := range m.docs {
 		side := MergeSide(i)
-		if side == MergeBase && !m.showBase {
-			continue
+		if !m.paneOpenLocked(side) {
+			continue // спрятанная база и свёрнутые панели кода не показывают
 		}
 		x0, x1, codeX := m.paneCodeXLocked(g, side)
 		_ = x0

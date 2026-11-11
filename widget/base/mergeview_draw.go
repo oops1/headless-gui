@@ -40,18 +40,22 @@ func (m *MergeView) Draw(ctx DrawContext) {
 
 	// Сначала ВСЕ шапки, потом панели: панель рисуется со своим отсечением, и
 	// шапка соседа, нарисованная между ними, была бы им обрезана.
-	for i := 0; i < 3; i++ {
-		if i == int(MergeBase) && !m.showBase {
-			continue
+	for i := MergeOurs; i <= MergeTheirs; i++ {
+		switch {
+		case !m.paneShownLocked(i):
+		case g.fold[i]:
+			m.drawStrip(ctx, g, i)
+		default:
+			m.drawHeader(ctx, g, i)
+			m.drawFoldButton(ctx, g, i)
 		}
-		m.drawHeader(ctx, g, MergeSide(i))
 	}
 	m.drawHeader(ctx, g, MergeResult)
-	for i := 0; i < 3; i++ {
-		if i == int(MergeBase) && !m.showBase {
+	for i := MergeOurs; i <= MergeTheirs; i++ {
+		if !m.paneOpenLocked(i) {
 			continue
 		}
-		m.drawPane(ctx, g, MergeSide(i), outer)
+		m.drawPane(ctx, g, i, outer)
 		ctx.SetClip(b.Intersect(outer))
 	}
 	m.drawPane(ctx, g, MergeResult, outer)
@@ -59,6 +63,7 @@ func (m *MergeView) Draw(ctx DrawContext) {
 	m.drawButtons(ctx, g, outer)
 	ctx.SetClip(b.Intersect(outer))
 	m.drawSplitter(ctx, g)
+	m.drawMaxButtons(ctx, g)
 	// Линейка и горизонтальная полоса — у краёв виджета (см. DiffView).
 	m.drawRuler(ctx, g)
 	ctx.SetClip(b.Intersect(outer))
@@ -111,6 +116,9 @@ func (m *MergeView) drawHeader(ctx DrawContext, g mvGeom, side MergeSide) {
 	tx += ctx.MeasureTextFont(name, m.fontSize, m.boldFont) + 10
 
 	right := x1 - 10
+	if fb := m.foldBtnRectLocked(g, side); !fb.Empty() {
+		right = fb.Min.X - 6 // примечание не залезает под кнопку «свернуть»
+	}
 	mark := func(text string, col color.RGBA) {
 		w := ctx.MeasureText(text, m.fontSize)
 		right -= w
@@ -131,6 +139,9 @@ func (m *MergeView) drawHeader(ctx DrawContext, g mvGeom, side MergeSide) {
 		}
 		bw := ctx.MeasureText(badge, m.fontSize) + 16
 		bx := x1 - bw - 10
+		if r := m.maxBtnRectLocked(g, mvMaxResult); !r.Empty() {
+			bx = r.Min.X - bw - 6 // счётчик — левее кнопок «на всю высоту»
+		}
 		band := p.addBand
 		if n > 0 {
 			band = p.delBand
@@ -322,6 +333,11 @@ func isMarkerLine(s string, size int) bool {
 // левого края панели «их», на первой строке блока.
 func (m *MergeView) buttonCenterLocked(g mvGeom, ci, slot int) (image.Point, bool) {
 	if ci < 0 || ci >= len(m.chunks) || !m.chunks[ci].Conflict {
+		return image.Point{}, false
+	}
+	// У свёрнутой панели кнопки решения нет: блок решают из кода или кнопкой
+	// второй стороны.
+	if (slot == mvBtnOurs && g.fold[MergeOurs]) || (slot == mvBtnTheirs && g.fold[MergeTheirs]) {
 		return image.Point{}, false
 	}
 	sp := m.spans[ci]

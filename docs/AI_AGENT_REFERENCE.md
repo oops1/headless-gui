@@ -10717,3 +10717,55 @@ eng.SetTextHintingX(false)               // only the new horizontal snapping off
 - Tests: `core/raster/texthintx_test.go` (stems on the grid for four fonts, five sizes,
   all pen phases; shape kept; even stems), `TestTextQuality_MeasureUnchanged` and
   `TestTextQuality_MaskHash` with the new modes, `engine/textquality_paths_test.go`.
+
+---
+
+## v4.4: collapse a side of `DiffView`, collapse panes and maximize in `MergeView` (Go.Git GG-95, GG-96)
+
+**`DiffView` (GG-95).** A side collapses into a 28 px strip with an "expand" chevron;
+the other side takes the freed width. Change highlighting, the overview ruler,
+`NextChange`/`PrevChange`, editing, undo and saving keep working; connectors and transfer
+buttons are not drawn, `CopyBlock`/`CopyCurrent`/`CopyAll` work from code.
+
+```go
+dv.SetCollapsed(widget.DiffLeft, true) // only one side: collapsing the other expands this one
+dv.Collapsed(side) bool
+dv.SetShowCollapseButtons(false)       // hide the header chevrons (the strip still expands on click)
+dv.SetSplit(0.6); dv.Split()           // left share when both are expanded, clamped to 0.15…0.85
+dv.OnCollapsedChanged = func(side widget.DiffSide, collapsed bool) {}
+dv.OnSplitChanged = func(ratio float64) {} // once per drag (on release), on double click, on SetSplit
+```
+
+- Collapsing the active side makes the visible one active (`OnActiveSideChanged`);
+  `SetActiveSide`/`SetCaret` on a collapsed side expand it; undo never leaves the collapsed
+  side active.
+- The connector gap is the splitter (cursor ↔); a double click on it restores 0.5.
+  At 0.5 the geometry is the old one, byte for byte.
+- Horizontal scrolling is measured by the narrowest expanded code area.
+- Markup: `CollapsedSide="None|Left|Right"`, `ShowCollapseButtons`, `Split`.
+- The header chevron is shown by default, so header frames changed (the badge moved left of it).
+
+**`MergeView` (GG-96).**
+
+```go
+mv.SetPaneCollapsed(widget.MergeOurs|MergeBase|MergeTheirs, true); mv.PaneCollapsed(side)
+mv.SetResultMaximized(true); mv.ResultMaximized()   // result full height, top = header strip
+mv.SetSourcesMaximized(true); mv.SourcesMaximized() // top full height, result = its header
+mv.SetSplit(0.5); mv.Split()                        // top share 0.2…0.85; clears maximizing
+mv.SetShowCollapseButtons(false)
+mv.OnLayoutChanged = func() {} // collapse/expand, ShowBase, maximize, split (once per drag)
+```
+
+- At least one top pane stays expanded (collapsing the last one is a no-op; hiding the base
+  with ours and theirs collapsed expands ours). `SetShowBase(false)` keeps its meaning.
+- A collapsed pane has no resolve button; `Resolve*` work from code. Collapsing the active pane
+  or maximizing the result moves input to the result; `SetActiveSide` on a collapsed pane
+  expands it.
+- Chevrons are in the top pane headers; the two full-height buttons are at the right of the
+  result header (the unresolved badge moved left of them). A double click on the splitter
+  restores 0.58 and clears maximizing; dragging it clears maximizing too.
+- With no collapsed pane the widths use the old formula.
+- Markup: `CollapsedPanes="Ours,Base,Theirs"`, `Split`, `ResultMaximized`, `SourcesMaximized`,
+  `ShowCollapseButtons`.
+- Tests: `tests/diffview_collapse_test.go`, `tests/mergeview_collapse_test.go`; golden images
+  `diffview_*`, `mergeview_*` re-recorded for the header buttons.
