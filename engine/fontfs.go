@@ -108,12 +108,12 @@ func (e *Engine) RegisterFontFS(fsys fs.FS, dir string) error {
 // Псевдоним семейства не перебивает уже занятое имя: каталог мог принести
 // своё «Roboto» после того, как приложение зарегистрировало собственное.
 func (e *Engine) registerFontBlob(stem string, data []byte) bool {
-	e.canvas.RegisterFont(stem, data)
+	e.registerNamedLocked(stem, data)
 	if !e.canvas.HasFont(stem) {
 		return false
 	}
 	if fam := fontFamilyAlias(stem); fam != "" && fam != stem && !e.canvas.HasFont(fam) {
-		e.canvas.RegisterFont(fam, data)
+		e.registerNamedLocked(fam, data)
 	}
 	return true
 }

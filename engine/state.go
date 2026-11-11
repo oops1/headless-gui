@@ -82,6 +82,12 @@ type sceneState struct {
 	// просил последний применённый профиль. Под frameMu.
 	subpixelOwn, subpixelPinned, subpixelWant bool
 
+	// fontOps — шрифты, отданные приложением после создания движка, по
+	// порядку; defaultFont — имя из SetDefaultFont. Для вторичных движков окна
+	// (CopyTextSettingsFrom, textcopy.go). Под frameMu.
+	fontOps     []fontOp
+	defaultFont string
+
 	// rec — рекордер команд пути Draw (cmdpath.go); cmdPath — включён ли он;
 	// replayer и replayDmg — воспроизводитель и буфер повреждения кадра.
 	rec       *hgdraw.Recorder

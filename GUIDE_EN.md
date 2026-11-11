@@ -3087,6 +3087,16 @@ eng.SetDefaultFont("Roboto")
 <TextBlock FontFamily="Roboto" FontSize="16"/>
 ```
 
+**Dialogs in their own windows (v4.5).** A dialog or a floating pane moved
+into its own OS window is drawn by a separate engine. Since v4.5 it gets the
+window engine's text settings at creation: fonts the application registered
+(`RegisterFont*`, `RegisterFallbackFont*`, a replaced `widget.BuiltinFontBold`),
+the default font, `SetDPI`, the text quality layer and the application's
+`SetTextSubpixel`. Before, such a dialog drew text in Roboto with the default
+layer. Settings changed on the window later do not reach an already open
+dialog (except the "text as in the system" mode). For your own secondary
+engines use `eng.CopyTextSettingsFrom(main)`.
+
 ### Font metrics
 
 Ascent, descent and line gap lived only inside the engine — `DrawText` sets
@@ -3219,8 +3229,9 @@ win.SetTextQualityFromSystem(true) // before Run: the layer is set before the fi
 
 The layer follows changes live: the user toggles ClearType, connects to the same
 session over RDP or comes back to their own monitor. It also reaches dialogs and
-floating panes in their own OS windows (since v4.5 their engines take the text
-quality layer from the window — the application's explicit `SetTextQuality` too).
+floating panes in their own OS windows (since v4.5 their engines take the fonts
+and the text quality layer from the window — the application's explicit
+`SetTextQuality` too).
 `window.TextQualityFor(tr)` is the same rule as a function,
 `win.SystemTextRendering()` — the OS setting now. Turning it off (`false`) stops
 watching and keeps the layer; an explicit `SetTextQuality` after turning it on

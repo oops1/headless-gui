@@ -1,9 +1,12 @@
 package core
 
 import (
+	"os"
+	"slices"
 	"testing"
 
 	"github.com/oops1/headless-gui/v4/engine"
+	"github.com/oops1/headless-gui/v4/internal/testreset"
 	"github.com/oops1/headless-gui/v4/platform/native"
 	"github.com/oops1/headless-gui/v4/widget"
 )
@@ -113,7 +116,7 @@ func TestWindowTextQualityFromSystem(t *testing.T) {
 
 // Вторичный движок диалога или плавающей панели берёт слой качества текста
 // у движка родительского окна.
-func TestInheritTextQuality(t *testing.T) {
+func TestInheritText_Quality(t *testing.T) {
 	parentEng := engine.New(100, 100, 30)
 	defer parentEng.Stop()
 	q := engine.TextQuality{Hinting: true, HintingX: true, LCD: true, LCDOrder: engine.LCDOrderBGR}
@@ -123,9 +126,69 @@ func TestInheritTextQuality(t *testing.T) {
 
 	child := engine.New(50, 50, 30)
 	defer child.Stop()
-	inheritTextQuality(child, parent)
+	inheritText(child, parent)
 	if got := child.TextQuality(); got != q {
 		t.Errorf("вторичный движок: %+v, ждал %+v", got, q)
 	}
-	inheritTextQuality(child, nil) // без родителя — ничего
+	inheritText(child, nil) // без родителя — ничего
+}
+
+// Вторичный движок диалога получает шрифт приложения и шрифт по умолчанию
+// движка окна — диалог в своём окне ОС рисует текст тем же шрифтом.
+func TestInheritText_Fonts(t *testing.T) {
+	data, err := os.ReadFile("../../assets/fonts/OpenSans-Regular.ttf")
+	if err != nil {
+		t.Skipf("шрифт недоступен: %v", err)
+	}
+	parentEng := engine.New(100, 100, 30)
+	defer parentEng.Stop()
+	parentEng.RegisterFont("AppUI", data)
+	parentEng.SetDefaultFont("AppUI")
+	parent := &Window{}
+	parent.eng = parentEng
+
+	child := engine.New(50, 50, 30)
+	defer child.Stop()
+	inheritText(child, parent)
+	if !slices.Contains(child.AvailableFonts(), "AppUI") {
+		t.Errorf("шрифт приложения не дошёл до диалога: %v", child.AvailableFonts())
+	}
+}
+
+// Сквозной путь: диалог, вынесенный хостом в своё окно ОС, получает шрифт по
+// умолчанию и слой качества текста главного окна (до v4.5 — Roboto и слой по
+// умолчанию, что бы ни задало приложение).
+func TestHostedDialog_InheritsText(t *testing.T) {
+	testreset.Globals(t)
+	data, err := os.ReadFile("../../assets/fonts/OpenSans-Regular.ttf")
+	if err != nil {
+		t.Skipf("шрифт недоступен: %v", err)
+	}
+	r := newHostedRig(t, nil)
+	r.eng.RegisterFont("AppUI", data)
+	r.eng.SetDefaultFont("AppUI")
+	q := engine.TextQuality{Hinting: true, HintingX: true, LCD: true}
+	r.eng.SetTextQuality(q)
+
+	dlg := widget.NewDialog("Сравнение файлов", 320, 200)
+	r.eng.ShowModal(dlg)
+	if r.fake(1) == nil {
+		t.Fatal("окно ОС для диалога не создано")
+	}
+	r.win.modalHost.mu.Lock()
+	var de *engine.Engine
+	if len(r.win.modalHost.stack) > 0 {
+		de = r.win.modalHost.stack[0].eng
+	}
+	r.win.modalHost.mu.Unlock()
+	if de == nil {
+		t.Fatal("вторичного движка диалога нет")
+	}
+	if !slices.Contains(de.AvailableFonts(), "AppUI") {
+		t.Errorf("шрифт приложения не дошёл до диалога: %v", de.AvailableFonts())
+	}
+	if got := de.TextQuality(); got != q {
+		t.Errorf("слой качества диалога %+v, ждал %+v", got, q)
+	}
+	r.eng.CloseModal(dlg)
 }

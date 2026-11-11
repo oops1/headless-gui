@@ -10845,8 +10845,16 @@ window.TextQualityFor(tr)              // the rule: Known && Subpixel && !Remote
   engine. The layer goes to the window engine and to hosted engines (`dialogHost.stack`,
   `dockFloatHost.floats`).
 - Hosted engines (dialogs, floating panes in own OS windows) now inherit the parent engine's
-  `TextQuality()` at creation (`inheritTextQuality`, next to `inheritMotionProfile`):
-  before v4.5 they kept the default layer whatever the application set.
+  text settings at creation (`inheritText`, next to `inheritMotionProfile`) via the new
+  `Engine.CopyTextSettingsFrom(src *Engine)`: fonts registered after construction, in order
+  (`RegisterFont`/`File`/`Dir`/`FS`, `RegisterFallbackFont*`, a replaced `$hg_bold`;
+  recorded in `Engine.fontOps` by `registerNamedLocked`/`recordFontLocked` with the
+  process-wide bytes `text.InternedFontData` — re-registering a name replaces its entry, a
+  repeated fallback is not added again; the constructor's assets/fonts are not recorded), the `SetDefaultFont` name, `SetDPI`, `TextQuality()`, and `SetTextSubpixel`
+  when pinned by the application (theme-driven subpixel stays with the theme). Before v4.5 a
+  hosted dialog drew text in Roboto with the default layer whatever the application set.
+  Later changes on the parent do not propagate (except the system text mode). Tests:
+  `engine/textcopy_test.go`, `TestInheritText_Fonts`, `TestHostedDialog_InheritsText`.
 - Tests: `window/core/systext_test.go` (rule table, follow/unfollow with a fake backend,
   inheritance), `platform/win32/textrender_windows_test.go` (live: reading, messages,
   session notifications before and after Create).

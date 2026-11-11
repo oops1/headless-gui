@@ -201,9 +201,9 @@ func (h *dialogHost) create(hm *hostedModal) {
 	// Профиль движения — у окна тот же, что у родителя: удалённый или
 	// «без движения» стол не должен анимировать свои диалоги.
 	inheritMotionProfile(eng, h.parent)
-	// Слой качества текста — тоже: явный SetTextQuality приложения и текст
-	// «как в системе» не должны обрываться на окне диалога.
-	inheritTextQuality(eng, h.parent)
+	// Текст — тоже: шрифты приложения, слой качества и текст «как в
+	// системе» не должны обрываться на окне диалога.
+	inheritText(eng, h.parent)
 	// Синхронизирует глобальный widget.SetScreenBounds(dw,dh) под диалог.
 	eng.SetResolution(dw, dh)
 

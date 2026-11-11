@@ -169,14 +169,20 @@ func (win *Window) hostedEngines() []*engine.Engine {
 	return out
 }
 
-// inheritTextQuality даёт вторичному движку (диалог, плавающая панель) слой
-// качества текста движка родительского окна: явный SetTextQuality
-// приложения и режим «как в системе» доходят и до окон диалогов.
-func inheritTextQuality(eng *engine.Engine, parent *Window) {
+// inheritText даёт вторичному движку (диалог, плавающая панель) текстовые
+// настройки движка родительского окна: шрифты приложения, шрифт по
+// умолчанию, DPI шрифтов, слой качества (engine.CopyTextSettingsFrom). Явный
+// SetTextQuality приложения, режим «как в системе» и свой шрифт доходят и до
+// окон диалогов. Движок окна — не *engine.Engine: только слой качества, если
+// он его знает.
+func inheritText(eng *engine.Engine, parent *Window) {
 	if parent == nil {
 		return
 	}
-	if s, ok := parent.eng.(textQualitySink); ok {
-		eng.SetTextQuality(s.TextQuality())
+	switch pe := parent.eng.(type) {
+	case *engine.Engine:
+		eng.CopyTextSettingsFrom(pe)
+	case textQualitySink:
+		eng.SetTextQuality(pe.TextQuality())
 	}
 }
