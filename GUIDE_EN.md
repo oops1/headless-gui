@@ -3202,6 +3202,30 @@ eng.SetTextQuality(engine.DefaultTextQuality())         // the engine default la
 Programs with golden snapshots of text must re-record them after moving to
 v4.4 (or restore the previous look with `SetTextQuality(engine.TextQuality{})`).
 
+**Text as in the system (v4.5).** The subpixel layer matches Windows ClearType
+on the same font by the numbers, but the engine does not turn it on itself: it
+is right only on a monitor with a known subpixel order and harmful in a remote
+session. The OS knows that, and the window can ask it:
+
+```go
+win := window.New(eng, "Go.Git")
+win.SetTextQualityFromSystem(true) // before Run: the layer is set before the first frame
+```
+
+- ClearType on and a local session — `TextQuality{Hinting, HintingX, LCD}` with
+  the subpixel order from the ClearType Text Tuner (RGB or BGR);
+- grayscale smoothing, smoothing off, a remote session (RDP) or a platform
+  that does not know the setting (Linux, macOS) — `engine.DefaultTextQuality()`.
+
+The layer follows changes live: the user toggles ClearType, connects to the same
+session over RDP or comes back to their own monitor. It also reaches dialogs and
+floating panes in their own OS windows (since v4.5 their engines take the text
+quality layer from the window — the application's explicit `SetTextQuality` too).
+`window.TextQualityFor(tr)` is the same rule as a function,
+`win.SystemTextRendering()` — the OS setting now. Turning it off (`false`) stops
+watching and keeps the layer; an explicit `SetTextQuality` after turning it on
+holds until the next change in the OS.
+
 ---
 
 ### Standard dialogs (MessageBox, input, progress, files)

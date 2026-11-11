@@ -345,6 +345,12 @@ type Win32Window struct {
 	frameColor   atomic.Uint32
 	frameColorOn atomic.Bool
 
+	// onTextRendering — подписка на смену сглаживания текста и удалённого
+	// сеанса (textrender_windows.go); wtsNotify — уведомления о сеансе
+	// включены WTSRegisterSessionNotification.
+	onTextRendering atomic.Pointer[func()]
+	wtsNotify       atomic.Bool
+
 	hwnd   windows.HWND
 	width  int
 	height int
@@ -853,6 +859,10 @@ func (w *Win32Window) createInternal(title string, width, height int, style, exS
 	win32Windows[hwnd] = w
 	win32Creating = nil
 	win32Mu.Unlock()
+
+	// Подписка на сглаживание текста, заданная до создания: уведомления о
+	// сеансе включаются с окном.
+	w.syncSessionNotify()
 
 	// Значок, заданный до создания окна: SetIcon мог прийти раньше Run.
 	w.applyPendingIcon()
@@ -1655,6 +1665,9 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		w.mu.Unlock()
 		w.ulwRelease()       // DIB-секция попапа (popupulw_windows.go)
 		w.destroyShadowWnd() // окно-тень (shadowwnd_windows.go)
+		if w.wtsNotify.Swap(false) {
+			procWTSUnRegisterSessionNotification.Call(hwnd)
+		}
 		// Вторичные окна модалок (noQuit) не завершают цикл сообщений — иначе
 		// закрытие диалога уронило бы всё приложение. Главное окно — завершает.
 		if !w.noQuit {
@@ -1773,6 +1786,12 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		if wparam == spiSetDropShadow {
 			w.applyCorners() // тени окон включили или выключили: DWM или своя
 		}
+		if textSmoothingSetting(wparam) {
+			w.noteTextRendering() // ClearType включили, выключили, перенастроили
+		}
+
+	case wmWtsSessionChange:
+		w.noteTextRendering() // зашли по RDP или вернулись к своему монитору
 
 	case wmDwmCompositionChgd:
 		w.applyCorners() // композиция DWM сменилась: DWM или своя тень

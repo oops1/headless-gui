@@ -158,6 +158,7 @@ func OpenURL
 func RevealFile
 func SystemLanguages
 func TakeActivationToken
+func TextQualityFor
 type CocoaWindow
 type ContentFitMode
 type DragEffect
@@ -170,6 +171,7 @@ type ShadowSource
 type Style
 type SystemAppearance
 type SystemTheme
+type TextRendering
 type WaylandWindow
 type Win32Window
 type Window

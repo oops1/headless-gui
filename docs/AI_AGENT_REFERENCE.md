@@ -10814,3 +10814,39 @@ showed (dark, or accent with `SetFrameColor`).
 - Headless rendering, Windows 10, X11 are unchanged.
 - Tests: `tests/system_frame_test.go`, `window/core/corners_test.go` (`TestSyncSystemFrame`),
   `platform/win32/corners_windows_test.go` (`TestWin32DrawsFrame`, live).
+
+---
+
+## v4.5: text quality as in the system — ClearType setting and RDP (`SetTextQualityFromSystem`)
+
+The LCD layer `{Hinting, HintingX, LCD}` matches Windows ClearType on the same font
+(solid 44.0 % vs 44.3 %), but it is not an engine default: wrong for an unknown subpixel
+order and for RDP. The window asks the OS.
+
+```go
+win.SetTextQualityFromSystem(true)     // before or after Run; false stops watching, keeps the layer
+win.SystemTextRendering()              // native.TextRendering{Known, Subpixel, BGR, Remote}
+window.TextQualityFor(tr)              // the rule: Known && Subpixel && !Remote →
+                                       // {Hinting, HintingX, LCD, LCDOrder(BGR?)}, else DefaultTextQuality()
+```
+
+- `platform/native.TextRendering` (new type). Backend interface in `window/core`:
+  `textRenderingSource { TextRendering(); SetOnTextRenderingChanged(fn func()) }`; a backend
+  without it → `Known=false` → default layer.
+- Win32 (`textrender_windows.go`): `SPI_GETFONTSMOOTHING`, `SPI_GETFONTSMOOTHINGTYPE`
+  (`FE_FONTSMOOTHINGCLEARTYPE`), `SPI_GETFONTSMOOTHINGORIENTATION` (BGR = 0),
+  `GetSystemMetrics(SM_REMOTESESSION)`. Notifications: `WM_SETTINGCHANGE` with
+  `SPI_SETFONTSMOOTHING*` (smoothing, type, contrast, orientation) and
+  `WM_WTSSESSION_CHANGE` (`WTSRegisterSessionNotification` while subscribed and the window
+  exists, unregistered on unsubscribe and `WM_DESTROY`). The callback runs on the window
+  thread; the window posts `applySystemText` to the engine goroutine.
+- `bringUp` calls `syncSystemText` after the corners (layer before the first frame),
+  `tearDown` unsubscribes. A repeated notification with the same layer does not touch the
+  engine. The layer goes to the window engine and to hosted engines (`dialogHost.stack`,
+  `dockFloatHost.floats`).
+- Hosted engines (dialogs, floating panes in own OS windows) now inherit the parent engine's
+  `TextQuality()` at creation (`inheritTextQuality`, next to `inheritMotionProfile`):
+  before v4.5 they kept the default layer whatever the application set.
+- Tests: `window/core/systext_test.go` (rule table, follow/unfollow with a fake backend,
+  inheritance), `platform/win32/textrender_windows_test.go` (live: reading, messages,
+  session notifications before and after Create).

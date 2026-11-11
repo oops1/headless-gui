@@ -239,3 +239,10 @@ const (
 	// SystemThemeDark — тёмная тема.
 	SystemThemeDark = native.SystemThemeDark
 )
+
+// ── textrender.go ──
+
+// TextRendering — настройка сглаживания текста в ОС. По ней окно выбирает
+// слой качества текста движка (window.Window.SetTextQualityFromSystem):
+// субпиксельный, как у ClearType, или серый.
+type TextRendering = native.TextRendering

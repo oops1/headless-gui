@@ -205,6 +205,9 @@ func (h *dockFloatHost) create(fp *floatingPane) {
 	// Профиль движения — у окна тот же, что у родителя: удалённый или
 	// «без движения» стол не должен анимировать свои диалоги.
 	inheritMotionProfile(eng, h.parent)
+	// Слой качества текста — тоже: явный SetTextQuality приложения и текст
+	// «как в системе» не должны обрываться на окне диалога.
+	inheritTextQuality(eng, h.parent)
 	eng.SetResolution(dw, dh)
 	pw, ph := eng.PhysicalSize()
 
