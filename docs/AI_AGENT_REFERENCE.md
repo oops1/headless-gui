@@ -10788,3 +10788,29 @@ mv.OnLayoutChanged = func() {} // collapse/expand, ShowBase, maximize, split (on
   `ShowCollapseButtons`.
 - Tests: `tests/diffview_collapse_test.go`, `tests/mergeview_collapse_test.go`; golden images
   `diffview_*`, `mergeview_*` re-recorded for the header buttons.
+
+---
+
+## v4.5: the window frame is drawn by the OS where it rounds the corners (Go.Git GG-99)
+
+On Windows 11 DWM cuts the window corners with its own radius and draws a 1 px frame
+along that arc. The engine drew its own rounded outer contour on top: on straight edges it
+lay under the DWM frame, at the corners radii and antialiasing differ and a second arc
+showed (dark, or accent with `SetFrameColor`).
+
+- `widget.Window.SystemFrame bool` — the OS draws the outer frame and the corners: the body
+  is square (`corner()` → 0) and no outer contour is drawn (neither the frame color nor the
+  main window XOR frame). Ignored while maximized (`osFrame()`): the engine contour returns.
+- `widget.Window.SystemFrameColor func(c color.RGBA, set bool)` — receives the effective
+  frame color (`frameColor()`: `SetFrameColor`/`FrameColor`, theme `WindowFrame`, dimmed when
+  inactive) or `set=false` (system color). Called from `Draw` only when the value changed.
+- `widget.Dialog.SystemFrame bool` — square body, no `DrawRoundBorder`; set by the modal host
+  for a dialog moved into its own OS window.
+- `window/core`: backend interface `systemFramer { DrawsFrame() bool; SetFrameColor(c, set) }`;
+  `syncSquareCorners` sets `SystemFrame`/`SystemFrameColor` from it (a backend without it — old
+  behavior). Win32: `DrawsFrame()` = `RoundsCorners()` (Windows 11, radius > 0, not maximized,
+  not fullscreen, no own shadow); `SetFrameColor` stores a COLORREF and sets
+  `DWMWA_BORDER_COLOR` (34; `DWMWA_COLOR_DEFAULT` when unset), re-applied in `applyCorners`.
+- Headless rendering, Windows 10, X11 are unchanged.
+- Tests: `tests/system_frame_test.go`, `window/core/corners_test.go` (`TestSyncSystemFrame`),
+  `platform/win32/corners_windows_test.go` (`TestWin32DrawsFrame`, live).

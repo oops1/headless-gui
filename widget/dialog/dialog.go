@@ -68,6 +68,11 @@ type Dialog struct {
 	// X11): корпус рисуется прямоугольным, иначе за скруглением виден фон.
 	// Ставит хост модальных окон (пакет window).
 	SquareCorners bool
+	// SystemFrame — диалог вынесен в окно ОС, которое само срезает углы и
+	// рисует рамку (Windows 11, DWM): корпус рисуется прямоугольным и без
+	// своего наружного контура — иначе на углах видна вторая дуга (GG-99).
+	// Ставит хост модальных окон (пакет window).
+	SystemFrame bool
 
 	// ShowLocaleIndicator — показывать индикатор текущей локали (напр. «EN»)
 	// в заголовке диалога. По умолчанию выключен (принятый дизайн — ✕).
@@ -393,7 +398,7 @@ func (d *Dialog) Draw(ctx base.DrawContext) {
 
 	// Современный вид (принятый дизайн): скругление, мягкая тень, ✕.
 	cr := d.CornerRadius
-	if cr < 0 || d.SquareCorners {
+	if cr < 0 || d.SquareCorners || d.SystemFrame {
 		cr = 0
 	}
 
@@ -420,7 +425,9 @@ func (d *Dialog) Draw(ctx base.DrawContext) {
 			base.DrawLocaleBadge(ctx, b.Max.X-dlgCloseSize-12, b.Min.Y, d.TitleHeight, d.TitleColor)
 		}
 	}
-	ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, d.BorderColor)
+	if !d.SystemFrame {
+		ctx.DrawRoundBorder(b.Min.X, b.Min.Y, b.Dx(), b.Dy(), cr, d.BorderColor)
+	}
 
 	// Дети обрезаются по скруглённому корпусу: содержимое без отступа
 	// (SetContentPadding) и боковая панель, поднятая под верх, заливаются

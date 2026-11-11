@@ -205,6 +205,15 @@ ww.SetFrameColor(color.RGBA{R: 0x3C, G: 0x3C, B: 0x3C, A: 255})
 `SetFrameColor` pins the color over the theme: switching themes does not reset
 it. A zero alpha returns the window to the theme color.
 
+**OS frame (Windows 11).** There DWM cuts the window corners and draws a 1 px
+frame itself. The engine window then gets `SystemFrame` (set by the `window`
+package): the body is drawn square and without its own outer contour — otherwise
+a second arc shows at the corners. The color from `SetFrameColor` or the theme goes
+to the DWM frame (dimmed for an inactive window); with no color the frame is the
+system one. A maximized window, Windows 10, X11 and the engine's own shadow keep
+the engine contour. A dialog moved into its own OS window behaves the same
+(`Dialog.SystemFrame`).
+
 ### Panel
 
 Container with background, border, rounded corners, background image, and built-in window title bar.

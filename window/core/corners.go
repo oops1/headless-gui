@@ -1,11 +1,24 @@
 package core
 
-import "github.com/oops1/headless-gui/v4/widget"
+import (
+	"image/color"
+
+	"github.com/oops1/headless-gui/v4/widget"
+)
 
 // cornerRounder — бэкенд, который может сказать, скругляет ли ОС углы окна.
 // Бэкенд без интерфейса считается скругляющим (прежнее поведение).
 type cornerRounder interface {
 	RoundsCorners() bool
+}
+
+// systemFramer — бэкенд, у которого наружную рамку окна рисует ОС (Windows 11:
+// DWM срезает углы и кладёт рамку в 1 px). DrawsFrame — рисует ли она её у
+// этого окна сейчас; SetFrameColor задаёт её цвет (set=false — системный).
+// Бэкенд без интерфейса рамку не рисует: контур остаётся за движком.
+type systemFramer interface {
+	DrawsFrame() bool
+	SetFrameColor(c color.RGBA, set bool)
 }
 
 // syncSquareCorners сообщает корневому widget.Window, что ОС показывает окно с
@@ -22,8 +35,15 @@ func (win *Window) syncSquareCorners() {
 		return
 	}
 	square := !cr.RoundsCorners()
-	if ww.SquareCorners != square {
-		ww.SquareCorners = square
+	sys := false
+	ww.SystemFrameColor = nil
+	if sf, ok := win.native.(systemFramer); ok && sf.DrawsFrame() {
+		// Рамку и углы даёт ОС: свой контур окно не рисует, цвет отдаёт ей.
+		sys = true
+		ww.SystemFrameColor = sf.SetFrameColor
+	}
+	if ww.SquareCorners != square || ww.SystemFrame != sys {
+		ww.SquareCorners, ww.SystemFrame = square, sys
 		ww.Invalidate()
 	}
 }

@@ -263,6 +263,11 @@ func (h *dialogHost) create(hm *hostedModal) {
 			dlg.SquareCorners = true
 		}
 	}
+	// Окно ОС само срезает углы и рисует рамку (Windows 11) — диалог своего
+	// контура не рисует: на углах он расходился бы с рамкой ОС (GG-99).
+	if sf, ok := nw.(systemFramer); ok && sf.DrawsFrame() {
+		dlg.SystemFrame = true
+	}
 
 	// Owner + модальность.
 	if ow, ok := nw.(ownedWindow); ok {
