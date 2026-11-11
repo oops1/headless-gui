@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 
+	"github.com/oops1/headless-gui/v4/engine"
 	"github.com/oops1/headless-gui/v4/platform/native"
 	"github.com/oops1/headless-gui/v4/window/core"
 )
@@ -147,6 +148,21 @@ const (
 //
 // Безопасно звать из любой горутины и до создания окна.
 func SystemLanguages() []string { return core.SystemLanguages() }
+
+// ── systext.go ──
+
+// TextQualityFor — слой качества текста движка для настройки сглаживания ОС:
+//
+//   - ClearType на своём мониторе — субпиксельный слой с привязкой к сетке по
+//     обеим осям и порядком подпикселей монитора:
+//     TextQuality{Hinting, HintingX, LCD, LCDOrder};
+//   - серое сглаживание, сглаживание выключено, удалённый сеанс (RDP) или
+//     настройка неизвестна — слой движка по умолчанию,
+//     engine.DefaultTextQuality() (серый).
+//
+// Выключенное в ОС сглаживание движок не повторяет: текст без сглаживания
+// он не рисует.
+func TextQualityFor(tr native.TextRendering) engine.TextQuality { return core.TextQualityFor(tr) }
 
 // ── systheme.go ──
 

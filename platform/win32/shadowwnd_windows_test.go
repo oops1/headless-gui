@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // Своя тень окна (shadowwnd_windows.go): окно-тень под окном, когда DWM тени
@@ -40,6 +42,45 @@ func shadowScreenPixel(x, y int) (uint32, bool) {
 	return uint32(c), uint32(c) != 0xFFFFFFFF
 }
 
+// shadowScreenLive сообщает, отражает ли чтение экрана слоёные окна в точке
+// (x, y): поверх неё на миг ставится маленькое непрозрачное окно «поверх всех»
+// (стандартный STATIC, белый или чёрный — противоположный тому, что на экране),
+// и пиксель обязан измениться. Окно слоёное (WS_EX_LAYERED), как окно-тень:
+// контроль идёт тем же путём компоновки, что и проверяемое. Не изменился —
+// экран наших окон не показывает: кадр рабочего стола не обновляется (фоновый
+// сеанс машины CI), слоёные окна в него не попадают или точку закрывает чужое
+// окно поверх всех. По такому экрану потемнение не сверить.
+func shadowScreenLive(x, y int) bool {
+	before, ok := shadowScreenPixel(x, y)
+	if !ok {
+		return false
+	}
+	const ssBlackRect, ssWhiteRect = 0x4, 0x6
+	style := uintptr(wsPopup | wsVisible | ssWhiteRect)
+	if lum(before) > 3*128 {
+		style = uintptr(wsPopup | wsVisible | ssBlackRect)
+	}
+	cls, _ := windows.UTF16PtrFromString("STATIC")
+	h, _, _ := procCreateWindowExW.Call(
+		uintptr(wsExLayered|wsExTransparent|wsExTopmost|wsExToolwindow|wsExNoactivate),
+		uintptr(unsafe.Pointer(cls)), 0, style,
+		uintptr(x-8), uintptr(y-8), 16, 16, 0, 0, 0, 0)
+	if h == 0 {
+		return false
+	}
+	const lwaAlpha = 0x2
+	procSetLayeredWindowAttributes.Call(h, 0, 255, lwaAlpha) // непрозрачное; без вызова слоёное окно не видно
+	live := false
+	for try := 0; try < 3 && !live; try++ {
+		shadowPump()
+		c, _ := shadowScreenPixel(x, y)
+		live = c != before
+	}
+	procDestroyWindow.Call(h)
+	shadowPump() // экран под пробным окном возвращается к прежнему
+	return live
+}
+
 func withDwmShadows(t *testing.T, on bool) {
 	prev := dwmShadowsOn
 	dwmShadowsOn = func() bool { return on }
@@ -60,6 +101,11 @@ func TestWin32OwnShadow_Engine(t *testing.T) {
 	onTop := w.SetAlwaysOnTop(true)
 	shadowPump()
 	wr := w.windowRect()
+	// Живой ли экран в точке сверки. На машине CI (windows-latest, прогоны #363
+	// и #364: «под окном не темнее: 0a0a0a, было 0a0a0a» при окне поверх всех и
+	// ожидании кадра 2,4 с) чтение экрана порой отдаёт один и тот же пиксель,
+	// что бы на нём ни показывали. Пробное окно это отличает от пропавшей тени.
+	live := shadowScreenLive(wr.Min.X+wr.Dx()/2, wr.Max.Y+8)
 	below, ok := shadowScreenPixel(wr.Min.X+wr.Dx()/2, wr.Max.Y+8)
 	if !ok {
 		t.Skip("экран не читается")
@@ -84,6 +130,8 @@ func TestWin32OwnShadow_Engine(t *testing.T) {
 	switch {
 	case !onTop:
 		t.Log("окно теста не поднялось поверх остальных: потемнение экрана не сверяется")
+	case !live:
+		t.Log("чтение экрана не видит пробное окно в точке сверки: потемнение экрана не сверяется")
 	case lum(below) < 8:
 		t.Logf("экран под окном чёрный (%06x): потемнение не сверяется", below)
 	default:

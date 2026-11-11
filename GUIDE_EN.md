@@ -205,6 +205,15 @@ ww.SetFrameColor(color.RGBA{R: 0x3C, G: 0x3C, B: 0x3C, A: 255})
 `SetFrameColor` pins the color over the theme: switching themes does not reset
 it. A zero alpha returns the window to the theme color.
 
+**OS frame (Windows 11).** There DWM cuts the window corners and draws a 1 px
+frame itself. The engine window then gets `SystemFrame` (set by the `window`
+package): the body is drawn square and without its own outer contour — otherwise
+a second arc shows at the corners. The color from `SetFrameColor` or the theme goes
+to the DWM frame (dimmed for an inactive window); with no color the frame is the
+system one. A maximized window, Windows 10, X11 and the engine's own shadow keep
+the engine contour. A dialog moved into its own OS window behaves the same
+(`Dialog.SystemFrame`).
+
 ### Panel
 
 Container with background, border, rounded corners, background image, and built-in window title bar.
@@ -3078,6 +3087,16 @@ eng.SetDefaultFont("Roboto")
 <TextBlock FontFamily="Roboto" FontSize="16"/>
 ```
 
+**Dialogs in their own windows (v4.5).** A dialog or a floating pane moved
+into its own OS window is drawn by a separate engine. Since v4.5 it gets the
+window engine's text settings at creation: fonts the application registered
+(`RegisterFont*`, `RegisterFallbackFont*`, a replaced `widget.BuiltinFontBold`),
+the default font, `SetDPI`, the text quality layer and the application's
+`SetTextSubpixel`. Before, such a dialog drew text in Roboto with the default
+layer. Settings changed on the window later do not reach an already open
+dialog (except the "text as in the system" mode). For your own secondary
+engines use `eng.CopyTextSettingsFrom(main)`.
+
 ### Font metrics
 
 Ascent, descent and line gap lived only inside the engine — `DrawText` sets
@@ -3158,11 +3177,26 @@ eng.SetTextQuality(engine.TextQuality{}) // the previous look, byte for byte
 eng.SetTextHintingX(false)                // only the horizontal snapping off
 ```
 
-- Stem widths are rounded to whole pixels (up from a 0.4 fraction), and stems
-  close to the font's standard width at that size (taken from `l`) get the
-  same width: the letters of a line have one weight.
-- Stems with an equal step (`Ш`, `ш`, `m`, `п`) are placed as a row with one
-  rounded step — the counters are equal.
+**If the application already calls `SetTextQuality` with the v3.42 recipe**
+(`TextQuality{Hinting: true, Contrast: …}`), horizontal snapping is **not
+turned on** for it: an explicit call sets the whole layer, and `HintingX` is
+not in it. After moving to v4.4 the text of such an application looks as
+before. Remove the call or replace it:
+
+```go
+eng.SetTextQuality(engine.DefaultTextQuality())         // the engine default layer
+// or add the field: TextQuality{Hinting: true, HintingX: true, Contrast: …}
+```
+
+- Stems close to the font's standard width at that size (taken from `l`) get
+  the same width: the letters of a line have one weight. A width within
+  ~0.1 px of a whole number of pixels (at least one) is rounded to it, and
+  the stem is placed on whole pixels; any other width is **kept** and only
+  the left edge goes to a pixel boundary — one solid column and one grey
+  (since v4.5: v4.4 rounded 1.3 px stems of Go Regular 10 pt down to 1 px and
+  the text got thin and sparse, Go.Git GG-98).
+- Stems with an equal step (`Ш`, `ш`, `m`, `п`) of whole width are placed as
+  a row with one rounded step — the counters are equal.
 - Advances, kerning and line widths **do not change** — layout stays the
   same; a glyph moves inside its cell by less than a pixel (a stem by at most
   half a pixel, in a row of equal stems up to 3/4 px, plus up to 1/4 px
@@ -3177,6 +3211,31 @@ eng.SetTextHintingX(false)                // only the horizontal snapping off
 
 Programs with golden snapshots of text must re-record them after moving to
 v4.4 (or restore the previous look with `SetTextQuality(engine.TextQuality{})`).
+
+**Text as in the system (v4.5).** The subpixel layer matches Windows ClearType
+on the same font by the numbers, but the engine does not turn it on itself: it
+is right only on a monitor with a known subpixel order and harmful in a remote
+session. The OS knows that, and the window can ask it:
+
+```go
+win := window.New(eng, "Go.Git")
+win.SetTextQualityFromSystem(true) // before Run: the layer is set before the first frame
+```
+
+- ClearType on and a local session — `TextQuality{Hinting, HintingX, LCD}` with
+  the subpixel order from the ClearType Text Tuner (RGB or BGR);
+- grayscale smoothing, smoothing off, a remote session (RDP) or a platform
+  that does not know the setting (Linux, macOS) — `engine.DefaultTextQuality()`.
+
+The layer follows changes live: the user toggles ClearType, connects to the same
+session over RDP or comes back to their own monitor. It also reaches dialogs and
+floating panes in their own OS windows (since v4.5 their engines take the fonts
+and the text quality layer from the window — the application's explicit
+`SetTextQuality` too).
+`window.TextQualityFor(tr)` is the same rule as a function,
+`win.SystemTextRendering()` — the OS setting now. Turning it off (`false`) stops
+watching and keeps the layer; an explicit `SetTextQuality` after turning it on
+holds until the next change in the OS.
 
 ---
 

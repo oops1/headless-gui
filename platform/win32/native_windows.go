@@ -4,6 +4,7 @@ package win32
 
 import (
 	"image"
+	"image/color"
 	"runtime"
 	"strings"
 	"sync"
@@ -338,6 +339,17 @@ type Win32Window struct {
 	// исполняемого файла принадлежит модулю, и уничтожать его нельзя.
 	ownIcons     [2]windows.Handle
 	pendingIcons []image.Image
+
+	// frameColor — цвет рамки, которую рисует DWM (COLORREF), и признак, что
+	// он задан (SetFrameColor); иначе рамка системная.
+	frameColor   atomic.Uint32
+	frameColorOn atomic.Bool
+
+	// onTextRendering — подписка на смену сглаживания текста и удалённого
+	// сеанса (textrender_windows.go); wtsNotify — уведомления о сеансе
+	// включены WTSRegisterSessionNotification.
+	onTextRendering atomic.Pointer[func()]
+	wtsNotify       atomic.Bool
 
 	hwnd   windows.HWND
 	width  int
@@ -847,6 +859,10 @@ func (w *Win32Window) createInternal(title string, width, height int, style, exS
 	win32Windows[hwnd] = w
 	win32Creating = nil
 	win32Mu.Unlock()
+
+	// Подписка на сглаживание текста, заданная до создания: уведомления о
+	// сеансе включаются с окном.
+	w.syncSessionNotify()
 
 	// Значок, заданный до создания окна: SetIcon мог прийти раньше Run.
 	w.applyPendingIcon()
@@ -1414,6 +1430,7 @@ func (w *Win32Window) applyCorners() {
 		return
 	}
 	w.setNCRendering(true)
+	w.applyFrameColor()
 	defer w.updateShadowWnd() // своя тень, если DWM её не даёт
 	if w.cornerRadius <= 0 || w.maximized || w.fs.on.Load() || w.style.borderless.Load() {
 		// Прямые углы (или развёрнутое окно, или Style.Borderless — тени у
@@ -1440,6 +1457,40 @@ func (w *Win32Window) applyCorners() {
 
 // dwmMargins — MARGINS для DwmExtendFrameIntoClientArea.
 type dwmMargins struct{ Left, Right, Top, Bottom int32 }
+
+// DWM-атрибут цвета рамки окна (Windows 11) и значение «системный цвет».
+const (
+	dwmwaBorderColor  = 34         // DWMWA_BORDER_COLOR
+	dwmwaColorDefault = 0xFFFFFFFF // DWMWA_COLOR_DEFAULT
+)
+
+// DrawsFrame — рисует ли ОС наружную рамку этого окна сама (systemFramer):
+// там же, где скругляет углы, — DWM Windows 11 кладёт рамку в 1 px по своей
+// дуге. Окно движка тогда своего контура не рисует (GG-99).
+func (w *Win32Window) DrawsFrame() bool { return w.RoundsCorners() }
+
+// SetFrameColor задаёт цвет рамки, которую рисует DWM (DWMWA_BORDER_COLOR,
+// Windows 11); set=false возвращает системный цвет. До создания окна
+// запоминается и применяется вместе с углами. На Windows 10 атрибута нет —
+// вызов ничего не меняет, рамку там рисует движок.
+func (w *Win32Window) SetFrameColor(c color.RGBA, set bool) {
+	w.frameColor.Store(uint32(c.R) | uint32(c.G)<<8 | uint32(c.B)<<16) // COLORREF 0x00BBGGRR
+	w.frameColorOn.Store(set)
+	w.applyFrameColor()
+}
+
+// applyFrameColor передаёт DWM запомненный цвет рамки.
+func (w *Win32Window) applyFrameColor() {
+	if w.hwnd == 0 || w.isPopup {
+		return
+	}
+	v := uint32(dwmwaColorDefault)
+	if w.frameColorOn.Load() {
+		v = w.frameColor.Load()
+	}
+	procDwmSetWindowAttribute.Call(uintptr(w.hwnd), dwmwaBorderColor,
+		uintptr(unsafe.Pointer(&v)), unsafe.Sizeof(v))
+}
 
 // RoundsCorners — скруглены ли сейчас углы этого окна средствами ОС
 // (cornerRounder): только у окна со скруглением, не развёрнутого и не на весь
@@ -1614,6 +1665,9 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		w.mu.Unlock()
 		w.ulwRelease()       // DIB-секция попапа (popupulw_windows.go)
 		w.destroyShadowWnd() // окно-тень (shadowwnd_windows.go)
+		if w.wtsNotify.Swap(false) {
+			procWTSUnRegisterSessionNotification.Call(hwnd)
+		}
 		// Вторичные окна модалок (noQuit) не завершают цикл сообщений — иначе
 		// закрытие диалога уронило бы всё приложение. Главное окно — завершает.
 		if !w.noQuit {
@@ -1732,6 +1786,12 @@ func wndProc(hwnd uintptr, umsg uint32, wparam, lparam uintptr) uintptr {
 		if wparam == spiSetDropShadow {
 			w.applyCorners() // тени окон включили или выключили: DWM или своя
 		}
+		if textSmoothingSetting(wparam) {
+			w.noteTextRendering() // ClearType включили, выключили, перенастроили
+		}
+
+	case wmWtsSessionChange:
+		w.noteTextRendering() // зашли по RDP или вернулись к своему монитору
 
 	case wmDwmCompositionChgd:
 		w.applyCorners() // композиция DWM сменилась: DWM или своя тень

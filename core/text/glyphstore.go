@@ -1020,3 +1020,14 @@ func (s *shapedShard) dropColorsLocked() {
 func (c colorKey) rgba() color.RGBA { return color.RGBA{R: c.r, G: c.g, B: c.b, A: c.a} }
 
 func keyOfColor(c color.RGBA) colorKey { return colorKey{c.R, c.G, c.B, c.A} }
+
+// InternedFontData возвращает общие на процесс байты шрифта с тем же
+// содержимым, что data (разбирая их, если такого шрифта ещё не было); nil —
+// пусто или не шрифт. Кто хранит байты шрифта долго, хранит их — тогда копии
+// одного шрифта не множатся (журнал шрифтов движка, engine/textcopy.go).
+func InternedFontData(data []byte) []byte {
+	if f := store.intern(data); f != nil {
+		return f.data
+	}
+	return nil
+}

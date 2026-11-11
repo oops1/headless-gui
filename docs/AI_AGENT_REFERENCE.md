@@ -10678,12 +10678,25 @@ eng.SetTextQuality(engine.TextQuality{}) // the pre-4.4 look, byte for byte
 eng.SetTextHintingX(false)               // only the new horizontal snapping off
 ```
 
+**Upgrade trap.** An application that already calls
+`SetTextQuality(TextQuality{Hinting: true, Contrast: …})` — the v3.42 recipe — does
+**not** get horizontal snapping: the explicit call sets the whole layer and `HintingX`
+is false in it, so its text looks exactly as on v4.3 (Go.Git hit this on the day of the
+release). Remove the call, or use `engine.DefaultTextQuality()`, or add
+`HintingX: true`.
+
 - **`TextQuality.HintingX`** (new field). Per glyph, vertical stems are found —
   pairs of left and right vertical edges (straight segments and curve ends with a
   vertical tangent, so the sides of `o`, `c`, `e` count) sharing a stretch of height.
-  The stem width is rounded to whole pixels (at least one; up from a 0.4 px
-  fraction), its edges to whole pixel boundaries; the outline in between is
+  Its edges go to whole pixel boundaries; the outline in between is
   stretched piecewise linearly along X, beyond the outer stems it is shifted.
+  **Since v4.5** (Go.Git GG-98) the width is rounded only when it is within
+  `stemWholeTol` (6/64 px) of a whole number of pixels (at least one); otherwise it
+  is kept and only the left edge is snapped (`xStem.whole`, `stemWidth`). v4.4 rounded
+  every width (up from a 0.4 px fraction): Go Regular 10 pt stems of 1.28 px became
+  1 px and the text got thin and sparse. `regularStems` applies only when every stem of
+  the glyph is whole; otherwise `singleStems`. Test: `TestTextHintX_KeepsWeight`
+  (ink 0.93…1.07 of the Y-only hinting at 8–14 pt, four fonts).
 - **Standard stem width.** One width per font and size, from the reference letter
   `l` (then `I`, `н`): a stem within 1/3 px of it gets it, so `l` (1.47 px) and the
   sides of `o` (1.52 px) of Open Sans at 18 px do not round to 1 and 2 px.
@@ -10775,3 +10788,73 @@ mv.OnLayoutChanged = func() {} // collapse/expand, ShowBase, maximize, split (on
   `ShowCollapseButtons`.
 - Tests: `tests/diffview_collapse_test.go`, `tests/mergeview_collapse_test.go`; golden images
   `diffview_*`, `mergeview_*` re-recorded for the header buttons.
+
+---
+
+## v4.5: the window frame is drawn by the OS where it rounds the corners (Go.Git GG-99)
+
+On Windows 11 DWM cuts the window corners with its own radius and draws a 1 px frame
+along that arc. The engine drew its own rounded outer contour on top: on straight edges it
+lay under the DWM frame, at the corners radii and antialiasing differ and a second arc
+showed (dark, or accent with `SetFrameColor`).
+
+- `widget.Window.SystemFrame bool` — the OS draws the outer frame and the corners: the body
+  is square (`corner()` → 0) and no outer contour is drawn (neither the frame color nor the
+  main window XOR frame). Ignored while maximized (`osFrame()`): the engine contour returns.
+- `widget.Window.SystemFrameColor func(c color.RGBA, set bool)` — receives the effective
+  frame color (`frameColor()`: `SetFrameColor`/`FrameColor`, theme `WindowFrame`, dimmed when
+  inactive) or `set=false` (system color). Called from `Draw` only when the value changed.
+- `widget.Dialog.SystemFrame bool` — square body, no `DrawRoundBorder`; set by the modal host
+  for a dialog moved into its own OS window.
+- `window/core`: backend interface `systemFramer { DrawsFrame() bool; SetFrameColor(c, set) }`;
+  `syncSquareCorners` sets `SystemFrame`/`SystemFrameColor` from it (a backend without it — old
+  behavior). Win32: `DrawsFrame()` = `RoundsCorners()` (Windows 11, radius > 0, not maximized,
+  not fullscreen, no own shadow); `SetFrameColor` stores a COLORREF and sets
+  `DWMWA_BORDER_COLOR` (34; `DWMWA_COLOR_DEFAULT` when unset), re-applied in `applyCorners`.
+- Headless rendering, Windows 10, X11 are unchanged.
+- Tests: `tests/system_frame_test.go`, `window/core/corners_test.go` (`TestSyncSystemFrame`),
+  `platform/win32/corners_windows_test.go` (`TestWin32DrawsFrame`, live).
+
+---
+
+## v4.5: text quality as in the system — ClearType setting and RDP (`SetTextQualityFromSystem`)
+
+The LCD layer `{Hinting, HintingX, LCD}` matches Windows ClearType on the same font
+(solid 44.0 % vs 44.3 %), but it is not an engine default: wrong for an unknown subpixel
+order and for RDP. The window asks the OS.
+
+```go
+win.SetTextQualityFromSystem(true)     // before or after Run; false stops watching, keeps the layer
+win.SystemTextRendering()              // native.TextRendering{Known, Subpixel, BGR, Remote}
+window.TextQualityFor(tr)              // the rule: Known && Subpixel && !Remote →
+                                       // {Hinting, HintingX, LCD, LCDOrder(BGR?)}, else DefaultTextQuality()
+```
+
+- `platform/native.TextRendering` (new type). Backend interface in `window/core`:
+  `textRenderingSource { TextRendering(); SetOnTextRenderingChanged(fn func()) }`; a backend
+  without it → `Known=false` → default layer.
+- Win32 (`textrender_windows.go`): `SPI_GETFONTSMOOTHING`, `SPI_GETFONTSMOOTHINGTYPE`
+  (`FE_FONTSMOOTHINGCLEARTYPE`), `SPI_GETFONTSMOOTHINGORIENTATION` (BGR = 0),
+  `GetSystemMetrics(SM_REMOTESESSION)`. Notifications: `WM_SETTINGCHANGE` with
+  `SPI_SETFONTSMOOTHING*` (smoothing, type, contrast, orientation) and
+  `WM_WTSSESSION_CHANGE` (`WTSRegisterSessionNotification` while subscribed and the window
+  exists, unregistered on unsubscribe and `WM_DESTROY`). The callback runs on the window
+  thread; the window posts `applySystemText` to the engine goroutine.
+- `bringUp` calls `syncSystemText` after the corners (layer before the first frame),
+  `tearDown` unsubscribes. A repeated notification with the same layer does not touch the
+  engine. The layer goes to the window engine and to hosted engines (`dialogHost.stack`,
+  `dockFloatHost.floats`).
+- Hosted engines (dialogs, floating panes in own OS windows) now inherit the parent engine's
+  text settings at creation (`inheritText`, next to `inheritMotionProfile`) via the new
+  `Engine.CopyTextSettingsFrom(src *Engine)`: fonts registered after construction, in order
+  (`RegisterFont`/`File`/`Dir`/`FS`, `RegisterFallbackFont*`, a replaced `$hg_bold`;
+  recorded in `Engine.fontOps` by `registerNamedLocked`/`recordFontLocked` with the
+  process-wide bytes `text.InternedFontData` — re-registering a name replaces its entry, a
+  repeated fallback is not added again; the constructor's assets/fonts are not recorded), the `SetDefaultFont` name, `SetDPI`, `TextQuality()`, and `SetTextSubpixel`
+  when pinned by the application (theme-driven subpixel stays with the theme). Before v4.5 a
+  hosted dialog drew text in Roboto with the default layer whatever the application set.
+  Later changes on the parent do not propagate (except the system text mode). Tests:
+  `engine/textcopy_test.go`, `TestInheritText_Fonts`, `TestHostedDialog_InheritsText`.
+- Tests: `window/core/systext_test.go` (rule table, follow/unfollow with a fake backend,
+  inheritance), `platform/win32/textrender_windows_test.go` (live: reading, messages,
+  session notifications before and after Create).

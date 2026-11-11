@@ -12,32 +12,34 @@ package desktop
 // v4.4: все хэши обновлены осознанно — движок по умолчанию рисует текст с
 // полным слоем качества (engine.DefaultTextQuality: хинтинг по обеим осям и
 // контраст), меняются подписи панели и часы. FROZEN_PRINT=1 печатает новые.
+//
+// v4.5: все хэши обновлены осознанно — привязка вертикальных штрихов
+// (HintingX) больше не округляет толщину ствола, далёкую от целой (Go.Git
+// GG-98), меняются те же подписи и часы.
 var frozenHashes = map[string]string{
-	"Windows2000 light=false @1":      "8b86b2dfeb11664b",
-	"Windows2000 light=false @2":      "d5134cfb956edff4",
-	"Windows2000 Blue light=false @1": "5349517d72bb9c71",
-	"Windows2000 Blue light=false @2": "e0420a79a8115610",
-	"Windows10 light=false @1":        "fc0c69cdb6a358dc",
-	"Windows10 light=false @2":        "c0a0edfe6160757e",
-	"Windows10 light=true @1":         "969d062d68bf642f",
-	"Windows10 light=true @2":         "62c4f4fda72f29c4",
-	"Windows10 Dark light=false @1":   "2abdafb28b6094e0",
-	"Windows10 Dark light=false @2":   "6c4db9ba9f27bacb",
-	"macOS light=false @1":            "ec0a39a3be0c26cc",
-	"macOS light=false @2":            "a20e84b6f8d1330e",
-	"macOS Dark light=false @1":       "247051b34f427dbf",
-	"macOS Dark light=false @2":       "445e80e0c895aef5",
+	"Windows2000 light=false @1":      "ff2ea71c8bc23612",
+	"Windows2000 light=false @2":      "4b9845847bcb113f",
+	"Windows2000 Blue light=false @1": "b7ba6854874d05e2",
+	"Windows2000 Blue light=false @2": "100ac3d4f1f47ba2",
+	"Windows10 light=false @1":        "c769c79513e97029",
+	"Windows10 light=false @2":        "6de2a24be3a47131",
+	"Windows10 light=true @1":         "5e1a99f731b4b16c",
+	"Windows10 light=true @2":         "de04a15745d7bb41",
+	"Windows10 Dark light=false @1":   "b96562d4807354ff",
+	"Windows10 Dark light=false @2":   "b5f5ebc5899069e4",
+	"macOS light=false @1":            "35f287e5ab230767",
+	"macOS light=false @2":            "703791f69b74dbdc",
+	"macOS Dark light=false @1":       "e00d6216566cb5e8",
+	"macOS Dark light=false @2":       "4ed2bf937069a8dd",
 }
 
 // frozenHashesFMA — те же кадры в сборке, где компилятор сливает a*b+c в одну
 // FMA-инструкцию (arm64 — macOS на GitHub Actions; amd64 при GOAMD64=v3).
 // Округление FMA другое, и младшие биты сглаживания значков и глифов
 // отличаются. Здесь только расходящиеся ключи, остальные берутся из
-// frozenHashes. Сняты с GOAMD64=v3 (v4.4: FROZEN_PRINT=1 GOAMD64=v3).
+// frozenHashes. Сняты с GOAMD64=v3 (v4.5: FROZEN_PRINT=1 GOAMD64=v3).
 var frozenHashesFMA = map[string]string{
-	"Windows2000 light=false @1":      "972a1464ac882706",
-	"Windows2000 Blue light=false @1": "5f28ba683bd396a3",
-	"Windows10 light=false @2":        "a511304183304754",
-	"Windows10 light=true @2":         "79dfa0693ee1e100",
-	"Windows10 Dark light=false @2":   "e0ff78535a98339c",
+	"Windows10 light=false @2":      "1ff56bd071d3593a",
+	"Windows10 light=true @2":       "3b88efeb41697d26",
+	"Windows10 Dark light=false @2": "993811d6ddee08b1",
 }

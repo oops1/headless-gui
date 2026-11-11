@@ -201,6 +201,9 @@ func (h *dialogHost) create(hm *hostedModal) {
 	// Профиль движения — у окна тот же, что у родителя: удалённый или
 	// «без движения» стол не должен анимировать свои диалоги.
 	inheritMotionProfile(eng, h.parent)
+	// Текст — тоже: шрифты приложения, слой качества и текст «как в
+	// системе» не должны обрываться на окне диалога.
+	inheritText(eng, h.parent)
 	// Синхронизирует глобальный widget.SetScreenBounds(dw,dh) под диалог.
 	eng.SetResolution(dw, dh)
 
@@ -262,6 +265,11 @@ func (h *dialogHost) create(hm *hostedModal) {
 		if cr, ok := nw.(cornerRounder); ok && !cr.RoundsCorners() {
 			dlg.SquareCorners = true
 		}
+	}
+	// Окно ОС само срезает углы и рисует рамку (Windows 11) — диалог своего
+	// контура не рисует: на углах он расходился бы с рамкой ОС (GG-99).
+	if sf, ok := nw.(systemFramer); ok && sf.DrawsFrame() {
+		dlg.SystemFrame = true
 	}
 
 	// Owner + модальность.

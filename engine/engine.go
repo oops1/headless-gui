@@ -179,6 +179,8 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	// Шрифт по умолчанию — Roboto, если он есть в assets/fonts; иначе остаётся
 	// встроенный Go Regular.
 	e.canvas.SetDefaultFont("Roboto")
+	// Шрифты конструктора есть у каждого движка: вторичным их не копируем.
+	e.fontOps = nil
 	// Слой данных (биндинги/{Loc}/live-коллекции) и авто-damage виджетов
 	// сообщают об изменениях UI — нужно для рендера по запросу (см.
 	// invalidate.go). Регистрируемся в ШИРОКОВЕЩАТЕЛЬНОМ реестре приёмников:
@@ -572,7 +574,7 @@ func (e *Engine) acquireSnap(r image.Rectangle) *image.RGBA {
 func (e *Engine) RegisterFont(fontName string, ttfData []byte) {
 	e.frameMu.Lock() // кэш шрифтов читается отрисовкой — меняем между кадрами
 	defer e.frameMu.Unlock()
-	e.canvas.RegisterFont(fontName, ttfData)
+	e.registerNamedLocked(fontName, ttfData)
 	widget.BumpTextMetricsRev() // замеры именем этого шрифта устарели
 }
 
@@ -641,6 +643,7 @@ func (e *Engine) SetDefaultFont(name string) bool {
 	defer e.frameMu.Unlock()
 	ok := e.canvas.SetDefaultFont(name)
 	if ok {
+		e.defaultFont = name        // для вторичных движков (CopyTextSettingsFrom)
 		widget.BumpTextMetricsRev() // ширины шрифтом по умолчанию изменились
 		e.Invalidate()
 	}
@@ -788,6 +791,7 @@ func (e *Engine) RegisterFallbackFont(ttfData []byte) bool {
 	defer e.frameMu.Unlock()
 	ok := e.canvas.AddFallbackFont(ttfData)
 	if ok {
+		e.recordFontLocked(fontOp{fallback: true, data: hgtext.InternedFontData(ttfData)})
 		widget.BumpTextMetricsRev() // руны, которых не было, теперь имеют ширину
 	}
 	return ok

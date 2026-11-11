@@ -486,6 +486,10 @@ type Window struct {
 	// (см. SetOnSystemThemeChanged в systheme.go).
 	sysTheme systemThemeState
 
+	// sysText — режим «текст как в системе» (см. SetTextQualityFromSystem в
+	// systext.go).
+	sysText systemTextState
+
 	// kg — просьба о захвате клавиатуры до Run (см. SetKeyboardGrab в keygrab.go).
 	kg keyGrabState
 
@@ -655,6 +659,7 @@ func (win *Window) tearDown() {
 	win.releaseKeyboardGrab()
 	win.stopMonitorWatch()
 	win.closeSystemThemeWatch()
+	win.stopSystemText()
 	win.stopAccessibility()
 	win.stopTray()
 	// Сносим все оторванные окна панелей: останавливаем их движки (реестр
@@ -851,6 +856,9 @@ func (win *Window) bringUp() error {
 	// снимает скругление DWM.
 	applyShadowSource(win.native, win.ShadowSource(), win.scale, false)
 	win.syncSquareCorners()
+
+	// Текст «как в системе», заказанный до Run: слой — до первого кадра.
+	win.syncSystemText()
 
 	// Подключаем виджет-окно (drag, close, minimize, maximize)
 	win.setupWidgetWindow()

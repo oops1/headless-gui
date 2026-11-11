@@ -164,6 +164,21 @@ type Window struct {
 	// корпус рисуется прямоугольным, чтобы за скруглением не было видно фона
 	// холста. Ставит окно (пакет window), тема его не трогает.
 	SquareCorners bool
+	// SystemFrame — наружную рамку окна и скругление его углов рисует сама ОС
+	// (Windows 11: DWM срезает углы своим радиусом и кладёт рамку в 1 px).
+	// Корпус тогда рисуется прямоугольным и без своего наружного контура:
+	// контур движка лежал бы под рамкой ОС на прямых краях, а на углах, где
+	// радиусы и сглаживание двух рамок не совпадают, был бы виден второй
+	// дугой (GG-99). Ставит окно (пакет window), тема его не трогает.
+	SystemFrame bool
+	// SystemFrameColor принимает цвет рамки, которую рисует ОС: действующий
+	// FrameColor (у неактивного окна — приглушённый) или set=false, когда цвет
+	// не задан и рамка остаётся системной. Зовётся из отрисовки, только когда
+	// значение изменилось. Ставит окно (пакет window) вместе с SystemFrame.
+	SystemFrameColor func(c color.RGBA, set bool)
+	sysFrameSent     bool
+	sysFrameColor    color.RGBA
+	sysFrameSet      bool
 
 	// Backdrop — материал фона окна (theme.MaterialMica и др., см.
 	// SetBackdrop). Нулевой — окно заливается Background, как всегда.
@@ -854,7 +869,10 @@ func (w *Window) Draw(ctx base.DrawContext) {
 			// Главное окно в не-классических темах: контрастная XOR-рамка по всему
 			// периметру вместо обычной (на светлом фоне канваса светлая рамка окна
 			// сливалась бы) — если приложение или тема не задали свой цвет.
-			if w.MainWindow {
+			if w.osFrame() {
+				// Контур — рамка ОС (SystemFrame): свой не рисуем, цвет отдаём ей.
+				w.pushSystemFrameColor()
+			} else if w.MainWindow {
 				xc := xorBorderColor(w.xorBorderBase())
 				if haveFrame {
 					xc = frame
@@ -2043,14 +2061,34 @@ func (w *Window) xorBorderBase() color.RGBA {
 }
 
 // corner — радиус, которым корпус окна рисуется на самом деле: 0, если ОС
-// показывает окно с прямыми углами (SquareCorners) или окно развёрнуто —
-// развёрнутое окно не скругляет ни одна ОС, и скругление корпуса оставило бы
-// в углах экрана фон холста.
+// показывает окно с прямыми углами (SquareCorners), сама срезает их вместе с
+// рамкой (SystemFrame) или окно развёрнуто — развёрнутое окно не скругляет ни
+// одна ОС, и скругление корпуса оставило бы в углах экрана фон холста.
 func (w *Window) corner() int {
-	if w.SquareCorners || w.maximized {
+	if w.SquareCorners || w.SystemFrame || w.maximized {
 		return 0
 	}
 	return w.CornerRadius
+}
+
+// osFrame — наружный контур сейчас рисует ОС: SystemFrame у окна, которое не
+// развёрнуто (развёрнутому окну рамку не рисует никто, кроме движка).
+func (w *Window) osFrame() bool { return w.SystemFrame && !w.maximized }
+
+// pushSystemFrameColor отдаёт ОС действующий цвет рамки, если он изменился с
+// прошлого раза. Из отрисовки: цвет меняют SetFrameColor, тема, активность
+// окна и прямая запись в FrameColor — все они приводят к кадру.
+func (w *Window) pushSystemFrameColor() {
+	if !w.SystemFrame || w.SystemFrameColor == nil {
+		w.sysFrameSent = false
+		return
+	}
+	c, set := w.frameColor()
+	if w.sysFrameSent && c == w.sysFrameColor && set == w.sysFrameSet {
+		return
+	}
+	w.sysFrameSent, w.sysFrameColor, w.sysFrameSet = true, c, set
+	w.SystemFrameColor(c, set)
 }
 
 // notifyMoved объявляет перенос окна вместе с полями, на которые оно рисует
