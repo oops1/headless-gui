@@ -1112,6 +1112,29 @@ func TestTiles_SidebarAnimationInvalidatesOnlySidebarColumn(t *testing.T) {
 
 // ─── Полоса прокрутки ────────────────────────────────────────────────────────
 
+// waitFadeStarted ждёт, пока таймер паузы запустит затухание полосы. Спать
+// фиксированное время нельзя: пауза — time.AfterFunc, и на загруженной машине
+// (CI #362, windows-latest: «полоса не погасла: alpha 1») его горутина
+// просыпается позже, чем кончается сон теста, — анимации ещё нет, и шаг
+// анимаций ничего не гасит. Ждём саму анимацию: f.anim ставится после её
+// регистрации.
+func waitFadeStarted(t *testing.T, f *fadeBar) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		f.mu.Lock()
+		started := f.anim != nil || f.alpha == 0
+		f.mu.Unlock()
+		if started {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("затухание полосы не началось за 5 с")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
 func TestTiles_ThinScrollbarAppearsOnWheelAndFades(t *testing.T) {
 	testreset.Globals(t)
 	old1, old2 := thinBarHold, thinBarFade
@@ -1140,7 +1163,7 @@ func TestTiles_ThinScrollbarAppearsOnWheelAndFades(t *testing.T) {
 		t.Error("ползунок не нарисован")
 	}
 
-	time.Sleep(60 * time.Millisecond)
+	waitFadeStarted(t, &m.v.listBar)
 	t0 := time.Now()
 	widget.StepAnimations(t0)
 	widget.StepAnimations(t0.Add(time.Second))
