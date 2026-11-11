@@ -610,6 +610,7 @@ func newProtoFrame(src *Canvas, parallel, ownFonts bool) *protoFrame {
 			// отрисовки тот же (с запасной цепочкой), замки видов личные.
 			c = hgraster.NewCanvasScaled(ts, ts, 1, hgtext.NewFontCacheFromData(goregular.TTF, DefaultDPI))
 			c.AddDefaultFonts()
+			c.SetTextQuality(src.DefaultFont().Quality()) // слой качества — как у движка (engine.New)
 		} else {
 			c = src.CloneForSize(ts, ts, 1, nil)
 		}

@@ -138,6 +138,10 @@ func newEngine(width, height, fps int, offscreen bool) *Engine {
 	e := &Engine{}
 	e.fontCache = fc
 	e.canvas = hgraster.NewCanvas(width, height, fc)
+	// Текст по умолчанию — с полным слоем качества (v4.4): штрихи на пиксельной
+	// сетке по обеим осям, контраст тонких штрихов. Шрифты, зарегистрированные
+	// позже, наследуют слой от основного. Прежний вид — SetTextQuality(TextQuality{}).
+	e.canvas.SetTextQuality(hgtext.DefaultQuality())
 	e.rec = hgdraw.NewRecorder()
 	e.lp = loop.New(loopHost{e}, fps)
 	e.offscreen = offscreen
@@ -670,10 +674,13 @@ func (e *Engine) SetTextSubpixel(on bool) {
 }
 
 // SetTextQuality задаёт слой качества мелкого текста (см. TextQuality):
-// автохинтинг по вертикали, подъём контраста тонких штрихов и, по явной
-// просьбе, субпиксельное сглаживание LCD.
+// автохинтинг по вертикали и привязку вертикальных штрихов по горизонтали,
+// подъём контраста тонких штрихов и, по явной просьбе, субпиксельное
+// сглаживание LCD.
 //
-// По умолчанию всё выключено, и текст рисуется как прежде, побайтно. Ширины
+// С v4.4 движок включает DefaultTextQuality() сам (хинтинг по обеим осям и
+// контраст, без LCD); SetTextQuality(TextQuality{}) возвращает прежний вид
+// текста побайтно. Ширины
 // строк, шаги глифов и кернинг от режима не зависят, поэтому раскладку и
 // измерения (MeasureText) перестраивать не нужно; сбрасываются только маски
 // глифов, окно перерисуется. Режим касается шрифтов движка целиком, в том числе
@@ -698,6 +705,15 @@ func (e *Engine) TextQuality() TextQuality {
 func (e *Engine) SetTextHinting(on bool) {
 	q := e.TextQuality()
 	q.Hinting = on
+	e.SetTextQuality(q)
+}
+
+// SetTextHintingX включает и выключает только привязку вертикальных штрихов к
+// пиксельной сетке по горизонтали (TextQuality.HintingX), не трогая остальные
+// поля TextQuality.
+func (e *Engine) SetTextHintingX(on bool) {
+	q := e.TextQuality()
+	q.HintingX = on
 	e.SetTextQuality(q)
 }
 

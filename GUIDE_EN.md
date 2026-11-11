@@ -3069,12 +3069,12 @@ not divide by zero; a size of zero or less gives all zeros.
 
 ### Small text sharpness (v3.42)
 
-By default text is rasterized as before: grayscale antialiasing without
+Without this layer text is rasterized with grayscale antialiasing and no
 hinting. At small sizes (12–14 px) stems then land on the pixel grid by
 chance, so the same letter is crisp in one place of a line and blurry in
-another. The `TextQuality` mode fixes that. It is **off by default** — frames
-of existing programs do not change — and has to be turned on explicitly, once
-at start-up:
+another. The `TextQuality` mode fixes that. Before v4.4 it was **off by
+default** and had to be turned on explicitly, once at start-up (since v4.4
+the engine turns it on itself, see below):
 
 ```go
 eng.SetTextQuality(engine.TextQuality{
@@ -3098,6 +3098,34 @@ The mode applies to every font of the canvas, survives `SetScale`/
 byte-identical on Windows, Linux and in CI. Short forms exist too:
 `SetTextHinting(bool)`, `SetTextContrast(float64)`. Re-record the program's
 golden snapshots after turning it on.
+
+**Since v4.4 the quality layer is on by default** and does more: the engine
+starts with `engine.DefaultTextQuality()` — hinting along both axes and
+contrast, no LCD. The new `HintingX` field snaps vertical stems to the pixel
+grid horizontally, like Windows hinting: a stem of `l`, `H` or the side of
+`o` about one pixel wide no longer lands on the border of two pixels (two
+grey columns — the "blurry" look) but fills one solid column.
+
+```go
+// Nothing to call — this is how the engine draws by default.
+eng.SetTextQuality(engine.TextQuality{}) // the previous look, byte for byte
+eng.SetTextHintingX(false)                // only the horizontal snapping off
+```
+
+- Stem widths are rounded to whole pixels (up from a 0.4 fraction), and stems
+  close to the font's standard width at that size (taken from `l`) get the
+  same width: the letters of a line have one weight.
+- Stems with an equal step (`Ш`, `ш`, `m`, `п`) are placed as a row with one
+  rounded step — the counters are equal.
+- Advances, kerning and line widths **do not change** — layout stays the
+  same; a glyph moves inside its cell by at most half a pixel. With
+  `SetTextSubpixel(true)` stems are placed from the exact pen position, the
+  error does not accumulate along a line.
+- Applies to `DrawText`/`DrawTextFont` and rotated text; shaped text
+  (complex scripts) and SVG text are hinted vertically only.
+
+Programs with golden snapshots of text must re-record them after moving to
+v4.4 (or restore the previous look with `SetTextQuality(engine.TextQuality{})`).
 
 ---
 

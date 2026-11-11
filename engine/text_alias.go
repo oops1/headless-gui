@@ -29,6 +29,11 @@ const LCDOrderRGB = hgtext.LCDOrderRGB
 // TextQuality — см. text.TextQuality.
 type TextQuality = hgtext.TextQuality
 
+// DefaultTextQuality — слой качества текста, включённый в движке по умолчанию
+// (с v4.4): хинтинг по обеим осям и подъём контраста. См. text.DefaultQuality.
+// Прежний вид текста возвращает SetTextQuality(TextQuality{}).
+func DefaultTextQuality() TextQuality { return hgtext.DefaultQuality() }
+
 // DefaultGlyphCacheBudget — см. text.DefaultGlyphCacheBudget.
 const DefaultGlyphCacheBudget = hgtext.DefaultGlyphCacheBudget
 

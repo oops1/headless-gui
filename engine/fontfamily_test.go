@@ -289,6 +289,9 @@ func TestSubpixel_AppliesToLaterFonts(t *testing.T) {
 func TestSubpixel_PhasesGiveDifferentMasks(t *testing.T) {
 	testreset.Globals(t)
 	eng := openSansEngine(t)
+	// Механизм фаз — без привязки штрихов: HintingX ставит ствол «l» на целый
+	// пиксель при любой фазе (это и нужно для чёткости), маски тогда совпадают.
+	eng.SetTextQuality(TextQuality{})
 	eng.SetTextSubpixel(true)
 	fc := eng.canvas.FontFor("OpenSans")
 	g0 := fc.GlyphAt(8.5, 'l', 0)
@@ -409,6 +412,7 @@ func TestSubpixel_SecondGlyphIsRenderedAtItsPhase(t *testing.T) {
 	testreset.Globals(t)
 	render := func(on bool, text string) *image.RGBA {
 		eng := openSansEngine(t)
+		eng.SetTextQuality(TextQuality{}) // механизм фаз — без привязки штрихов
 		eng.SetTextSubpixel(on)
 		eng.canvas.DrawTextFont(text, 2, 2, 8.5, "OpenSans", color.RGBA{0, 0, 0, 255})
 		return eng.canvas.Back()
