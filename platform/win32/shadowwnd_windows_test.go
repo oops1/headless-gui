@@ -42,12 +42,14 @@ func shadowScreenPixel(x, y int) (uint32, bool) {
 	return uint32(c), uint32(c) != 0xFFFFFFFF
 }
 
-// shadowScreenLive сообщает, отражает ли чтение экрана окна в точке (x, y):
-// поверх неё на миг ставится маленькое непрозрачное окно «поверх всех»
+// shadowScreenLive сообщает, отражает ли чтение экрана слоёные окна в точке
+// (x, y): поверх неё на миг ставится маленькое непрозрачное окно «поверх всех»
 // (стандартный STATIC, белый или чёрный — противоположный тому, что на экране),
-// и пиксель обязан измениться. Не изменился — экран наших окон не показывает:
-// кадр рабочего стола не обновляется (фоновый сеанс машины CI) или точку
-// закрывает чужое окно поверх всех. По такому экрану потемнение не сверить.
+// и пиксель обязан измениться. Окно слоёное (WS_EX_LAYERED), как окно-тень:
+// контроль идёт тем же путём компоновки, что и проверяемое. Не изменился —
+// экран наших окон не показывает: кадр рабочего стола не обновляется (фоновый
+// сеанс машины CI), слоёные окна в него не попадают или точку закрывает чужое
+// окно поверх всех. По такому экрану потемнение не сверить.
 func shadowScreenLive(x, y int) bool {
 	before, ok := shadowScreenPixel(x, y)
 	if !ok {
@@ -60,12 +62,14 @@ func shadowScreenLive(x, y int) bool {
 	}
 	cls, _ := windows.UTF16PtrFromString("STATIC")
 	h, _, _ := procCreateWindowExW.Call(
-		uintptr(wsExTopmost|wsExToolwindow|wsExNoactivate),
+		uintptr(wsExLayered|wsExTransparent|wsExTopmost|wsExToolwindow|wsExNoactivate),
 		uintptr(unsafe.Pointer(cls)), 0, style,
 		uintptr(x-8), uintptr(y-8), 16, 16, 0, 0, 0, 0)
 	if h == 0 {
 		return false
 	}
+	const lwaAlpha = 0x2
+	procSetLayeredWindowAttributes.Call(h, 0, 255, lwaAlpha) // непрозрачное; без вызова слоёное окно не видно
 	live := false
 	for try := 0; try < 3 && !live; try++ {
 		shadowPump()
