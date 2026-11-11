@@ -67,6 +67,7 @@ type dvGeom struct {
 	lx0, lx1, rx0, rx1 int
 	cy0, cy1           int
 	rulerX             int
+	fold               [2]bool // свёрнутые стороны (GG-95)
 }
 
 type dvEditKind int
@@ -95,6 +96,7 @@ type dvStamp struct {
 	active  DiffSide
 	current int
 	changes int
+	coll    [2]bool
 }
 
 // DiffView — контрол сравнения и правки двух текстов.
@@ -124,6 +126,16 @@ type DiffView struct {
 	// место ползунка схватили, чтобы код не прыгал под курсор.
 	hbarDrag bool
 	hbarGrab int
+
+	// Свёрнутая сторона и граница между сторонами (GG-95, diffview_collapse.go).
+	coll         [2]bool
+	foldBtns     bool
+	hoverFold    DiffSide // кнопка «свернуть»/полоса под мышью; -1 — нет
+	split        float64  // доля ширины левой стороны, когда развёрнуты обе
+	splitEvent   bool
+	splitDrag    bool
+	splitGrab    int
+	splitClickAt time.Time
 
 	dragSide    DiffSide
 	lastClickAt time.Time
@@ -166,6 +178,13 @@ type DiffView struct {
 	OnBlockCopied          func(index int, toRight bool)
 	OnSaveRequest          func(side DiffSide) // Ctrl+S
 	OnError                func(side DiffSide, err error)
+	// OnCollapsedChanged — сторона свёрнута или развёрнута (кнопкой, полосой
+	// или SetCollapsed): приложение запоминает состояние и держит в согласии
+	// свои кнопки.
+	OnCollapsedChanged func(side DiffSide, collapsed bool)
+	// OnSplitChanged — доля ширины левой стороны изменилась (граница
+	// отпущена, двойной щелчок по ней или SetSplit).
+	OnSplitChanged func(ratio float64)
 }
 
 // NewDiffView создаёт контрол сравнения. monoFont — шрифт кода (пусто —
@@ -197,6 +216,9 @@ func NewDiffView(monoFont, boldFont string) *DiffView {
 		current:    -1,
 		hoverChunk: -1,
 		hoverBtn:   -1,
+		hoverFold:  -1,
+		foldBtns:   true,
+		split:      dvSplitHalf,
 		menu:       NewPopupMenu(),
 	}
 	// Меню — ребёнок контрола: так движок рисует его оверлей и отдаёт ему
@@ -219,7 +241,7 @@ func (d *DiffView) SetCaptureManager(cm CaptureManager) {
 // ─── События ────────────────────────────────────────────────────────────────
 
 func (d *DiffView) stampLocked() dvStamp {
-	st := dvStamp{active: d.active, current: d.current, changes: d.changeCountLocked()}
+	st := dvStamp{active: d.active, current: d.current, changes: d.changeCountLocked(), coll: d.coll}
 	for i, s := range d.docs {
 		st.rev[i], st.mod[i], st.caret[i] = s.rev, s.modified(), s.caret
 	}
@@ -244,6 +266,19 @@ func (d *DiffView) queueEventsLocked(a dvStamp) {
 			if f, m := d.OnModifiedChanged, b.mod[i]; f != nil {
 				d.emit(func() { f(side, m) })
 			}
+		}
+	}
+	for i := range b.coll {
+		if a.coll[i] != b.coll[i] {
+			if f, side, v := d.OnCollapsedChanged, DiffSide(i), b.coll[i]; f != nil {
+				d.emit(func() { f(side, v) })
+			}
+		}
+	}
+	if d.splitEvent && !d.splitDrag {
+		d.splitEvent = false
+		if f, v := d.OnSplitChanged, d.split; f != nil {
+			d.emit(func() { f(v) })
 		}
 	}
 	if a.active != b.active {
@@ -683,7 +718,17 @@ func (d *DiffView) ActiveSide() DiffSide {
 	return d.active
 }
 
-func (d *DiffView) SetActiveSide(side DiffSide) { d.do(func() { d.active = side }) }
+// SetActiveSide делает сторону активной. Свёрнутая сторона при этом
+// разворачивается: печатать в невидимую сторону нельзя.
+func (d *DiffView) SetActiveSide(side DiffSide) { d.do(func() { d.activateLocked(side) }) }
+
+// activateLocked делает сторону активной, разворачивая её, если свёрнута.
+func (d *DiffView) activateLocked(side DiffSide) {
+	if side == DiffLeft || side == DiffRight {
+		d.setCollapsedLocked(side, false)
+	}
+	d.active = side
+}
 
 // Caret — позиция каретки стороны (строка и колонка в рунах, от нуля).
 func (d *DiffView) Caret(side DiffSide) (line, col int) {
@@ -698,7 +743,7 @@ func (d *DiffView) SetCaret(side DiffSide, line, col int) {
 		s := d.docs[side]
 		s.caret = s.clamp(dvPos{line, col})
 		s.anchor = s.caret
-		d.active = side
+		d.activateLocked(side)
 		d.caretMovedLocked()
 	})
 }
@@ -914,11 +959,7 @@ func (d *DiffView) geom() dvGeom {
 	b := d.Bounds()
 	g := dvGeom{b: b}
 	g.rulerX = b.Max.X - dvRulerW - 6
-	pw := max((g.rulerX-b.Min.X-2*dvOuterPad-dvGutterW)/2, 80)
-	g.lx0 = b.Min.X + dvOuterPad
-	g.lx1 = g.lx0 + pw
-	g.rx0 = g.lx1 + dvGutterW
-	g.rx1 = g.rx0 + pw
+	d.layoutSides(&g)
 	g.cy0 = b.Min.Y
 	if d.headers {
 		g.cy0 += dvHeaderH
@@ -940,8 +981,7 @@ func (d *DiffView) needHBarLocked(g dvGeom) bool {
 	if d.charW <= 0 {
 		return false
 	}
-	_, _, codeX, codeR := d.paneGeom(g, DiffLeft)
-	return d.contentWLocked() > float64(codeR-codeX)
+	return d.contentWLocked() > d.codeWLocked(g)
 }
 
 // hbarTrack — трек горизонтальной полосы: под обеими панелями кода, до
@@ -960,8 +1000,7 @@ func (d *DiffView) hbarThumbLocked(g dvGeom) image.Rectangle {
 	if tr.Empty() {
 		return image.Rectangle{}
 	}
-	_, _, codeX, codeR := d.paneGeom(g, DiffLeft)
-	return HBarThumb(tr, d.hscroll, d.maxHScrollLocked(), float64(codeR-codeX), d.contentWLocked())
+	return HBarThumb(tr, d.hscroll, d.maxHScrollLocked(), d.codeWLocked(g), d.contentWLocked())
 }
 
 // setHScrollLocked задаёт смещение вбок, зажимая его в допустимые пределы.
@@ -984,17 +1023,15 @@ func (d *DiffView) hbarPressLocked(x int) {
 		d.hbarGrab = x - th.Min.X
 		return
 	}
-	_, _, codeX, codeR := d.paneGeom(g, DiffLeft)
 	d.setHScrollLocked(HBarScrollAt(d.hbarTrack(g), x, d.maxHScrollLocked(),
-		float64(codeR-codeX), d.contentWLocked()))
+		d.codeWLocked(g), d.contentWLocked()))
 }
 
 // hbarDragToLocked ведёт ползунок за курсором.
 func (d *DiffView) hbarDragToLocked(x int) bool {
 	g := d.geom()
-	_, _, codeX, codeR := d.paneGeom(g, DiffLeft)
 	return d.setHScrollLocked(HBarScrollForThumbX(d.hbarTrack(g), x-d.hbarGrab,
-		d.maxHScrollLocked(), float64(codeR-codeX), d.contentWLocked()))
+		d.maxHScrollLocked(), d.codeWLocked(g), d.contentWLocked()))
 }
 
 // paneGeom — края панели и области кода стороны.
@@ -1106,9 +1143,7 @@ func (d *DiffView) scrollBy(dy float64) {
 // maxHScrollLocked — насколько вбок можно увести код: самая длинная строка
 // обеих сторон минус ширина области кода.
 func (d *DiffView) maxHScrollLocked() float64 {
-	g := d.geom()
-	_, _, codeX, codeR := d.paneGeom(g, DiffLeft)
-	return math.Max(0, d.contentWLocked()-float64(codeR-codeX))
+	return math.Max(0, d.contentWLocked()-d.codeWLocked(d.geom()))
 }
 
 // contentWLocked — ширина содержимого в точках (самая длинная строка плюс
@@ -1216,8 +1251,8 @@ func (d *DiffView) circleCenters(g dvGeom, ci int, lt, rt float64) (lx, ly, rx, 
 // 2·участок+1 (правая); -1 — мимо.
 func (d *DiffView) hitButtonLocked(x, y int) int {
 	g := d.geom()
-	if y < g.cy0 || y >= g.cy1 {
-		return -1
+	if y < g.cy0 || y >= g.cy1 || g.fold[DiffLeft] || g.fold[DiffRight] {
+		return -1 // у свёрнутой стороны кнопок переноса нет
 	}
 	lt, rt := d.offsets(float64(g.cy1 - g.cy0))
 	fx, fy := float64(x), float64(y)
@@ -1244,9 +1279,9 @@ func (d *DiffView) sideAt(x, y int) (DiffSide, bool) {
 		return 0, false
 	}
 	switch {
-	case x >= g.lx0 && x < g.lx1:
+	case x >= g.lx0 && x < g.lx1 && !g.fold[DiffLeft]:
 		return DiffLeft, true
-	case x >= g.rx0 && x < g.rx1:
+	case x >= g.rx0 && x < g.rx1 && !g.fold[DiffRight]:
 		return DiffRight, true
 	}
 	return 0, false

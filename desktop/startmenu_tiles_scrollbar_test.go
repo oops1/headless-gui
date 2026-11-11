@@ -149,7 +149,7 @@ func TestScrollbar_ThumbDoesNotFadeWhileDragged(t *testing.T) {
 
 	release(m, x, y+20)
 	m.OnMouseMove(m.contentRect().Min.X+10, m.contentRect().Min.Y+10) // курсор ушёл с дорожки
-	time.Sleep(90 * time.Millisecond)
+	waitFadeStarted(t, &m.v.listBar)
 	t1 := time.Now()
 	widget.StepAnimations(t1)
 	widget.StepAnimations(t1.Add(time.Second))
@@ -176,7 +176,7 @@ func TestScrollbar_HoverKeepsBarVisible(t *testing.T) {
 		t.Errorf("над дорожкой полоса потухла: alpha %v", a)
 	}
 	m.OnMouseMove(m.contentRect().Min.X+100, m.contentRect().Min.Y+100)
-	time.Sleep(90 * time.Millisecond)
+	waitFadeStarted(t, &m.v.listBar)
 	t1 := time.Now()
 	widget.StepAnimations(t1)
 	widget.StepAnimations(t1.Add(time.Second))

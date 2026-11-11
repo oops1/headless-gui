@@ -53,3 +53,5 @@ func BenchmarkGlyphRasterHinting(b *testing.B) { benchGlyphRaster(b, TextQuality
 func BenchmarkGlyphRasterHintingLCD(b *testing.B) {
 	benchGlyphRaster(b, TextQuality{Hinting: true, LCD: true})
 }
+
+func BenchmarkGlyphRasterDefault(b *testing.B) { benchGlyphRaster(b, DefaultQuality()) }

@@ -9504,7 +9504,7 @@ eng.SetTextContrast(0.5)    // changes only the Contrast field
 q := eng.TextQuality()      // effective values (Contrast clamped to [0,1], step 1/64)
 ```
 
-**Off by default**: the zero `TextQuality` draws text exactly as before (frames of
+**Off by default until v4.4** (on since v4.4 — see the v4.4 section): the zero `TextQuality` draws text exactly as before (frames of
 existing scenes, golden and hash tests unchanged). The mode is independent of
 `SetTextSubpixel` (they can be combined). Changing it drops the glyph-mask
 caches and redraws; it applies to every font of the engine, including fonts
@@ -10661,3 +10661,117 @@ scene pilot"). New public API, no behaviour change for existing programs.
   `engine/shadowaround_test.go`, `engine/movekeep_test.go` (two engines, reuse on and off,
   frames compared byte for byte after every step; a random session; consumer buffers; two
   buffers; round and rectangular clips).
+
+---
+
+## v4.4: text quality on by default, vertical stems snapped to the pixel grid (`HintingX`)
+
+Small text looked soft: a vertical stem about one pixel wide landed on the border
+of two pixels and came out as two grey columns (Open Sans 11 px: 55 % + 45 %
+instead of one solid column; Windows GDI draws it as one). The v3.42 quality layer
+hinted only along Y and was off by default, so nobody had it on.
+
+```go
+// Since v4.4 the engine starts with this layer — no call needed:
+q := engine.DefaultTextQuality() // {Hinting: true, HintingX: true, Contrast: DefaultTextContrast}
+eng.SetTextQuality(engine.TextQuality{}) // the pre-4.4 look, byte for byte
+eng.SetTextHintingX(false)               // only the new horizontal snapping off
+```
+
+- **`TextQuality.HintingX`** (new field). Per glyph, vertical stems are found —
+  pairs of left and right vertical edges (straight segments and curve ends with a
+  vertical tangent, so the sides of `o`, `c`, `e` count) sharing a stretch of height.
+  The stem width is rounded to whole pixels (at least one; up from a 0.4 px
+  fraction), its edges to whole pixel boundaries; the outline in between is
+  stretched piecewise linearly along X, beyond the outer stems it is shifted.
+- **Standard stem width.** One width per font and size, from the reference letter
+  `l` (then `I`, `н`): a stem within 1/3 px of it gets it, so `l` (1.47 px) and the
+  sides of `o` (1.52 px) of Open Sans at 18 px do not round to 1 and 2 px.
+- **Even stems.** Stems going with an equal step (`Ш`, `ш`, `m`, `Н`, `п`) are placed
+  as one row: the step is rounded once, so the counters are equal (11 px `Ш`: 3 + 3 px,
+  not 3 + 4). A row moving a stem by more than 3/4 px, or mixing stems of very
+  different height (`ф`: short bowl sides, full-height stem) falls back to one by one.
+- **Overlapping stems.** A short edge inside a stem (the corner of Roboto `L`, `E`)
+  does not make a second stem: of stems overlapping along X the one with the longer
+  common height is kept.
+- **Advances do not change.** `MeasureText`, `MeasureRunes`, advances and kerning are
+  the same as before (layout is unchanged); a stem moves by at most half a pixel (up
+  to 3/4 px in a row of equal stems). With a whole-pixel advance (no `SetTextSubpixel`)
+  a glyph that has stems is first centred in its rounded cell (≤ 1/4 px), so the
+  rounding error goes to both sides equally instead of all to the right (Roboto `П`
+  8.56 → 9 px); a glyph without stems (`v`, `x`, `s`) keeps its mask.
+- **Not snapped.** Signs outside the zones — those vertical hinting only shifts (`•`,
+  `·`, `°`, `.`, `…`) — keep their shape byte for byte: the sides of a dot are not
+  stems, and rounding its width with the height untouched made the password bullet
+  oval. Fonts without hint zones (no Latin or Cyrillic reference letters: icon and
+  symbol fonts) are not snapped either and take the pre-4.4 path.
+- **Subpixel positioning.** With `SetTextSubpixel(true)` the snapping uses the exact
+  pen position: stems are crisp, line width stays exact, the error per glyph does not
+  accumulate. Masks of the four pen phases may coincide for single-stem letters.
+- **Paths.** Per-rune `DrawText`/`DrawTextFont` and rotated text. The shaper path
+  (complex scripts) and SVG text keep vertical hinting only. The bare
+  `core/raster.Canvas` and `text.FontCache` still start with the zero `TextQuality`.
+- **Determinism.** Integer 26.6 arithmetic; mask hashes are the same with and without
+  FMA (`GOAMD64=v3`).
+- Measured on a two-line Latin + Cyrillic sample at 96 dpi (share of pixels with ink
+  > 0.8 among inked ones): Open Sans 8.5 pt 28 % → 58 %, Roboto 9 pt 36 % → 64 %,
+  Inter 9 pt 31 % → 62 %, Open Sans 8.5 pt light on dark 30 % → 48 %.
+- Golden images (`engine/testdata/golden`, `desktop/testdata/golden`) and the frozen
+  taskbar hashes were re-recorded for the new default. Applications with their own
+  golden snapshots of text must re-record them too, or call
+  `SetTextQuality(engine.TextQuality{})`.
+- Tests: `core/raster/texthintx_test.go` (stems on the grid for four fonts, five sizes,
+  all pen phases; shape kept; even stems), `TestTextQuality_MeasureUnchanged` and
+  `TestTextQuality_MaskHash` with the new modes, `engine/textquality_paths_test.go`.
+
+---
+
+## v4.4: collapse a side of `DiffView`, collapse panes and maximize in `MergeView` (Go.Git GG-95, GG-96)
+
+**`DiffView` (GG-95).** A side collapses into a 28 px strip with an "expand" chevron;
+the other side takes the freed width. Change highlighting, the overview ruler,
+`NextChange`/`PrevChange`, editing, undo and saving keep working; connectors and transfer
+buttons are not drawn, `CopyBlock`/`CopyCurrent`/`CopyAll` work from code.
+
+```go
+dv.SetCollapsed(widget.DiffLeft, true) // only one side: collapsing the other expands this one
+dv.Collapsed(side) bool
+dv.SetShowCollapseButtons(false)       // hide the header chevrons (the strip still expands on click)
+dv.SetSplit(0.6); dv.Split()           // left share when both are expanded, clamped to 0.15…0.85
+dv.OnCollapsedChanged = func(side widget.DiffSide, collapsed bool) {}
+dv.OnSplitChanged = func(ratio float64) {} // once per drag (on release), on double click, on SetSplit
+```
+
+- Collapsing the active side makes the visible one active (`OnActiveSideChanged`);
+  `SetActiveSide`/`SetCaret` on a collapsed side expand it; undo never leaves the collapsed
+  side active.
+- The connector gap is the splitter (cursor ↔); a double click on it restores 0.5.
+  At 0.5 the geometry is the old one, byte for byte.
+- Horizontal scrolling is measured by the narrowest expanded code area.
+- Markup: `CollapsedSide="None|Left|Right"`, `ShowCollapseButtons`, `Split`.
+- The header chevron is shown by default, so header frames changed (the badge moved left of it).
+
+**`MergeView` (GG-96).**
+
+```go
+mv.SetPaneCollapsed(widget.MergeOurs|MergeBase|MergeTheirs, true); mv.PaneCollapsed(side)
+mv.SetResultMaximized(true); mv.ResultMaximized()   // result full height, top = header strip
+mv.SetSourcesMaximized(true); mv.SourcesMaximized() // top full height, result = its header
+mv.SetSplit(0.5); mv.Split()                        // top share 0.2…0.85; clears maximizing
+mv.SetShowCollapseButtons(false)
+mv.OnLayoutChanged = func() {} // collapse/expand, ShowBase, maximize, split (once per drag)
+```
+
+- At least one top pane stays expanded (collapsing the last one is a no-op; hiding the base
+  with ours and theirs collapsed expands ours). `SetShowBase(false)` keeps its meaning.
+- A collapsed pane has no resolve button; `Resolve*` work from code. Collapsing the active pane
+  or maximizing the result moves input to the result; `SetActiveSide` on a collapsed pane
+  expands it.
+- Chevrons are in the top pane headers; the two full-height buttons are at the right of the
+  result header (the unresolved badge moved left of them). A double click on the splitter
+  restores 0.58 and clears maximizing; dragging it clears maximizing too.
+- With no collapsed pane the widths use the old formula.
+- Markup: `CollapsedPanes="Ours,Base,Theirs"`, `Split`, `ResultMaximized`, `SourcesMaximized`,
+  `ShowCollapseButtons`.
+- Tests: `tests/diffview_collapse_test.go`, `tests/mergeview_collapse_test.go`; golden images
+  `diffview_*`, `mergeview_*` re-recorded for the header buttons.

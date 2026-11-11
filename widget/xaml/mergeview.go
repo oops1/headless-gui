@@ -14,6 +14,7 @@ import (
 //	<MergeView x:Name="merge" OursFile="ours.go" BaseFile="base.go" TheirsFile="theirs.go"
 //	           ShowBase="True" SyntaxHighlight="True" ReadOnly="False"
 //	           ConflictStyle="diff3" FontFamily="Consolas" FontSize="10"
+//	           CollapsedPanes="Base" Split="0.58" ResultMaximized="False"
 //	           SaveCommand="{Binding Save}" ResolvedCommand="{Binding Left}"/>
 //
 // Три файла — редкий случай (обычно блоки приходят из приложения через
@@ -49,6 +50,27 @@ func buildXAMLMergeView(el Element, baseDir string) base.Widget {
 	if v := el.Attr("MarkerSize"); v != "" {
 		m.SetMarkerSize(ParseInt(v))
 	}
+
+	// Раскладка (GG-96): CollapsedPanes="Ours,Theirs", Split="0.58",
+	// ResultMaximized / SourcesMaximized, ShowCollapseButtons.
+	flag("ShowCollapseButtons", m.SetShowCollapseButtons)
+	for _, name := range strings.Split(el.Attr("CollapsedPanes"), ",") {
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "ours":
+			m.SetPaneCollapsed(base.MergeOurs, true)
+		case "base":
+			m.SetPaneCollapsed(base.MergeBase, true)
+		case "theirs":
+			m.SetPaneCollapsed(base.MergeTheirs, true)
+		}
+	}
+	if v := el.Attr("Split"); v != "" {
+		if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			m.SetSplit(f)
+		}
+	}
+	flag("ResultMaximized", m.SetResultMaximized)
+	flag("SourcesMaximized", m.SetSourcesMaximized)
 
 	baseFile, ours, theirs := el.Attr("BaseFile"), el.Attr("OursFile"), el.Attr("TheirsFile")
 	if baseFile != "" && ours != "" && theirs != "" {

@@ -31,6 +31,10 @@ type vHint struct {
 	src, dst []int
 }
 
+// shiftOnly — отображение только сдвигает (один узел): так floating отмечает
+// знак вне зон.
+func (h *vHint) shiftOnly() bool { return len(h.src) == 1 }
+
 // apply переводит высоту; за крайними узлами — сдвиг без растяжения.
 func (h *vHint) apply(up int) int {
 	n := len(h.src)
@@ -219,12 +223,21 @@ func (s *shard) hintedGlyph(face font.Face, dpi float64, r rune, phase int, q Te
 	buf := &s.buf // под s.mu; сегменты ниже живут до следующего обращения к нему
 	ppem := ppemOf(s.sizePt, dpi)
 	ttf := s.font.ttf
-	var h *vHint
-	if q.Hinting {
-		h = s.vhintLocked(ppem, buf)
-		if h == nil && !q.LCD {
+	// Зоны нужны и вертикальному хинтингу, и привязке по X: по ним видно, что
+	// знак стоит вне зон и менять его форму нельзя (см. ниже). Шрифт без зон
+	// (иконочный, символьный) по X не выравнивается, как и по Y: привязка
+	// одной оси сплющила бы его кольца и круги.
+	var zones *vHint
+	if q.Hinting || q.HintingX {
+		zones = s.vhintLocked(ppem, buf)
+		if zones == nil && !q.LCD {
 			return CachedGlyph{}, false
 		}
+	}
+	snapX := q.HintingX && zones != nil
+	std := 0 // стандартная толщина ствола на кегле (до загрузки глифа: buf общий)
+	if snapX {
+		std = s.stdStemLocked(ppem, buf)
 	}
 	idx, err := ttf.GlyphIndex(buf, r)
 	if err != nil {
@@ -234,27 +247,47 @@ func (s *shard) hintedGlyph(face font.Face, dpi float64, r rune, phase int, q Te
 	if !ok {
 		return CachedGlyph{}, false
 	}
+	dotX := fixed.Int26_6(phase * (64 / SubpixelPhases))
+	var cell fixed.Int26_6
+	if snapX {
+		// Шаг, округлённый до целого пикселя (HintingFull), отдаёт всю ошибку
+		// округления правому промежутку: у Roboto «П» 8,56 → 9 px, и вместе со
+		// сдвигом ствола справа выходил почти лишний пиксель. Глиф со штрихами
+		// ставится в середину округлённой ячейки — ошибка делится между
+		// промежутками поровну (сдвиг ≤ ¼ px). В дробном режиме шаг точный,
+		// сдвиг нулевой.
+		if exact, err := ttf.GlyphAdvance(buf, idx, ppem, font.HintingNone); err == nil {
+			cell = (adv - exact) / 2
+		}
+	}
 	segs, err := ttf.LoadGlyph(buf, idx, ppem, nil)
 	if err != nil {
 		return CachedGlyph{}, false
 	}
-	dotX := fixed.Int26_6(phase * (64 / SubpixelPhases))
-	if h != nil {
-		var sc hintScan
-		for _, sg := range segs {
-			switch sg.Op {
-			case sfnt.SegmentOpMoveTo:
-				sc.moveTo(int(sg.Args[0].X), -int(sg.Args[0].Y))
-			case sfnt.SegmentOpLineTo:
-				sc.lineTo(int(sg.Args[0].X), -int(sg.Args[0].Y))
-			case sfnt.SegmentOpQuadTo:
-				sc.curveTo(int(sg.Args[1].X), -int(sg.Args[1].Y))
-			case sfnt.SegmentOpCubeTo:
-				sc.curveTo(int(sg.Args[2].X), -int(sg.Args[2].Y))
+	var h, xh *vHint // вертикальное отображение и привязка штрихов по X
+	if zones != nil {
+		// Сканер видит X со сдвигом пера. На вертикаль сдвиг не влияет: площадь
+		// замкнутого контура и длины отрезков от него не зависят.
+		sc := scanSegs(segs, dotX)
+		gb := segs.Bounds() // sfnt: ось Y вниз
+		gh := zones.forGlyph(sc, int(ppem), -int(gb.Min.Y), -int(gb.Max.Y))
+		if q.Hinting {
+			h = gh
+		}
+		// Знак вне зон («•», «·», «°», «.», «…») по вертикали только сдвигается,
+		// и по горизонтали его форма тоже остаётся прежней: бока точки — не
+		// штрихи, а округление её ширины при нетронутой высоте делало круг
+		// овалом (отчёт RDP-клиента на v3.43.0, только по другой оси).
+		if snapX && !gh.shiftOnly() {
+			if cell != 0 {
+				sc = scanSegs(segs, dotX+cell) // штрихи встают на целые пиксели маски
+			}
+			// Сдвиг в середину ячейки — только вместе со штрихами: глиф без них
+			// («v», «x», «s») остаётся на прежнем месте, его маска не меняется.
+			if xh = xStemHint(sc, int(ppem), std); xh != nil {
+				dotX += cell
 			}
 		}
-		gb := segs.Bounds() // sfnt: ось Y вниз
-		h = h.forGlyph(&sc, int(ppem), -int(gb.Min.Y), -int(gb.Max.Y))
 	}
 	xs := fixed.Int26_6(1)
 	if q.LCD {
@@ -270,7 +303,11 @@ func (s *shard) hintedGlyph(face font.Face, dpi float64, r rune, phase int, q Te
 		}
 		for j := 0; j < n; j++ {
 			p := &segs[i].Args[j]
-			p.X = (p.X + dotX) * xs
+			x := p.X + dotX
+			if xh != nil {
+				x = fixed.Int26_6(xh.apply(int(x)))
+			}
+			p.X = x * xs
 			if h != nil {
 				p.Y = -fixed.Int26_6(h.apply(-int(p.Y))) // sfnt: ось Y вниз
 			}
@@ -296,6 +333,57 @@ func (s *shard) hintedGlyph(face font.Face, dpi float64, r rune, phase int, q Te
 	s.rasterSegs(m, segs, -fixed.Int26_6(dr.Min.X<<6), -fixed.Int26_6(dr.Min.Y<<6))
 	g.Mask = m
 	return g, true
+}
+
+// scanSegs прогоняет контур sfnt (ось Y вниз) через сканер хинтинга: ось Y —
+// вверх, X сдвинут на dotX.
+func scanSegs(segs sfnt.Segments, dotX fixed.Int26_6) *hintScan {
+	sc := &hintScan{}
+	pt := func(p fixed.Point26_6) (int, int) { return int(p.X + dotX), -int(p.Y) }
+	for _, sg := range segs {
+		switch sg.Op {
+		case sfnt.SegmentOpMoveTo:
+			sc.moveTo(pt(sg.Args[0]))
+		case sfnt.SegmentOpLineTo:
+			sc.lineTo(pt(sg.Args[0]))
+		case sfnt.SegmentOpQuadTo:
+			cx, cy := pt(sg.Args[0])
+			x, y := pt(sg.Args[1])
+			sc.quadTo(cx, cy, x, y)
+		case sfnt.SegmentOpCubeTo:
+			c1x, c1y := pt(sg.Args[0])
+			c2x, c2y := pt(sg.Args[1])
+			x, y := pt(sg.Args[2])
+			sc.cubeTo(c1x, c1y, c2x, c2y, x, y)
+		}
+	}
+	return sc
+}
+
+// stdStemLocked возвращает (и кэширует) стандартную толщину вертикального
+// ствола шрифта при данном ppem (stdStem; 0 — эталона нет). Под s.mu.Lock.
+func (s *shard) stdStemLocked(ppem fixed.Int26_6, buf *sfnt.Buffer) int {
+	if v, ok := s.stdStems[ppem]; ok {
+		return v
+	}
+	ttf := s.font.ttf
+	v := stdStem(func(r rune) (*hintScan, bool) {
+		idx, err := ttf.GlyphIndex(buf, r)
+		if err != nil || idx == 0 {
+			return nil, false
+		}
+		segs, err := ttf.LoadGlyph(buf, idx, ppem, nil)
+		if err != nil || len(segs) == 0 {
+			return nil, false
+		}
+		return scanSegs(segs, 0), true
+	}, int(ppem))
+	if s.stdStems == nil {
+		s.stdStems = make(map[fixed.Int26_6]int)
+	}
+	s.stdStems[ppem] = v
+	s.bytes += smallEntry
+	return v
 }
 
 // rasterSegs рисует контур в маску m (покрытие, Src) со сдвигом (biasX, biasY).
@@ -432,6 +520,9 @@ type hintScan struct {
 	// стоять на зоне: см. floating).
 	lo, hi int
 	edges  []int
+	// vedges — вертикальные участки контура: прямые и концы кривых с
+	// вертикальной касательной (texthintx.go, TextQuality.HintingX).
+	vedges []vEdge
 }
 
 // hLine — отрезок контура на высоте y от x0 к x1 (направление обхода).
@@ -452,6 +543,9 @@ func (s *hintScan) seg(x, y int, line bool) {
 	s.area += s.cur[0]*y - x*s.cur[1]
 	if line && y == s.cur[1] && x != s.cur[0] {
 		s.lines = append(s.lines, hLine{y: y, x0: s.cur[0], x1: x})
+	}
+	if line {
+		s.noteVertical(s.cur[0], s.cur[1], x, y)
 	}
 	s.cur = [2]int{x, y}
 	s.lo, s.hi = min(s.lo, y), max(s.hi, y)
