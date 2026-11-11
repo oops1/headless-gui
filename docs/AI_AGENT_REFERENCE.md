@@ -10678,12 +10678,25 @@ eng.SetTextQuality(engine.TextQuality{}) // the pre-4.4 look, byte for byte
 eng.SetTextHintingX(false)               // only the new horizontal snapping off
 ```
 
+**Upgrade trap.** An application that already calls
+`SetTextQuality(TextQuality{Hinting: true, Contrast: …})` — the v3.42 recipe — does
+**not** get horizontal snapping: the explicit call sets the whole layer and `HintingX`
+is false in it, so its text looks exactly as on v4.3 (Go.Git hit this on the day of the
+release). Remove the call, or use `engine.DefaultTextQuality()`, or add
+`HintingX: true`.
+
 - **`TextQuality.HintingX`** (new field). Per glyph, vertical stems are found —
   pairs of left and right vertical edges (straight segments and curve ends with a
   vertical tangent, so the sides of `o`, `c`, `e` count) sharing a stretch of height.
-  The stem width is rounded to whole pixels (at least one; up from a 0.4 px
-  fraction), its edges to whole pixel boundaries; the outline in between is
+  Its edges go to whole pixel boundaries; the outline in between is
   stretched piecewise linearly along X, beyond the outer stems it is shifted.
+  **Since v4.5** (Go.Git GG-98) the width is rounded only when it is within
+  `stemWholeTol` (6/64 px) of a whole number of pixels (at least one); otherwise it
+  is kept and only the left edge is snapped (`xStem.whole`, `stemWidth`). v4.4 rounded
+  every width (up from a 0.4 px fraction): Go Regular 10 pt stems of 1.28 px became
+  1 px and the text got thin and sparse. `regularStems` applies only when every stem of
+  the glyph is whole; otherwise `singleStems`. Test: `TestTextHintX_KeepsWeight`
+  (ink 0.93…1.07 of the Y-only hinting at 8–14 pt, four fonts).
 - **Standard stem width.** One width per font and size, from the reference letter
   `l` (then `I`, `н`): a stem within 1/3 px of it gets it, so `l` (1.47 px) and the
   sides of `o` (1.52 px) of Open Sans at 18 px do not round to 1 and 2 px.

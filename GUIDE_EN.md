@@ -3158,11 +3158,26 @@ eng.SetTextQuality(engine.TextQuality{}) // the previous look, byte for byte
 eng.SetTextHintingX(false)                // only the horizontal snapping off
 ```
 
-- Stem widths are rounded to whole pixels (up from a 0.4 fraction), and stems
-  close to the font's standard width at that size (taken from `l`) get the
-  same width: the letters of a line have one weight.
-- Stems with an equal step (`Ш`, `ш`, `m`, `п`) are placed as a row with one
-  rounded step — the counters are equal.
+**If the application already calls `SetTextQuality` with the v3.42 recipe**
+(`TextQuality{Hinting: true, Contrast: …}`), horizontal snapping is **not
+turned on** for it: an explicit call sets the whole layer, and `HintingX` is
+not in it. After moving to v4.4 the text of such an application looks as
+before. Remove the call or replace it:
+
+```go
+eng.SetTextQuality(engine.DefaultTextQuality())         // the engine default layer
+// or add the field: TextQuality{Hinting: true, HintingX: true, Contrast: …}
+```
+
+- Stems close to the font's standard width at that size (taken from `l`) get
+  the same width: the letters of a line have one weight. A width within
+  ~0.1 px of a whole number of pixels (at least one) is rounded to it, and
+  the stem is placed on whole pixels; any other width is **kept** and only
+  the left edge goes to a pixel boundary — one solid column and one grey
+  (since v4.5: v4.4 rounded 1.3 px stems of Go Regular 10 pt down to 1 px and
+  the text got thin and sparse, Go.Git GG-98).
+- Stems with an equal step (`Ш`, `ш`, `m`, `п`) of whole width are placed as
+  a row with one rounded step — the counters are equal.
 - Advances, kerning and line widths **do not change** — layout stays the
   same; a glyph moves inside its cell by less than a pixel (a stem by at most
   half a pixel, in a row of equal stems up to 3/4 px, plus up to 1/4 px
