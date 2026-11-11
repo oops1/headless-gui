@@ -598,7 +598,7 @@ func (m *MergeView) paneAtLocked(x, y int) (MergeSide, bool) {
 		return MergeResult, true
 	}
 	for i := 0; i < 3; i++ {
-		if i == int(MergeBase) && !m.showBase {
+		if !m.paneOpenLocked(MergeSide(i)) {
 			continue
 		}
 		if p.In(image.Rect(g.px[i][0], g.ty0, g.px[i][1], g.ty1)) {
@@ -698,8 +698,12 @@ func (m *MergeView) leftPressLocked(e MouseEvent) bool {
 		m.hbarPressLocked(e.X)
 		return true
 	}
+	if hit := m.hitFoldLocked(e.X, e.Y); hit >= 0 {
+		m.foldPressLocked(hit)
+		return true
+	}
 	if m.onSplitterLocked(e.Y) {
-		m.splitDrag = true
+		m.splitPressLocked()
 		return true
 	}
 	if btn := m.hitButtonLocked(e.X, e.Y); btn >= 0 {
@@ -774,8 +778,15 @@ func (m *MergeView) OnMouseMove(x, y int) {
 			g := m.geom()
 			inner := float64(g.b.Dy() - 2*dvOuterPad)
 			if inner > 0 {
-				m.split = min(max(0.2, (float64(y-g.b.Min.Y-dvOuterPad))/inner), 0.85)
-				m.clampScrollLocked()
+				// Протянули границу — развёртывание на всю высоту снимается,
+				// событие OnLayoutChanged уйдёт, когда её отпустят.
+				before := m.split
+				m.setSplitLocked(float64(y-g.b.Min.Y-dvOuterPad) / inner)
+				if m.split != before {
+					// Нажатие, начавшее перетаскивание, — не первый щелчок
+					// двойного: быстрое повторное нажатие долю не сбрасывает.
+					m.splitClickAt = time.Time{}
+				}
 			}
 			return
 		}
@@ -793,6 +804,7 @@ func (m *MergeView) OnMouseMove(x, y int) {
 		if btn != m.hoverBtn || chunk != m.hoverChunk {
 			m.hoverBtn, m.hoverChunk = btn, chunk
 		}
+		m.hoverFold = m.hitFoldLocked(x, y)
 	})
 }
 
@@ -854,6 +866,9 @@ func (m *MergeView) Cursor(x, y int) Cursor {
 	defer m.mu.Unlock()
 	if m.onRulerLocked(x, y) {
 		return CursorArrow
+	}
+	if m.hitFoldLocked(x, y) >= 0 {
+		return CursorHand
 	}
 	if m.onSplitterLocked(y) {
 		return CursorSizeNS

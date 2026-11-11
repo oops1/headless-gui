@@ -508,17 +508,18 @@ type shard struct {
 	sizePt  float64
 	lastUse atomic.Uint64
 
-	mu      sync.RWMutex
-	faces   map[faceKey]font.Face
-	glyphs  map[l2GlyphKey]CachedGlyph
-	adv     map[l2AdvKey]advEntry
-	kern    map[l2KernKey]fixed.Int26_6
-	metrics map[faceKey]VMetric
-	maxAdv  map[faceKey]fixed.Int26_6 // наибольший шаг глифа шрифта на кегле
-	hints   map[fixed.Int26_6]*vHint  // по ppem (кегль × DPI)
-	buf     sfnt.Buffer
-	rast    *vector.Rasterizer
-	bytes   int64 // учёт шарда — источник правды для хранилища
+	mu       sync.RWMutex
+	faces    map[faceKey]font.Face
+	glyphs   map[l2GlyphKey]CachedGlyph
+	adv      map[l2AdvKey]advEntry
+	kern     map[l2KernKey]fixed.Int26_6
+	metrics  map[faceKey]VMetric
+	maxAdv   map[faceKey]fixed.Int26_6 // наибольший шаг глифа шрифта на кегле
+	hints    map[fixed.Int26_6]*vHint  // по ppem (кегль × DPI)
+	stdStems map[fixed.Int26_6]int     // стандартная толщина ствола по ppem (HintingX)
+	buf      sfnt.Buffer
+	rast     *vector.Rasterizer
+	bytes    int64 // учёт шарда — источник правды для хранилища
 }
 
 // hit отмечает попадание: lastUse догоняет часы, только если отстал, —
@@ -547,7 +548,7 @@ func (s *shard) clear() int64 {
 
 func (s *shard) clearLocked() int64 {
 	n := s.bytes
-	s.faces, s.glyphs, s.adv, s.kern, s.metrics, s.hints, s.maxAdv = nil, nil, nil, nil, nil, nil, nil
+	s.faces, s.glyphs, s.adv, s.kern, s.metrics, s.hints, s.maxAdv, s.stdStems = nil, nil, nil, nil, nil, nil, nil, nil
 	s.bytes = 0
 	return n
 }
@@ -623,7 +624,7 @@ func (s *shard) glyphMiss(key l2GlyphKey) (CachedGlyph, int64) {
 // rasterLocked растеризует глиф: хинтованный/LCD путь (texthint.go) либо
 // opentype.Face.Glyph с плотной копией маски. Под s.mu.Lock.
 func (s *shard) rasterLocked(face font.Face, k faceKey, q TextQuality, r rune, phase int) CachedGlyph {
-	if q.Hinting || q.LCD {
+	if q.Hinting || q.HintingX || q.LCD {
 		if hg, ok := s.hintedGlyph(face, k.dpi, r, phase, q); ok {
 			return hg
 		}

@@ -30,6 +30,9 @@ func (d *DiffView) restoreLocked(e dvHist) {
 		s.wantCol = -1
 	}
 	d.active = e.active
+	if d.coll[d.active] {
+		d.active = 1 - d.active // свёрнутая сторона активной не бывает (GG-95)
+	}
 }
 
 // pushUndoLocked сохраняет состояние до правки. Подряд идущий набор одной
@@ -583,8 +586,14 @@ func (d *DiffView) OnMouseButton(e MouseEvent) bool {
 		// Захват снимет движок: он гарантирует это при отпускании ЛКМ.
 		d.mu.Lock()
 		was := d.rulerDrag || d.dragSel || d.hbarDrag
+		split := d.splitDrag
 		d.rulerDrag, d.dragSel, d.hbarDrag = false, false, false
 		d.mu.Unlock()
+		if split {
+			// Граница отпущена: OnSplitChanged — одно событие на перетаскивание.
+			d.do(func() { d.splitDrag = false })
+			return true
+		}
 		return was
 	}
 	d.mu.Lock()
@@ -600,6 +609,16 @@ func (d *DiffView) OnMouseButton(e MouseEvent) bool {
 		d.hbarPressLocked(e.X)
 		d.mu.Unlock()
 		d.Invalidate()
+		return true
+	}
+	if side := d.hitFoldLocked(e.X, e.Y); side >= 0 {
+		d.mu.Unlock()
+		d.do(func() { d.setCollapsedLocked(side, !d.coll[side]) })
+		return true
+	}
+	if d.gutterHitLocked(e.X, e.Y) {
+		d.mu.Unlock()
+		d.do(func() { d.splitPressLocked(e.X) })
 		return true
 	}
 	btn := d.hitButtonLocked(e.X, e.Y)
@@ -679,7 +698,7 @@ func (d *DiffView) WantsCapture(e MouseEvent) bool {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if image.Pt(e.X, e.Y).In(d.rulerTrack(d.geom()).Inset(-4)) {
+	if image.Pt(e.X, e.Y).In(d.rulerTrack(d.geom()).Inset(-4)) || d.gutterHitLocked(e.X, e.Y) {
 		return true
 	}
 	_, ok := d.inTextArea(e.X, e.Y)
@@ -696,6 +715,16 @@ func (d *DiffView) OnMouseMove(x, y int) {
 	}
 	if d.hbarDrag {
 		ch := d.hbarDragToLocked(x)
+		d.mu.Unlock()
+		if ch {
+			d.Invalidate()
+		}
+		return
+	}
+	if d.splitDrag {
+		before := d.split
+		d.splitDragToLocked(x)
+		ch := d.split != before
 		d.mu.Unlock()
 		if ch {
 			d.Invalidate()
@@ -719,8 +748,9 @@ func (d *DiffView) OnMouseMove(x, y int) {
 		})
 		return
 	}
-	btn, ch := -1, -1
+	btn, ch, fold := -1, -1, DiffSide(-1)
 	if !CursorIsNowhere(x, y) {
+		fold = d.hitFoldLocked(x, y)
 		btn = d.hitButtonLocked(x, y)
 		if btn >= 0 {
 			ch = btn / 2
@@ -728,8 +758,8 @@ func (d *DiffView) OnMouseMove(x, y int) {
 			ch = d.hitChunkLocked(x, y)
 		}
 	}
-	changed := btn != d.hoverBtn || ch != d.hoverChunk
-	d.hoverBtn, d.hoverChunk = btn, ch
+	changed := btn != d.hoverBtn || ch != d.hoverChunk || fold != d.hoverFold
+	d.hoverBtn, d.hoverChunk, d.hoverFold = btn, ch, fold
 	d.mu.Unlock()
 	if changed {
 		d.Invalidate()
@@ -760,8 +790,15 @@ func (d *DiffView) OnMouseWheelPixelsMod(x, y int, dx, dy float64, mod KeyMod) b
 func (d *DiffView) Cursor(x, y int) Cursor {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.hitButtonLocked(x, y) >= 0 || image.Pt(x, y).In(d.rulerTrack(d.geom()).Inset(-4)) {
+	if d.splitDrag {
+		return CursorSizeWE
+	}
+	if d.hitButtonLocked(x, y) >= 0 || d.hitFoldLocked(x, y) >= 0 ||
+		image.Pt(x, y).In(d.rulerTrack(d.geom()).Inset(-4)) {
 		return CursorHand
+	}
+	if d.gutterHitLocked(x, y) {
+		return CursorSizeWE
 	}
 	if side, ok := d.inTextArea(x, y); ok {
 		s := d.docs[side]

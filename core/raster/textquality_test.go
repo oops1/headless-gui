@@ -258,6 +258,7 @@ func TestTextQuality_MeasureUnchanged(t *testing.T) {
 	modes := []hgtext.TextQuality{
 		{}, {Hinting: true}, {Contrast: 1}, {Hinting: true, Contrast: hgtext.DefaultTextContrast},
 		{Hinting: true, LCD: true}, {Hinting: true, Contrast: 0.5, LCD: true, LCDOrder: hgtext.LCDOrderBGR},
+		{HintingX: true}, hgtext.DefaultQuality(), {Hinting: true, HintingX: true, LCD: true},
 	}
 	for _, sub := range []bool{false, true} {
 		base := tqFont(t, hgtext.TextQuality{})
@@ -358,6 +359,11 @@ func TestTextQuality_MaskHash(t *testing.T) {
 		{"хинтинг+subpixel", hgtext.TextQuality{Hinting: true}, true, "4c2520ead3db99a9"},
 		{"lcd rgb", hgtext.TextQuality{Hinting: true, LCD: true}, false, "a121546a0d5def02"},
 		{"lcd bgr", hgtext.TextQuality{LCD: true, LCDOrder: hgtext.LCDOrderBGR}, false, "30d41a494b94623d"},
+		// v4.4: привязка штрихов по X (HintingX) и слой движка по умолчанию.
+		{"hintingX", hgtext.TextQuality{HintingX: true}, false, "5aa1c997ed5fd55a"},
+		{"по умолчанию", hgtext.DefaultQuality(), false, "0a91e54fc5ded167"},
+		{"по умолчанию+subpixel", hgtext.DefaultQuality(), true, "34cccab3d541a6f3"},
+		{"по умолчанию+lcd", hgtext.TextQuality{Hinting: true, HintingX: true, LCD: true}, false, "0bc1401c4cc374d2"},
 	}
 	for _, c := range cases {
 		got := sum(c.q, c.sub)

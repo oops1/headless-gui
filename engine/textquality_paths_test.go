@@ -24,9 +24,14 @@ func TestTextQuality_EngineAPI(t *testing.T) {
 	}
 	e := New(200, 100, 20)
 	t.Cleanup(e.Stop)
-	if q := e.TextQuality(); q != (TextQuality{}) {
-		t.Fatalf("по умолчанию режим не нулевой: %+v", q)
+	// С v4.4 движок рисует текст с полным слоем качества по умолчанию.
+	if q := e.TextQuality(); q != DefaultTextQuality() {
+		t.Fatalf("по умолчанию режим %+v, ожидался DefaultTextQuality %+v", q, DefaultTextQuality())
 	}
+	if q := DefaultTextQuality(); !q.Hinting || !q.HintingX || q.Contrast != DefaultTextContrast || q.LCD {
+		t.Fatalf("DefaultTextQuality: %+v", q)
+	}
+	e.SetTextQuality(TextQuality{}) // дальше тест проверяет переходы от прежнего вида
 	e.RegisterFont("OS-early", data)
 	e.canvas.AddFallbackFont(data)
 	before := e.canvas.DefaultFont().Glyph(9, 'e')
