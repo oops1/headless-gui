@@ -360,10 +360,10 @@ func TestTextQuality_MaskHash(t *testing.T) {
 		{"lcd rgb", hgtext.TextQuality{Hinting: true, LCD: true}, false, "a121546a0d5def02"},
 		{"lcd bgr", hgtext.TextQuality{LCD: true, LCDOrder: hgtext.LCDOrderBGR}, false, "30d41a494b94623d"},
 		// v4.4: привязка штрихов по X (HintingX) и слой движка по умолчанию.
-		{"hintingX", hgtext.TextQuality{HintingX: true}, false, "a665d37d18edaec9"},
-		{"по умолчанию", hgtext.DefaultQuality(), false, "151277a469655dbf"},
-		{"по умолчанию+subpixel", hgtext.DefaultQuality(), true, "b7c63f50184e0216"},
-		{"по умолчанию+lcd", hgtext.TextQuality{Hinting: true, HintingX: true, LCD: true}, false, "abb5f9465a9848b0"},
+		{"hintingX", hgtext.TextQuality{HintingX: true}, false, "5aa1c997ed5fd55a"},
+		{"по умолчанию", hgtext.DefaultQuality(), false, "0a91e54fc5ded167"},
+		{"по умолчанию+subpixel", hgtext.DefaultQuality(), true, "34cccab3d541a6f3"},
+		{"по умолчанию+lcd", hgtext.TextQuality{Hinting: true, HintingX: true, LCD: true}, false, "0bc1401c4cc374d2"},
 	}
 	for _, c := range cases {
 		got := sum(c.q, c.sub)

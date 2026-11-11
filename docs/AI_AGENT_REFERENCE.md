@@ -10695,10 +10695,16 @@ eng.SetTextHintingX(false)               // only the new horizontal snapping off
   does not make a second stem: of stems overlapping along X the one with the longer
   common height is kept.
 - **Advances do not change.** `MeasureText`, `MeasureRunes`, advances and kerning are
-  the same as before (layout is unchanged); the glyph moves inside its cell by at most
-  half a pixel. With a whole-pixel advance (no `SetTextSubpixel`) the glyph is first
-  centred in its rounded cell (≤ 1/4 px), so the rounding error goes to both sides
-  equally instead of all to the right (Roboto `П` 8.56 → 9 px).
+  the same as before (layout is unchanged); a stem moves by at most half a pixel (up
+  to 3/4 px in a row of equal stems). With a whole-pixel advance (no `SetTextSubpixel`)
+  a glyph that has stems is first centred in its rounded cell (≤ 1/4 px), so the
+  rounding error goes to both sides equally instead of all to the right (Roboto `П`
+  8.56 → 9 px); a glyph without stems (`v`, `x`, `s`) keeps its mask.
+- **Not snapped.** Signs outside the zones — those vertical hinting only shifts (`•`,
+  `·`, `°`, `.`, `…`) — keep their shape byte for byte: the sides of a dot are not
+  stems, and rounding its width with the height untouched made the password bullet
+  oval. Fonts without hint zones (no Latin or Cyrillic reference letters: icon and
+  symbol fonts) are not snapped either and take the pre-4.4 path.
 - **Subpixel positioning.** With `SetTextSubpixel(true)` the snapping uses the exact
   pen position: stems are crisp, line width stays exact, the error per glyph does not
   accumulate. Masks of the four pen phases may coincide for single-stem letters.

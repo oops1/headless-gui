@@ -31,6 +31,10 @@ type vHint struct {
 	src, dst []int
 }
 
+// shiftOnly — отображение только сдвигает (один узел): так floating отмечает
+// знак вне зон.
+func (h *vHint) shiftOnly() bool { return len(h.src) == 1 }
+
 // apply переводит высоту; за крайними узлами — сдвиг без растяжения.
 func (h *vHint) apply(up int) int {
 	n := len(h.src)
@@ -219,15 +223,20 @@ func (s *shard) hintedGlyph(face font.Face, dpi float64, r rune, phase int, q Te
 	buf := &s.buf // под s.mu; сегменты ниже живут до следующего обращения к нему
 	ppem := ppemOf(s.sizePt, dpi)
 	ttf := s.font.ttf
-	var h *vHint
-	if q.Hinting {
-		h = s.vhintLocked(ppem, buf)
-		if h == nil && !q.LCD && !q.HintingX {
+	// Зоны нужны и вертикальному хинтингу, и привязке по X: по ним видно, что
+	// знак стоит вне зон и менять его форму нельзя (см. ниже). Шрифт без зон
+	// (иконочный, символьный) по X не выравнивается, как и по Y: привязка
+	// одной оси сплющила бы его кольца и круги.
+	var zones *vHint
+	if q.Hinting || q.HintingX {
+		zones = s.vhintLocked(ppem, buf)
+		if zones == nil && !q.LCD {
 			return CachedGlyph{}, false
 		}
 	}
+	snapX := q.HintingX && zones != nil
 	std := 0 // стандартная толщина ствола на кегле (до загрузки глифа: buf общий)
-	if q.HintingX {
+	if snapX {
 		std = s.stdStemLocked(ppem, buf)
 	}
 	idx, err := ttf.GlyphIndex(buf, r)
@@ -239,32 +248,45 @@ func (s *shard) hintedGlyph(face font.Face, dpi float64, r rune, phase int, q Te
 		return CachedGlyph{}, false
 	}
 	dotX := fixed.Int26_6(phase * (64 / SubpixelPhases))
-	if q.HintingX {
+	var cell fixed.Int26_6
+	if snapX {
 		// Шаг, округлённый до целого пикселя (HintingFull), отдаёт всю ошибку
 		// округления правому промежутку: у Roboto «П» 8,56 → 9 px, и вместе со
-		// сдвигом ствола справа выходил почти лишний пиксель. Глиф ставится в
-		// середину округлённой ячейки — ошибка делится между промежутками
-		// поровну (сдвиг ≤ ¼ px). В дробном режиме шаг точный, сдвиг нулевой.
+		// сдвигом ствола справа выходил почти лишний пиксель. Глиф со штрихами
+		// ставится в середину округлённой ячейки — ошибка делится между
+		// промежутками поровну (сдвиг ≤ ¼ px). В дробном режиме шаг точный,
+		// сдвиг нулевой.
 		if exact, err := ttf.GlyphAdvance(buf, idx, ppem, font.HintingNone); err == nil {
-			dotX += (adv - exact) / 2
+			cell = (adv - exact) / 2
 		}
 	}
 	segs, err := ttf.LoadGlyph(buf, idx, ppem, nil)
 	if err != nil {
 		return CachedGlyph{}, false
 	}
-	var xh *vHint // привязка вертикальных штрихов по X (q.HintingX)
-	if h != nil || q.HintingX {
-		// Сканер видит X уже со сдвигом пера: штрихи встают на целые пиксели
-		// маски. На вертикаль сдвиг не влияет (площадь замкнутого контура и
-		// длины отрезков от него не зависят).
+	var h, xh *vHint // вертикальное отображение и привязка штрихов по X
+	if zones != nil {
+		// Сканер видит X со сдвигом пера. На вертикаль сдвиг не влияет: площадь
+		// замкнутого контура и длины отрезков от него не зависят.
 		sc := scanSegs(segs, dotX)
-		if h != nil {
-			gb := segs.Bounds() // sfnt: ось Y вниз
-			h = h.forGlyph(sc, int(ppem), -int(gb.Min.Y), -int(gb.Max.Y))
+		gb := segs.Bounds() // sfnt: ось Y вниз
+		gh := zones.forGlyph(sc, int(ppem), -int(gb.Min.Y), -int(gb.Max.Y))
+		if q.Hinting {
+			h = gh
 		}
-		if q.HintingX {
-			xh = xStemHint(sc, int(ppem), std)
+		// Знак вне зон («•», «·», «°», «.», «…») по вертикали только сдвигается,
+		// и по горизонтали его форма тоже остаётся прежней: бока точки — не
+		// штрихи, а округление её ширины при нетронутой высоте делало круг
+		// овалом (отчёт RDP-клиента на v3.43.0, только по другой оси).
+		if snapX && !gh.shiftOnly() {
+			if cell != 0 {
+				sc = scanSegs(segs, dotX+cell) // штрихи встают на целые пиксели маски
+			}
+			// Сдвиг в середину ячейки — только вместе со штрихами: глиф без них
+			// («v», «x», «s») остаётся на прежнем месте, его маска не меняется.
+			if xh = xStemHint(sc, int(ppem), std); xh != nil {
+				dotX += cell
+			}
 		}
 	}
 	xs := fixed.Int26_6(1)

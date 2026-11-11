@@ -243,7 +243,13 @@ func (d *DiffView) splitDragToLocked(x int) {
 		return
 	}
 	lw := x - d.splitGrab - dvGutterW/2 - g.lx0
+	before := d.split
 	d.setSplitLocked(float64(lw) / float64(both))
+	if d.split != before {
+		// Границу протянули: нажатие, начавшее перетаскивание, — не первый
+		// щелчок двойного, и быстрое повторное нажатие долю не сбрасывает.
+		d.splitClickAt = time.Time{}
+	}
 }
 
 // drawStrip рисует свёрнутую сторону: полоса-карточка с цветной меткой

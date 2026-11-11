@@ -15,24 +15,34 @@ import (
 func TestTextHint_FloatingSignsKeepShape(t *testing.T) {
 	testreset.Globals(t)
 	plain := tqFont(t, hgtext.TextQuality{})
-	hinted := tqFont(t, hgtext.TextQuality{Hinting: true, Contrast: hgtext.DefaultTextContrast})
-	for px := 9; px <= 24; px++ {
-		pt := float64(px) * 72 / 96
-		for _, r := range "•·°" {
-			a, b := plain.GlyphAt(pt, r, 0), hinted.GlyphAt(pt, r, 0)
-			if a.Mask == nil || b.Mask == nil {
-				t.Fatalf("%d px %q: пустая маска", px, r)
-			}
-			if a.Mask.Rect.Size() != b.Mask.Rect.Size() || a.OffX != b.OffX {
-				t.Errorf("%d px %q: рамка %v (x %d) → %v (x %d)", px, r,
-					a.Mask.Rect.Size(), a.OffX, b.Mask.Rect.Size(), b.OffX)
-				continue
-			}
-			if !bytes.Equal(a.Mask.Pix, b.Mask.Pix) {
-				t.Errorf("%d px %q: форма знака изменилась", px, r)
-			}
-			if d := b.OffY - a.OffY; d < -2 || d > 2 {
-				t.Errorf("%d px %q: сдвиг на %d строк — больше, чем растяжение зон", px, r, d)
+	// Слой движка по умолчанию (v4.4) и привязка по X сама по себе — тоже:
+	// бока точки не штрихи, по горизонтали знак вне зон не трогается вовсе.
+	for _, q := range []hgtext.TextQuality{
+		{Hinting: true, Contrast: hgtext.DefaultTextContrast},
+		hgtext.DefaultQuality(),
+		{HintingX: true},
+	} {
+		hinted := tqFont(t, q)
+		for px := 9; px <= 24; px++ {
+			pt := float64(px) * 72 / 96
+			for _, r := range "•·°.…" {
+				for ph := 0; ph < hgtext.SubpixelPhases; ph++ {
+					a, b := plain.GlyphAt(pt, r, ph), hinted.GlyphAt(pt, r, ph)
+					if a.Mask == nil || b.Mask == nil {
+						t.Fatalf("%+v %d px %q: пустая маска", q, px, r)
+					}
+					if a.Mask.Rect.Size() != b.Mask.Rect.Size() || a.OffX != b.OffX {
+						t.Errorf("%+v %d px %q фаза %d: рамка %v (x %d) → %v (x %d)", q, px, r, ph,
+							a.Mask.Rect.Size(), a.OffX, b.Mask.Rect.Size(), b.OffX)
+						continue
+					}
+					if !bytes.Equal(a.Mask.Pix, b.Mask.Pix) {
+						t.Errorf("%+v %d px %q фаза %d: форма знака изменилась", q, px, r, ph)
+					}
+					if d := b.OffY - a.OffY; d < -2 || d > 2 {
+						t.Errorf("%+v %d px %q: сдвиг на %d строк — больше, чем растяжение зон", q, px, r, d)
+					}
+				}
 			}
 		}
 	}

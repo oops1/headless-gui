@@ -780,7 +780,13 @@ func (m *MergeView) OnMouseMove(x, y int) {
 			if inner > 0 {
 				// Протянули границу — развёртывание на всю высоту снимается,
 				// событие OnLayoutChanged уйдёт, когда её отпустят.
+				before := m.split
 				m.setSplitLocked(float64(y-g.b.Min.Y-dvOuterPad) / inner)
+				if m.split != before {
+					// Нажатие, начавшее перетаскивание, — не первый щелчок
+					// двойного: быстрое повторное нажатие долю не сбрасывает.
+					m.splitClickAt = time.Time{}
+				}
 			}
 			return
 		}

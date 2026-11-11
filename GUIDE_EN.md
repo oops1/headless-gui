@@ -3164,9 +3164,14 @@ eng.SetTextHintingX(false)                // only the horizontal snapping off
 - Stems with an equal step (`Ш`, `ш`, `m`, `п`) are placed as a row with one
   rounded step — the counters are equal.
 - Advances, kerning and line widths **do not change** — layout stays the
-  same; a glyph moves inside its cell by at most half a pixel. With
+  same; a glyph moves inside its cell by less than a pixel (a stem by at most
+  half a pixel, in a row of equal stems up to 3/4 px, plus up to 1/4 px
+  towards the cell centre with whole-pixel advances). With
   `SetTextSubpixel(true)` stems are placed from the exact pen position, the
   error does not accumulate along a line.
+- Signs outside the zones (`•`, `·`, `°`, `.`, `…`) and fonts without Latin
+  and Cyrillic (icon fonts) are not snapped: the password bullet stays round,
+  icons stay as they were.
 - Applies to `DrawText`/`DrawTextFont` and rotated text; shaped text
   (complex scripts) and SVG text are hinted vertically only.
 
